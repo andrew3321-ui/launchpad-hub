@@ -1,16 +1,13 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { LayoutDashboard } from "lucide-react";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+export default function Dashboard() {
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <LayoutDashboard className="h-6 w-6 text-primary" />
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+      </div>
+      <p className="text-muted-foreground">Visão geral do lançamento ativo será exibida aqui.</p>
     </div>
   );
-};
-
-const Index = PlaceholderIndex;
-
-export default Index;
+}
