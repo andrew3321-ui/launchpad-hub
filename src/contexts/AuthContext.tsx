@@ -27,8 +27,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
+    // Safety timeout - never stay loading forever
+    const timeout = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn("Auth loading timeout - forcing loaded state");
+        setLoading(false);
+      }
+    }, 5000);
+
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (!mounted) return;
+      if (error) {
+        console.error("getSession error:", error);
+        setLoading(false);
+        return;
+      }
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("user_id", session.user.id)
+          .single()
+          .then(({ data }) => {
+            if (mounted) setProfile(data);
+          });
+      }
+      setLoading(false);
+    }).catch((err) => {
+      console.error("getSession catch:", err);
+      if (mounted) setLoading(false);
+    });
+
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        if (!mounted) return;
         setSession(session);
         setUser(session?.user ?? null);
 
@@ -38,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .select("full_name")
             .eq("user_id", session.user.id)
             .single();
-          setProfile(data);
+          if (mounted) setProfile(data);
         } else {
           setProfile(null);
         }
@@ -46,21 +84,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("user_id", session.user.id)
-          .single()
-          .then(({ data }) => setProfile(data));
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
