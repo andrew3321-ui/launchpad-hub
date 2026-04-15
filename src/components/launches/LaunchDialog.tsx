@@ -94,7 +94,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       setAcApiUrl(data.ac_api_url || "");
       setAcApiKey(data.ac_api_key || "");
       setAcListId(data.ac_default_list_id || "");
-      setAcNamedTags(Array.isArray(data.ac_named_tags) ? (data.ac_named_tags as NamedTag[]) : []);
+      setAcNamedTags(Array.isArray(data.ac_named_tags) ? (data.ac_named_tags as unknown as NamedTag[]) : []);
     }
 
     const { data: ws } = await supabase
@@ -128,12 +128,12 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     const launchData = {
       name: name.trim(),
       slug: slug.trim() || slugify(name),
-      custom_states: customStates,
+      custom_states: customStates as unknown as import("@/integrations/supabase/types").Json,
       whatsapp_group_link: whatsappLink || null,
       ac_api_url: acApiUrl || null,
       ac_api_key: acApiKey || null,
       ac_default_list_id: acListId || null,
-      ac_named_tags: acNamedTags,
+      ac_named_tags: acNamedTags as unknown as import("@/integrations/supabase/types").Json,
     };
 
     let savedId = launchId;
