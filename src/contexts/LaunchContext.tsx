@@ -1,10 +1,12 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 
 interface Launch {
   id: string;
   name: string;
+  slug: string | null;
+  status: string;
 }
 
 interface LaunchContextType {
@@ -12,6 +14,7 @@ interface LaunchContextType {
   activeLaunch: Launch | null;
   setActiveLaunch: (launch: Launch | null) => void;
   loading: boolean;
+  refreshLaunches: () => Promise<void>;
 }
 
 const LaunchContext = createContext<LaunchContextType>({
@@ -19,6 +22,7 @@ const LaunchContext = createContext<LaunchContextType>({
   activeLaunch: null,
   setActiveLaunch: () => {},
   loading: true,
+  refreshLaunches: async () => {},
 });
 
 export const useLaunch = () => useContext(LaunchContext);
@@ -29,7 +33,7 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
   const [activeLaunch, setActiveLaunch] = useState<Launch | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchLaunches = useCallback(async () => {
     if (!user) {
       setLaunches([]);
       setActiveLaunch(null);
@@ -37,26 +41,31 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const fetchLaunches = async () => {
-      const { data } = await supabase
-        .from("launches")
-        .select("id, name")
-        .order("created_at", { ascending: false });
+    const { data } = await supabase
+      .from("launches")
+      .select("id, name, slug, status")
+      .order("created_at", { ascending: false });
 
-      if (data) {
-        setLaunches(data);
-        if (!activeLaunch && data.length > 0) {
-          setActiveLaunch(data[0]);
+    if (data) {
+      setLaunches(data);
+      setActiveLaunch((prev) => {
+        if (prev && data.find((l) => l.id === prev.id)) {
+          return data.find((l) => l.id === prev.id)!;
         }
-      }
-      setLoading(false);
-    };
-
-    fetchLaunches();
+        return data.length > 0 ? data[0] : null;
+      });
+    }
+    setLoading(false);
   }, [user]);
 
+  useEffect(() => {
+    fetchLaunches();
+  }, [fetchLaunches]);
+
   return (
-    <LaunchContext.Provider value={{ launches, activeLaunch, setActiveLaunch, loading }}>
+    <LaunchContext.Provider
+      value={{ launches, activeLaunch, setActiveLaunch, loading, refreshLaunches: fetchLaunches }}
+    >
       {children}
     </LaunchContext.Provider>
   );

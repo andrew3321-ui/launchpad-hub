@@ -16,22 +16,46 @@ export type Database = {
     Tables: {
       launches: {
         Row: {
+          ac_api_key: string | null
+          ac_api_url: string | null
+          ac_default_list_id: string | null
+          ac_named_tags: Json
           created_at: string
           created_by: string
+          custom_states: Json
           id: string
           name: string
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
         }
         Insert: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          ac_default_list_id?: string | null
+          ac_named_tags?: Json
           created_at?: string
           created_by: string
+          custom_states?: Json
           id?: string
           name: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
         }
         Update: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          ac_default_list_id?: string | null
+          ac_named_tags?: Json
           created_at?: string
           created_by?: string
+          custom_states?: Json
           id?: string
           name?: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
         }
         Relationships: []
       }
@@ -55,6 +79,50 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      uchat_workspaces: {
+        Row: {
+          api_token: string
+          bot_id: string
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string
+          max_subscribers: number
+          workspace_id: string
+          workspace_name: string
+        }
+        Insert: {
+          api_token: string
+          bot_id: string
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id: string
+          max_subscribers?: number
+          workspace_id: string
+          workspace_name: string
+        }
+        Update: {
+          api_token?: string
+          bot_id?: string
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id?: string
+          max_subscribers?: number
+          workspace_id?: string
+          workspace_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "uchat_workspaces_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
