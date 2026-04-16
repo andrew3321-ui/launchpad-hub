@@ -1,43 +1,39 @@
 
-# Launch Hub — Plano de Implementação
 
-## Visão Geral
-Plataforma de orquestração de leads para lançamentos digitais, com autenticação, sidebar com navegação, e seletor global de lançamento.
+# Fix: Projeto criando infinitamente
 
-## 1. Design System
-- Cor primária: coral/laranja `#D85A30`
-- Fundo claro, tipografia moderna (Inter)
-- Layout: sidebar fixa à esquerda + área de conteúdo à direita
+## Diagnóstico
 
-## 2. Backend (Supabase/Lovable Cloud)
-- Ativar autenticação por email/senha
-- Criar tabela `profiles` (id, user_id, full_name) com trigger automático no signup
-- Criar tabela `launches` (id, name, created_by, created_at) para o seletor de lançamentos
-- RLS em ambas as tabelas
+O botão "Criar" fica girando indefinidamente. Analisando o código do `ProjectDialog.tsx`, o problema mais provável é que uma das queries do Supabase está falhando silenciosamente ou demorando sem retorno adequado. A tabela de projetos também mostra "Carregando..." sem resolver.
 
-## 3. Autenticação
-- Página de Login (`/login`) — email + senha
-- Página de Cadastro (`/signup`) — nome, email, senha
-- Componente `AuthGuard` que protege todas as rotas internas
-- Redirecionamento automático para `/login` se não autenticado
+Problemas identificados:
 
-## 4. Layout Principal
-- **Sidebar** com:
-  - Nome do usuário logado no topo
-  - Seletor global de "Lançamento ativo" (dropdown, busca da tabela `launches`)
-  - Menus: Dashboard, Lançamentos, Fontes, Regras, Leads, Fila, Logs
-  - Botão de Logout no rodapé
-- **Área de conteúdo** à direita com as rotas correspondentes
+1. **`fetchRows` em Projects.tsx** — faz duas queries sequenciais (projects + launches). Se a segunda query falhar, `setLoading(false)` nunca é chamado porque não há tratamento de erro adequado.
+2. **`handleSave` em ProjectDialog.tsx** — se o `delete` de `uchat_workspaces` falhar silenciosamente (RLS pode bloquear para um projeto recém-criado se o `savedId` ainda não propagou), o fluxo trava.
+3. **Trigger `handle_new_user` inexistente** — o sistema reporta "There are no triggers in the database", o que pode significar que o profile do usuário não foi criado. Isso pode causar problemas em cascata na sidebar (nome do usuário).
 
-## 5. Páginas (placeholder por enquanto)
-Cada página mostra o título da seção e um texto indicando que o conteúdo será implementado:
-- `/` — Dashboard
-- `/launches` — Lançamentos
-- `/sources` — Fontes
-- `/rules` — Regras
-- `/leads` — Leads
-- `/queue` — Fila
-- `/logs` — Logs
+## Plano de Correção
 
-## 6. Fluxo de Teste
-O app será testável conforme os 6 cenários descritos: redirecionamento sem login, cadastro, logout, login, navegação nos menus, e seletor de lançamento visível (vazio).
+### 1. Adicionar tratamento de erro robusto em `Projects.tsx > fetchRows`
+- Envolver as queries em try/catch
+- Garantir `setLoading(false)` sempre execute no `finally`
+
+### 2. Corrigir `ProjectDialog.tsx > handleSave`
+- Envolver todo o fluxo de save em try/catch/finally
+- Garantir `setSaving(false)` sempre execute no `finally`
+- Adicionar log de erro se o insert falhar
+
+### 3. Recriar o trigger `handle_new_user`
+- Migration para garantir que o trigger `on_auth_user_created` existe no `auth.users`
+- Isso garante que profiles são criados automaticamente no signup
+
+### 4. Corrigir `ProjectContext.tsx > fetchProjects`
+- Adicionar try/catch para não travar se a query falhar
+- Garantir `setLoading(false)` no finally
+
+## Arquivos alterados
+- `src/pages/Projects.tsx` — try/catch/finally em fetchRows
+- `src/components/projects/ProjectDialog.tsx` — try/catch/finally em handleSave
+- `src/contexts/ProjectContext.tsx` — try/catch/finally em fetchProjects
+- Migration SQL — recriar trigger handle_new_user
+
