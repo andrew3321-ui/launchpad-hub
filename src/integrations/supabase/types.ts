@@ -14,402 +14,94 @@ export type Database = {
   }
   public: {
     Tables: {
-      contact_processing_logs: {
+      launch_uchat_workspaces: {
         Row: {
-          code: string
-          contact_id: string | null
           created_at: string
-          details: Json
-          event_id: string | null
+          current_count: number
           id: string
           launch_id: string
-          level: string
-          message: string
-          source: string
-          title: string
+          max_subscribers: number
+          workspace_id: string
         }
         Insert: {
-          code: string
-          contact_id?: string | null
           created_at?: string
-          details?: Json
-          event_id?: string | null
+          current_count?: number
           id?: string
           launch_id: string
-          level: string
-          message: string
-          source: string
-          title: string
+          max_subscribers?: number
+          workspace_id: string
         }
         Update: {
-          code?: string
-          contact_id?: string | null
           created_at?: string
-          details?: Json
-          event_id?: string | null
+          current_count?: number
           id?: string
           launch_id?: string
-          level?: string
-          message?: string
-          source?: string
-          title?: string
+          max_subscribers?: number
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "contact_processing_logs_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "lead_contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "contact_processing_logs_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "inbound_contact_events"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "contact_processing_logs_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      inbound_contact_events: {
-        Row: {
-          event_type: string
-          external_contact_id: string | null
-          id: string
-          launch_id: string
-          payload: Json
-          processed_at: string | null
-          processed_contact_id: string | null
-          processing_status: string
-          processing_summary: Json
-          received_at: string
-          source: string
-        }
-        Insert: {
-          event_type: string
-          external_contact_id?: string | null
-          id?: string
-          launch_id: string
-          payload?: Json
-          processed_at?: string | null
-          processed_contact_id?: string | null
-          processing_status?: string
-          processing_summary?: Json
-          received_at?: string
-          source: string
-        }
-        Update: {
-          event_type?: string
-          external_contact_id?: string | null
-          id?: string
-          launch_id?: string
-          payload?: Json
-          processed_at?: string | null
-          processed_contact_id?: string | null
-          processing_status?: string
-          processing_summary?: Json
-          received_at?: string
-          source?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "inbound_contact_events_launch_id_fkey"
+            foreignKeyName: "launch_uchat_workspaces_launch_id_fkey"
             columns: ["launch_id"]
             isOneToOne: false
             referencedRelation: "launches"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "inbound_contact_events_processed_contact_id_fkey"
-            columns: ["processed_contact_id"]
+            foreignKeyName: "launch_uchat_workspaces_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "lead_contacts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      launch_dedupe_settings: {
-        Row: {
-          auto_add_country_code: boolean
-          auto_add_ninth_digit: boolean
-          auto_merge_duplicates: boolean
-          compare_digits_only: boolean
-          created_at: string
-          default_country_code: string
-          launch_id: string
-          merge_on_exact_email: boolean
-          merge_on_exact_phone: boolean
-          prefer_most_complete_record: boolean
-          updated_at: string
-        }
-        Insert: {
-          auto_add_country_code?: boolean
-          auto_add_ninth_digit?: boolean
-          auto_merge_duplicates?: boolean
-          compare_digits_only?: boolean
-          created_at?: string
-          default_country_code?: string
-          launch_id: string
-          merge_on_exact_email?: boolean
-          merge_on_exact_phone?: boolean
-          prefer_most_complete_record?: boolean
-          updated_at?: string
-        }
-        Update: {
-          auto_add_country_code?: boolean
-          auto_add_ninth_digit?: boolean
-          auto_merge_duplicates?: boolean
-          compare_digits_only?: boolean
-          created_at?: string
-          default_country_code?: string
-          launch_id?: string
-          merge_on_exact_email?: boolean
-          merge_on_exact_phone?: boolean
-          prefer_most_complete_record?: boolean
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "launch_dedupe_settings_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: true
-            referencedRelation: "launches"
+            referencedRelation: "uchat_workspaces"
             referencedColumns: ["id"]
           },
         ]
       }
       launches: {
         Row: {
-          ac_api_key: string | null
-          ac_api_url: string | null
+          ac_default_automation_id: string | null
           ac_default_list_id: string | null
           ac_named_tags: Json
           created_at: string
           created_by: string
           custom_states: Json
           id: string
-          manychat_account_id: string | null
-          manychat_api_key: string | null
-          manychat_api_url: string | null
           name: string
+          project_id: string | null
           slug: string | null
           status: string
-          whatsapp_group_link: string | null
         }
         Insert: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
+          ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
           created_at?: string
           created_by: string
           custom_states?: Json
           id?: string
-          manychat_account_id?: string | null
-          manychat_api_key?: string | null
-          manychat_api_url?: string | null
           name: string
+          project_id?: string | null
           slug?: string | null
           status?: string
-          whatsapp_group_link?: string | null
         }
         Update: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
+          ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
           created_at?: string
           created_by?: string
           custom_states?: Json
           id?: string
-          manychat_account_id?: string | null
-          manychat_api_key?: string | null
-          manychat_api_url?: string | null
           name?: string
+          project_id?: string | null
           slug?: string | null
           status?: string
-          whatsapp_group_link?: string | null
-        }
-        Relationships: []
-      }
-      lead_contact_identities: {
-        Row: {
-          contact_id: string
-          created_at: string
-          external_contact_id: string | null
-          external_email: string | null
-          external_phone: string | null
-          id: string
-          launch_id: string
-          normalized_phone: string | null
-          raw_snapshot: Json
-          source: string
-          updated_at: string
-        }
-        Insert: {
-          contact_id: string
-          created_at?: string
-          external_contact_id?: string | null
-          external_email?: string | null
-          external_phone?: string | null
-          id?: string
-          launch_id: string
-          normalized_phone?: string | null
-          raw_snapshot?: Json
-          source: string
-          updated_at?: string
-        }
-        Update: {
-          contact_id?: string
-          created_at?: string
-          external_contact_id?: string | null
-          external_email?: string | null
-          external_phone?: string | null
-          id?: string
-          launch_id?: string
-          normalized_phone?: string | null
-          raw_snapshot?: Json
-          source?: string
-          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "lead_contact_identities_contact_id_fkey"
-            columns: ["contact_id"]
+            foreignKeyName: "launches_project_id_fkey"
+            columns: ["project_id"]
             isOneToOne: false
-            referencedRelation: "lead_contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "lead_contact_identities_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      lead_contacts: {
-        Row: {
-          created_at: string
-          data: Json
-          first_source: string | null
-          id: string
-          last_source: string | null
-          launch_id: string
-          merged_from_count: number
-          normalized_phone: string | null
-          primary_email: string | null
-          primary_name: string | null
-          primary_phone: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          data?: Json
-          first_source?: string | null
-          id?: string
-          last_source?: string | null
-          launch_id: string
-          merged_from_count?: number
-          normalized_phone?: string | null
-          primary_email?: string | null
-          primary_name?: string | null
-          primary_phone?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          data?: Json
-          first_source?: string | null
-          id?: string
-          last_source?: string | null
-          launch_id?: string
-          merged_from_count?: number
-          normalized_phone?: string | null
-          primary_email?: string | null
-          primary_name?: string | null
-          primary_phone?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "lead_contacts_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      platform_sync_runs: {
-        Row: {
-          created_at: string
-          created_count: number
-          error_count: number
-          finished_at: string | null
-          id: string
-          last_error: string | null
-          launch_id: string
-          merged_count: number
-          metadata: Json
-          processed_count: number
-          skipped_count: number
-          source: string
-          started_at: string
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          created_count?: number
-          error_count?: number
-          finished_at?: string | null
-          id?: string
-          last_error?: string | null
-          launch_id: string
-          merged_count?: number
-          metadata?: Json
-          processed_count?: number
-          skipped_count?: number
-          source: string
-          started_at?: string
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          created_count?: number
-          error_count?: number
-          finished_at?: string | null
-          id?: string
-          last_error?: string | null
-          launch_id?: string
-          merged_count?: number
-          metadata?: Json
-          processed_count?: number
-          skipped_count?: number
-          source?: string
-          started_at?: string
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "platform_sync_runs_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
@@ -435,46 +127,70 @@ export type Database = {
         }
         Relationships: []
       }
+      projects: {
+        Row: {
+          ac_api_key: string | null
+          ac_api_url: string | null
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
+        }
+        Insert: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
+        }
+        Update: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
+        }
+        Relationships: []
+      }
       uchat_workspaces: {
         Row: {
           api_token: string
-          bot_id: string
           created_at: string
-          current_count: number
           id: string
-          launch_id: string
-          max_subscribers: number
-          workspace_id: string
+          project_id: string | null
           workspace_name: string
         }
         Insert: {
           api_token: string
-          bot_id: string
           created_at?: string
-          current_count?: number
           id?: string
-          launch_id: string
-          max_subscribers?: number
-          workspace_id: string
+          project_id?: string | null
           workspace_name: string
         }
         Update: {
           api_token?: string
-          bot_id?: string
           created_at?: string
-          current_count?: number
           id?: string
-          launch_id?: string
-          max_subscribers?: number
-          workspace_id?: string
+          project_id?: string | null
           workspace_name?: string
         }
         Relationships: [
           {
-            foreignKeyName: "uchat_workspaces_launch_id_fkey"
-            columns: ["launch_id"]
+            foreignKeyName: "uchat_workspaces_project_id_fkey"
+            columns: ["project_id"]
             isOneToOne: false
-            referencedRelation: "launches"
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
