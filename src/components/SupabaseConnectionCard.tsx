@@ -32,7 +32,7 @@ interface Props {
 }
 
 export function SupabaseConnectionCard({
-  title = "Conexao Supabase",
+  title = "Conexão Supabase",
   description = "Conecte outro projeto Supabase por personal access token e troque a base sem rebuild.",
 }: Props) {
   const { toast } = useToast();
@@ -53,8 +53,8 @@ export function SupabaseConnectionCard({
   const handleFetchProjects = async () => {
     if (!token.trim()) {
       toast({
-        title: "Token obrigatorio",
-        description: "Informe um personal access token do Supabase para descobrir os projetos disponiveis.",
+        title: "Token obrigatório",
+        description: "Informe um personal access token do Supabase para descobrir os projetos disponíveis.",
         variant: "destructive",
       });
       return;
@@ -87,7 +87,7 @@ export function SupabaseConnectionCard({
   const handleConnectProject = async () => {
     if (!token.trim() || !selectedProjectRef) {
       toast({
-        title: "Projeto nao selecionado",
+        title: "Projeto não selecionado",
         description: "Busque os projetos com o token e selecione o destino antes de conectar.",
         variant: "destructive",
       });
@@ -112,7 +112,7 @@ export function SupabaseConnectionCard({
         description: `O app agora esta apontando para ${runtimeConnection.projectName}.`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel conectar o projeto selecionado.";
+      const message = error instanceof Error ? error.message : "Não foi possível conectar o projeto selecionado.";
       toast({ title: "Erro ao conectar projeto", description: message, variant: "destructive" });
     } finally {
       setConnecting(false);
@@ -125,8 +125,8 @@ export function SupabaseConnectionCard({
     setSelectedProjectRef("");
     setToken("");
     toast({
-      title: "Conexao resetada",
-      description: "O app voltou a usar o projeto Supabase embutido nas variaveis de ambiente.",
+      title: "Conexão resetada",
+      description: "O app voltou a usar o projeto Supabase embutido nas variáveis de ambiente.",
     });
   };
 
@@ -182,7 +182,7 @@ export function SupabaseConnectionCard({
             className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
           />
           <p className="text-xs text-slate-400">
-            O token e usado apenas para descobrir projetos e chaves. Ele nao fica salvo na configuracao runtime do app.
+            O token é usado apenas para descobrir projetos e chaves. Ele não fica salvo na configuração runtime do app.
           </p>
         </div>
 

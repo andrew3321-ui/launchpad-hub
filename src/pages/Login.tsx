@@ -52,14 +52,14 @@ export default function Login() {
       const { error } = await withTimeout(
         supabase.auth.signInWithPassword({ email, password }),
         8000,
-        "O login demorou demais para responder. Atualize a pagina e tente novamente.",
+        "O login demorou demais para responder. Atualize a página e tente novamente.",
       );
 
       if (error) {
         toast({ title: "Erro ao entrar", description: error.message, variant: "destructive" });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel concluir o login.";
+      const message = error instanceof Error ? error.message : "Não foi possível concluir o login.";
       toast({ title: "Erro ao entrar", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
@@ -81,9 +81,9 @@ export default function Login() {
                   <Sparkles className="h-3.5 w-3.5" />
                   Acesso ao painel
                 </div>
-                <CardTitle className="text-3xl font-semibold text-white">Entre na operacao Megafone</CardTitle>
+                <CardTitle className="text-3xl font-semibold text-white">Entre na operação Megafone</CardTitle>
                 <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
-                  Conecte suas bases, monitore o tratamento automatico e acompanhe cada lead em um ambiente com identidade Megafone.
+                  Conecte suas bases, monitore o tratamento automático e acompanhe cada lead em um ambiente com identidade Megafone.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -128,7 +128,7 @@ export default function Login() {
                 </Button>
 
                 <p className="text-sm text-slate-400">
-                  Nao tem conta?{" "}
+                  Não tem conta?{" "}
                   <Link to="/signup" className="font-semibold text-[#8feeff] hover:text-white">
                     Criar conta
                   </Link>
@@ -138,13 +138,13 @@ export default function Login() {
           </Card>
 
           <SupabaseConnectionCard
-            title="Conexao Supabase"
-            description="Troque rapidamente o backend ativo durante desenvolvimento e homologacao, sem rebuild."
+            title="Conexão Supabase"
+            description="Troque rapidamente o backend ativo durante desenvolvimento e homologação, sem rebuild."
           />
 
           <SchemaSetupCard
-            title="Validacao do schema"
-            description="Confira se o backend conectado ja recebeu todas as estruturas que o app precisa para operar."
+            title="Validação do schema"
+            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
           />
         </div>
       </div>
