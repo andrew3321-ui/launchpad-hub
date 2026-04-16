@@ -9,6 +9,7 @@ import {
 import { FolderOpen, Plus } from "lucide-react";
 import { ProjectDialog } from "@/components/projects/ProjectDialog";
 import { useToast } from "@/hooks/use-toast";
+import { withTimeout } from "@/lib/supabaseTimeout";
 
 interface ProjectRow {
   id: string;
@@ -28,33 +29,41 @@ export default function Projects() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const fetchRows = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("id, name, slug, status, created_at")
-        .order("created_at", { ascending: false });
+      const { data, error } = await withTimeout(
+        supabase.from("projects").select("id, name, slug, status, created_at").order("created_at", { ascending: false }),
+        10000, "Fetch projects"
+      );
 
       if (error) {
         console.error("Error fetching projects:", error);
+        toast({ title: "Erro ao carregar projetos", description: error.message, variant: "destructive" });
         return;
       }
 
       if (data) {
-        const { data: launches } = await supabase
-          .from("launches")
-          .select("project_id");
-
-        const counts: Record<string, number> = {};
-        launches?.forEach((l) => {
-          if (l.project_id) {
-            counts[l.project_id] = (counts[l.project_id] || 0) + 1;
-          }
-        });
+        // Fetch launch counts separately — don't block main list
+        let counts: Record<string, number> = {};
+        try {
+          const { data: launches } = await withTimeout(
+            supabase.from("launches").select("project_id"),
+            10000, "Fetch launch counts"
+          );
+          launches?.forEach((l) => {
+            if (l.project_id) {
+              counts[l.project_id] = (counts[l.project_id] || 0) + 1;
+            }
+          });
+        } catch {
+          console.warn("Could not fetch launch counts");
+        }
 
         setRows(data.map((p) => ({ ...p, launch_count: counts[p.id] || 0 })));
       }
     } catch (err) {
       console.error("Error in fetchRows:", err);
+      toast({ title: "Erro ao carregar", description: String(err), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -66,12 +75,16 @@ export default function Projects() {
 
   const toggleStatus = async (id: string, current: string) => {
     const newStatus = current === "active" ? "inactive" : "active";
-    const { error } = await supabase.from("projects").update({ status: newStatus }).eq("id", id);
-    if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-    } else {
-      await fetchRows();
-      await refreshProjects();
+    try {
+      const { error } = await supabase.from("projects").update({ status: newStatus }).eq("id", id);
+      if (error) {
+        toast({ title: "Erro", description: error.message, variant: "destructive" });
+      } else {
+        await fetchRows();
+        await refreshProjects();
+      }
+    } catch (err) {
+      console.error("Error toggling status:", err);
     }
   };
 

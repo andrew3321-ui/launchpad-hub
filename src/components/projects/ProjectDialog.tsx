@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { slugify } from "@/lib/slugify";
+import { withTimeout } from "@/lib/supabaseTimeout";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -63,28 +64,44 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
 
   const loadProject = async (id: string) => {
     setLoading(true);
-    const { data } = await supabase.from("projects").select("*").eq("id", id).single();
-    if (data) {
-      setName(data.name);
-      setSlug(data.slug || "");
-      setSlugManual(true);
-      setAcApiUrl(data.ac_api_url || "");
-      setAcApiKey(data.ac_api_key || "");
-    }
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from("projects").select("*").eq("id", id).single(),
+        10000, "Load project"
+      );
+      if (error) {
+        console.error("Error loading project:", error);
+        toast({ title: "Erro ao carregar projeto", description: error.message, variant: "destructive" });
+        return;
+      }
+      if (data) {
+        setName(data.name);
+        setSlug(data.slug || "");
+        setSlugManual(true);
+        setAcApiUrl(data.ac_api_url || "");
+        setAcApiKey(data.ac_api_key || "");
+      }
 
-    const { data: ws } = await supabase
-      .from("uchat_workspaces")
-      .select("*")
-      .eq("project_id", id)
-      .order("created_at");
-    if (ws) {
-      setUchatWorkspaces(ws.map((w) => ({
-        id: w.id,
-        workspace_name: w.workspace_name,
-        api_token: w.api_token,
-      })));
+      const { data: ws, error: wsError } = await withTimeout(
+        supabase.from("uchat_workspaces").select("*").eq("project_id", id).order("created_at"),
+        10000, "Load workspaces"
+      );
+      if (wsError) {
+        console.error("Error loading workspaces:", wsError);
+      }
+      if (ws) {
+        setUchatWorkspaces(ws.map((w) => ({
+          id: w.id,
+          workspace_name: w.workspace_name,
+          api_token: w.api_token,
+        })));
+      }
+    } catch (err) {
+      console.error("Error in loadProject:", err);
+      toast({ title: "Erro ao carregar", description: String(err), variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleNameChange = (val: string) => {
@@ -106,38 +123,60 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
 
       let savedId = projectId;
 
+      // Step 1: Save project
       if (isEditing) {
-        const { error } = await supabase.from("projects").update(projectData).eq("id", projectId);
+        const { error } = await withTimeout(
+          supabase.from("projects").update(projectData).eq("id", projectId),
+          10000, "Update project"
+        );
         if (error) {
+          console.error("Error updating project:", error);
           toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
           return;
         }
       } else {
-        const { data, error } = await supabase
-          .from("projects")
-          .insert({ ...projectData, created_by: user.id })
-          .select("id")
-          .maybeSingle();
+        const { data, error } = await withTimeout(
+          supabase.from("projects").insert({ ...projectData, created_by: user.id }).select("id").maybeSingle(),
+          10000, "Create project"
+        );
         if (error) {
+          console.error("Error creating project:", error);
           toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
           return;
         }
         savedId = data?.id ?? null;
+        if (!savedId) {
+          toast({ title: "Erro ao criar", description: "Projeto não retornou ID.", variant: "destructive" });
+          return;
+        }
       }
 
-      // Save uchat workspaces
+      // Step 2: Delete old workspaces
       if (savedId) {
-        await supabase.from("uchat_workspaces").delete().eq("project_id", savedId);
+        const { error: delError } = await withTimeout(
+          supabase.from("uchat_workspaces").delete().eq("project_id", savedId),
+          10000, "Delete old workspaces"
+        );
+        if (delError) {
+          console.error("Error deleting old workspaces:", delError);
+          toast({ title: "Erro ao limpar workspaces", description: delError.message, variant: "destructive" });
+          // Continue anyway — project was saved
+        }
+
+        // Step 3: Insert new workspaces
         if (uchatWorkspaces.length > 0) {
           const rows = uchatWorkspaces.map((w) => ({
             project_id: savedId!,
             workspace_name: w.workspace_name,
             api_token: w.api_token,
           }));
-          const { error } = await supabase.from("uchat_workspaces").insert(rows);
-          if (error) {
-            console.error("Error saving workspaces:", error);
-            toast({ title: "Erro ao salvar workspaces", description: error.message, variant: "destructive" });
+          const { error: insError } = await withTimeout(
+            supabase.from("uchat_workspaces").insert(rows),
+            10000, "Insert workspaces"
+          );
+          if (insError) {
+            console.error("Error inserting workspaces:", insError);
+            toast({ title: "Erro ao salvar workspaces", description: insError.message, variant: "destructive" });
           }
         }
       }
@@ -146,7 +185,7 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
       onSaved();
     } catch (err) {
       console.error("Error in handleSave:", err);
-      toast({ title: "Erro inesperado", description: "Tente novamente.", variant: "destructive" });
+      toast({ title: "Erro inesperado", description: String(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -157,6 +196,9 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar projeto" : "Novo projeto"}</DialogTitle>
+          <DialogDescription>
+            {isEditing ? "Atualize as configurações do projeto." : "Preencha os dados do novo projeto."}
+          </DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -202,7 +244,7 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
 
             <TabsContent value="uchat" className="space-y-4 mt-4">
               <p className="text-sm text-muted-foreground">
-                Cadastre os workspaces UChat que este projeto tem acesso. A configuração de uso (limites, distribuição) é feita em cada lançamento.
+                Cadastre os workspaces UChat que este projeto tem acesso.
               </p>
               <UChatWorkspacesEditor workspaces={uchatWorkspaces} onChange={setUchatWorkspaces} />
             </TabsContent>
