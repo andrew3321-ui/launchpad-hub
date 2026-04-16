@@ -78,79 +78,6 @@ export type Database = {
           },
         ]
       }
-      contact_routing_actions: {
-        Row: {
-          action_key: string | null
-          action_type: string
-          contact_id: string | null
-          created_at: string
-          error_message: string | null
-          event_id: string | null
-          id: string
-          launch_id: string
-          request_payload: Json
-          response_payload: Json
-          source: string
-          status: string
-          target: string
-          updated_at: string
-        }
-        Insert: {
-          action_key?: string | null
-          action_type: string
-          contact_id?: string | null
-          created_at?: string
-          error_message?: string | null
-          event_id?: string | null
-          id?: string
-          launch_id: string
-          request_payload?: Json
-          response_payload?: Json
-          source: string
-          status?: string
-          target: string
-          updated_at?: string
-        }
-        Update: {
-          action_key?: string | null
-          action_type?: string
-          contact_id?: string | null
-          created_at?: string
-          error_message?: string | null
-          event_id?: string | null
-          id?: string
-          launch_id?: string
-          request_payload?: Json
-          response_payload?: Json
-          source?: string
-          status?: string
-          target?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "contact_routing_actions_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "lead_contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "contact_routing_actions_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "inbound_contact_events"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "contact_routing_actions_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       inbound_contact_events: {
         Row: {
           event_type: string
@@ -318,7 +245,6 @@ export type Database = {
           project_id: string | null
           slug: string | null
           status: string
-          webhook_secret: string
           whatsapp_group_link: string | null
         }
         Insert: {
@@ -338,7 +264,6 @@ export type Database = {
           project_id?: string | null
           slug?: string | null
           status?: string
-          webhook_secret?: string
           whatsapp_group_link?: string | null
         }
         Update: {
@@ -358,7 +283,6 @@ export type Database = {
           project_id?: string | null
           slug?: string | null
           status?: string
-          webhook_secret?: string
           whatsapp_group_link?: string | null
         }
         Relationships: [
@@ -603,12 +527,10 @@ export type Database = {
           bot_id: string | null
           created_at: string
           current_count: number
-          default_tag_name: string | null
           id: string
           launch_id: string | null
           max_subscribers: number
           project_id: string | null
-          welcome_subflow_ns: string | null
           workspace_id: string | null
           workspace_name: string
         }
@@ -617,12 +539,10 @@ export type Database = {
           bot_id?: string | null
           created_at?: string
           current_count?: number
-          default_tag_name?: string | null
           id?: string
           launch_id?: string | null
           max_subscribers?: number
           project_id?: string | null
-          welcome_subflow_ns?: string | null
           workspace_id?: string | null
           workspace_name: string
         }
@@ -631,12 +551,10 @@ export type Database = {
           bot_id?: string | null
           created_at?: string
           current_count?: number
-          default_tag_name?: string | null
           id?: string
           launch_id?: string | null
           max_subscribers?: number
           project_id?: string | null
-          welcome_subflow_ns?: string | null
           workspace_id?: string | null
           workspace_name?: string
         }
