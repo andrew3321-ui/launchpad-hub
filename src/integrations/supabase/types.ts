@@ -524,23 +524,35 @@ export type Database = {
       uchat_workspaces: {
         Row: {
           api_token: string
+          bot_id: string | null
           created_at: string
+          current_count: number
           id: string
+          max_subscribers: number
           project_id: string | null
+          workspace_id: string | null
           workspace_name: string
         }
         Insert: {
           api_token: string
+          bot_id?: string | null
           created_at?: string
+          current_count?: number
           id?: string
+          max_subscribers?: number
           project_id?: string | null
+          workspace_id?: string | null
           workspace_name: string
         }
         Update: {
           api_token?: string
+          bot_id?: string | null
           created_at?: string
+          current_count?: number
           id?: string
+          max_subscribers?: number
           project_id?: string | null
+          workspace_id?: string | null
           workspace_name?: string
         }
         Relationships: [
