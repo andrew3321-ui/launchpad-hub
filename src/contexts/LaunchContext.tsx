@@ -44,25 +44,36 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data } = await supabase
-      .from("launches")
-      .select("id, name, slug, status, project_id")
-      .eq("project_id", activeProject.id)
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("launches")
+        .select("id, name, slug, status, project_id")
+        .eq("project_id", activeProject.id)
+        .order("created_at", { ascending: false });
 
-    if (data) {
-      setLaunches(data);
-      setActiveLaunch((prev) => {
-        if (prev && data.find((l) => l.id === prev.id)) {
-          return data.find((l) => l.id === prev.id)!;
-        }
-        return data.length > 0 ? data[0] : null;
-      });
+      if (error) {
+        console.error("Error fetching launches:", error);
+        return;
+      }
+
+      if (data) {
+        setLaunches(data);
+        setActiveLaunch((prev) => {
+          if (prev && data.find((l) => l.id === prev.id)) {
+            return data.find((l) => l.id === prev.id)!;
+          }
+          return data.length > 0 ? data[0] : null;
+        });
+      }
+    } catch (err) {
+      console.error("Error in fetchLaunches:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [user, activeProject]);
 
   useEffect(() => {
+    setLoading(true);
     fetchLaunches();
   }, [fetchLaunches]);
 

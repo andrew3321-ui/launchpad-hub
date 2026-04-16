@@ -4,8 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProject } from "@/contexts/ProjectContext";
 import { useToast } from "@/hooks/use-toast";
 import { slugify } from "@/lib/slugify";
+import { withTimeout } from "@/lib/supabaseTimeout";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -50,12 +51,10 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     "cadastrado", "boas_vindas_enviado", "entrou_grupo", "ativo",
   ]);
 
-  // AC config
   const [acListId, setAcListId] = useState("");
   const [acNamedTags, setAcNamedTags] = useState<NamedTag[]>([]);
   const [acAutomationId, setAcAutomationId] = useState("");
 
-  // UChat workspaces
   const [launchWorkspaces, setLaunchWorkspaces] = useState<LaunchWorkspace[]>([]);
 
   const isEditing = !!launchId;
@@ -82,45 +81,59 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
   const loadLaunch = async (id: string) => {
     setLoading(true);
-    const { data } = await supabase.from("launches").select("*").eq("id", id).single();
-    if (data) {
-      setName(data.name);
-      setSlug(data.slug || "");
-      setSlugManual(true);
-      setCustomStates(Array.isArray(data.custom_states) ? (data.custom_states as string[]) : []);
-      setAcListId(data.ac_default_list_id || "");
-      setAcNamedTags(Array.isArray(data.ac_named_tags) ? (data.ac_named_tags as unknown as NamedTag[]) : []);
-      setAcAutomationId(data.ac_default_automation_id || "");
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from("launches").select("*").eq("id", id).single(),
+        10000, "Load launch"
+      );
+      if (error) {
+        console.error("Error loading launch:", error);
+        toast({ title: "Erro ao carregar lançamento", description: error.message, variant: "destructive" });
+        return;
+      }
+      if (data) {
+        setName(data.name);
+        setSlug(data.slug || "");
+        setSlugManual(true);
+        setCustomStates(Array.isArray(data.custom_states) ? (data.custom_states as string[]) : []);
+        setAcListId(data.ac_default_list_id || "");
+        setAcNamedTags(Array.isArray(data.ac_named_tags) ? (data.ac_named_tags as unknown as NamedTag[]) : []);
+        setAcAutomationId(data.ac_default_automation_id || "");
+      }
+
+      const { data: lws, error: lwsError } = await withTimeout(
+        supabase.from("launch_uchat_workspaces").select("workspace_id, max_subscribers, current_count").eq("launch_id", id),
+        10000, "Load launch workspaces"
+      );
+      if (lwsError) {
+        console.error("Error loading launch workspaces:", lwsError);
+      }
+
+      if (lws && lws.length > 0) {
+        const wsIds = lws.map((l) => l.workspace_id);
+        const { data: wsData } = await withTimeout(
+          supabase.from("uchat_workspaces").select("id, workspace_name").in("id", wsIds),
+          10000, "Load workspace names"
+        );
+
+        const nameMap: Record<string, string> = {};
+        wsData?.forEach((w) => { nameMap[w.id] = w.workspace_name; });
+
+        setLaunchWorkspaces(lws.map((l) => ({
+          workspace_id: l.workspace_id,
+          workspace_name: nameMap[l.workspace_id] || "",
+          max_subscribers: l.max_subscribers,
+          current_count: l.current_count,
+        })));
+      } else {
+        setLaunchWorkspaces([]);
+      }
+    } catch (err) {
+      console.error("Error in loadLaunch:", err);
+      toast({ title: "Erro ao carregar", description: String(err), variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
-
-    // Load launch workspaces
-    const { data: lws } = await supabase
-      .from("launch_uchat_workspaces")
-      .select("workspace_id, max_subscribers, current_count")
-      .eq("launch_id", id);
-
-    if (lws && lws.length > 0) {
-      // Get workspace names
-      const wsIds = lws.map((l) => l.workspace_id);
-      const { data: wsData } = await supabase
-        .from("uchat_workspaces")
-        .select("id, workspace_name")
-        .in("id", wsIds);
-
-      const nameMap: Record<string, string> = {};
-      wsData?.forEach((w) => { nameMap[w.id] = w.workspace_name; });
-
-      setLaunchWorkspaces(lws.map((l) => ({
-        workspace_id: l.workspace_id,
-        workspace_name: nameMap[l.workspace_id] || "",
-        max_subscribers: l.max_subscribers,
-        current_count: l.current_count,
-      })));
-    } else {
-      setLaunchWorkspaces([]);
-    }
-
-    setLoading(false);
   };
 
   const handleNameChange = (val: string) => {
@@ -132,59 +145,79 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     if (!name.trim() || !user || !activeProject) return;
     setSaving(true);
 
-    const launchData = {
-      name: name.trim(),
-      slug: slug.trim() || slugify(name),
-      custom_states: customStates as unknown as Json,
-      project_id: activeProject.id,
-      ac_default_list_id: acListId || null,
-      ac_named_tags: acNamedTags as unknown as Json,
-      ac_default_automation_id: acAutomationId || null,
-    };
+    try {
+      const launchData = {
+        name: name.trim(),
+        slug: slug.trim() || slugify(name),
+        custom_states: customStates as unknown as Json,
+        project_id: activeProject.id,
+        ac_default_list_id: acListId || null,
+        ac_named_tags: acNamedTags as unknown as Json,
+        ac_default_automation_id: acAutomationId || null,
+      };
 
-    let savedId = launchId;
+      let savedId = launchId;
 
-    if (isEditing) {
-      const { error } = await supabase.from("launches").update(launchData).eq("id", launchId);
-      if (error) {
-        toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-    } else {
-      const { data, error } = await supabase
-        .from("launches")
-        .insert({ ...launchData, created_by: user.id })
-        .select("id")
-        .single();
-      if (error) {
-        toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-      savedId = data.id;
-    }
-
-    // Save launch workspaces
-    if (savedId) {
-      await supabase.from("launch_uchat_workspaces").delete().eq("launch_id", savedId);
-      if (launchWorkspaces.length > 0) {
-        const rows = launchWorkspaces.map((w) => ({
-          launch_id: savedId!,
-          workspace_id: w.workspace_id,
-          max_subscribers: w.max_subscribers,
-          current_count: w.current_count,
-        }));
-        const { error } = await supabase.from("launch_uchat_workspaces").insert(rows);
+      if (isEditing) {
+        const { error } = await withTimeout(
+          supabase.from("launches").update(launchData).eq("id", launchId),
+          10000, "Update launch"
+        );
         if (error) {
-          toast({ title: "Erro ao salvar workspaces", description: error.message, variant: "destructive" });
+          toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
+          return;
+        }
+      } else {
+        const { data, error } = await withTimeout(
+          supabase.from("launches").insert({ ...launchData, created_by: user.id }).select("id").maybeSingle(),
+          10000, "Create launch"
+        );
+        if (error) {
+          toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
+          return;
+        }
+        savedId = data?.id ?? null;
+        if (!savedId) {
+          toast({ title: "Erro ao criar", description: "Lançamento não retornou ID.", variant: "destructive" });
+          return;
         }
       }
-    }
 
-    toast({ title: isEditing ? "Lançamento atualizado!" : "Lançamento criado!" });
-    setSaving(false);
-    onSaved();
+      // Save launch workspaces
+      if (savedId) {
+        const { error: delError } = await withTimeout(
+          supabase.from("launch_uchat_workspaces").delete().eq("launch_id", savedId),
+          10000, "Delete old launch workspaces"
+        );
+        if (delError) {
+          console.error("Error deleting launch workspaces:", delError);
+        }
+
+        if (launchWorkspaces.length > 0) {
+          const rows = launchWorkspaces.map((w) => ({
+            launch_id: savedId!,
+            workspace_id: w.workspace_id,
+            max_subscribers: w.max_subscribers,
+            current_count: w.current_count,
+          }));
+          const { error: insError } = await withTimeout(
+            supabase.from("launch_uchat_workspaces").insert(rows),
+            10000, "Insert launch workspaces"
+          );
+          if (insError) {
+            toast({ title: "Erro ao salvar workspaces", description: insError.message, variant: "destructive" });
+          }
+        }
+      }
+
+      toast({ title: isEditing ? "Lançamento atualizado!" : "Lançamento criado!" });
+      onSaved();
+    } catch (err) {
+      console.error("Error in handleSave:", err);
+      toast({ title: "Erro inesperado", description: String(err), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -192,6 +225,9 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar lançamento" : "Novo lançamento"}</DialogTitle>
+          <DialogDescription>
+            {isEditing ? "Atualize as configurações do lançamento." : "Preencha os dados do novo lançamento."}
+          </DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -236,7 +272,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
             <TabsContent value="activecampaign" className="space-y-4 mt-4">
               <p className="text-sm text-muted-foreground">
-                Configurações de uso do ActiveCampaign para este lançamento. As credenciais (API URL/Key) ficam no projeto.
+                Configurações de uso do ActiveCampaign para este lançamento.
               </p>
               <div className="space-y-2">
                 <Label>ID da Lista</Label>
@@ -249,7 +285,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
               <div className="space-y-2">
                 <Label>Tags nomeadas</Label>
                 <p className="text-xs text-muted-foreground mb-2">
-                  Defina apelidos internos para tags do ActiveCampaign. Permite reusar regras entre lançamentos mudando só as tags.
+                  Defina apelidos internos para tags do ActiveCampaign.
                 </p>
                 <NamedTagsEditor tags={acNamedTags} onChange={setAcNamedTags} />
               </div>
