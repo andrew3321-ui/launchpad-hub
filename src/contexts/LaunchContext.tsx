@@ -40,7 +40,7 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
   const setActiveLaunch = useCallback((launch: Launch | null) => {
     setActiveLaunchState(launch);
 
-    if (launch.id) {
+    if (launch?.id) {
       localStorage.setItem(ACTIVE_LAUNCH_STORAGE_KEY, launch.id);
       return;
     }
@@ -63,7 +63,7 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       toast({
-        title: "Erro ao atualizar lançamentos",
+        title: "Erro ao atualizar lancamentos",
         description: error.message,
         variant: "destructive",
       });
@@ -78,14 +78,14 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
       const storedLaunchId = localStorage.getItem(ACTIVE_LAUNCH_STORAGE_KEY);
 
       setActiveLaunchState((prev) => {
-        const preferredId = prev.id || storedLaunchId;
+        const preferredId = prev?.id || storedLaunchId;
 
         if (preferredId) {
           const matchingLaunch = data.find((launch) => launch.id === preferredId);
           if (matchingLaunch) return matchingLaunch;
         }
 
-        return data.length > 0  data[0] : null;
+        return data.length > 0 ? data[0] : null;
       });
     }
     setLoading(false);

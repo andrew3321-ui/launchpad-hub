@@ -9,11 +9,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { buildLovableBootstrapPrompt, checkSchemaHealth, type SchemaIssue, type SchemaStatus } from "@/lib/schemaHealth";
-import bootstrapSql from "../../supabase/bootstrap.sqlraw";
+import bootstrapSql from "../../supabase/bootstrap.sql?raw";
 
 interface Props {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
 }
 
 function formatIssueLabel(issue: SchemaIssue) {
@@ -26,7 +26,7 @@ function formatIssueLabel(issue: SchemaIssue) {
 
 export function SchemaSetupCard({
   title = "Schema do backend",
-  description = "Valide se o projeto Supabase atual já tem todas as tabelas e colunas esperadas pelo app.",
+  description = "Valide se o projeto Supabase atual ja tem todas as tabelas e colunas esperadas pelo app.",
 }: Props) {
   const { connection } = useAuth();
   const { toast } = useToast();
@@ -40,7 +40,7 @@ export function SchemaSetupCard({
       const nextStatus = await checkSchemaHealth(supabase);
       setStatus(nextStatus);
     } catch (error) {
-      const message = error instanceof Error  error.message : "Falha ao validar o schema atual.";
+      const message = error instanceof Error ? error.message : "Falha ao validar o schema atual.";
       toast({ title: "Erro ao validar schema", description: message, variant: "destructive" });
       setStatus({
         ready: false,
@@ -62,14 +62,14 @@ export function SchemaSetupCard({
     validateSchema();
   }, [validateSchema, connection.projectRef]);
 
-  const bootstrapPrompt = useMemo(() => buildLovableBootstrapPrompt(status.issues  []), [status.issues]);
+  const bootstrapPrompt = useMemo(() => buildLovableBootstrapPrompt(status?.issues ?? []), [status?.issues]);
 
   const copyToClipboard = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      toast({ title: `${label} copiado`, description: "Você já pode colar isso no Lovable ou guardar para o setup." });
+      toast({ title: `${label} copiado`, description: "Voce ja pode colar isso no Lovable ou guardar para o setup." });
     } catch (error) {
-      const message = error instanceof Error  error.message : "Não foi possível copiar para a rea de transferncia.";
+      const message = error instanceof Error ? error.message : "Nao foi possivel copiar para a area de transferencia.";
       toast({ title: "Falha ao copiar", description: message, variant: "destructive" });
     }
   };
@@ -82,9 +82,9 @@ export function SchemaSetupCard({
             <Database className="h-5 w-5 text-primary" />
             {title}
           </CardTitle>
-          {checking  (
+          {checking ? (
             <Badge variant="secondary">Validando</Badge>
-          ) : status.ready  (
+          ) : status?.ready ? (
             <Badge className="gap-1">
               <CheckCircle2 className="h-3.5 w-3.5" />
               Pronto
@@ -101,7 +101,7 @@ export function SchemaSetupCard({
             <span className="font-medium text-white">Projeto validado:</span> {connection.projectName} ({connection.projectRef})
           </p>
           <p className="mt-1">
-            O app consegue trocar de projeto em runtime, mas criação de tabela/coluna não pode acontecer pelo front com chave pblica.
+            O app consegue trocar de projeto em runtime, mas criacao de tabela/coluna nao pode acontecer pelo front com chave publica.
           </p>
         </div>
 
@@ -110,7 +110,7 @@ export function SchemaSetupCard({
             <RefreshCcw className="mr-2 h-4 w-4" />
             Revalidar
           </Button>
-          {!status.ready && !checking && (
+          {!status?.ready && !checking && (
             <>
               <Button type="button" variant="outline" onClick={() => copyToClipboard(bootstrapPrompt, "Prompt do Lovable")}>
                 <Copy className="mr-2 h-4 w-4" />
@@ -124,17 +124,17 @@ export function SchemaSetupCard({
           )}
         </div>
 
-        {checking  (
+        {checking ? (
           <div className="flex items-center gap-2 text-sm text-slate-400">
             <Loader2 className="h-4 w-4 animate-spin" />
             Validando tabelas e colunas obrigatorias...
           </div>
-        ) : status.ready  (
+        ) : status?.ready ? (
           <Alert>
             <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>Schema pronto</AlertTitle>
             <AlertDescription>
-              Esse projeto já tem a estrutura mínima esperada para autenticação, fontes, regras, leads e logs.
+              Esse projeto ja tem a estrutura minima esperada para autenticacao, fontes, regras, leads e logs.
             </AlertDescription>
           </Alert>
         ) : (
@@ -148,17 +148,17 @@ export function SchemaSetupCard({
             </Alert>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium">Itens ausentes ou não validados</p>
+              <p className="text-sm font-medium">Itens ausentes ou nao validados</p>
               <div className="flex flex-wrap gap-2">
-                {(status.issues  []).map((issue) => (
-                  <Badge key={`${issue.table}-${issue.column  "table"}`} variant="outline">
+                {(status?.issues ?? []).map((issue) => (
+                  <Badge key={`${issue.table}-${issue.column ?? "table"}`} variant="outline">
                     {formatIssueLabel(issue)}
                   </Badge>
                 ))}
               </div>
               <div className="space-y-1 text-sm text-slate-300">
-                {(status.issues  []).map((issue) => (
-                  <p key={`${issue.table}-${issue.column  issue.description}`}>{issue.description}</p>
+                {(status?.issues ?? []).map((issue) => (
+                  <p key={`${issue.table}-${issue.column ?? issue.description}`}>{issue.description}</p>
                 ))}
               </div>
             </div>

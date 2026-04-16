@@ -4,7 +4,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface UChatWorkspace {
-  id: string;
+  id?: string;
   workspace_name: string;
   workspace_id: string;
   bot_id: string;
@@ -91,7 +91,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
 
       <p className="text-sm text-muted-foreground">
         Para importar do UChat, usamos somente o <span className="font-medium text-foreground">Workspace ID</span> e o{" "}
-        <span className="font-medium text-foreground">API Token</span>. O restante dos campos internos e preenchido automáticamente.
+        <span className="font-medium text-foreground">API Token</span>. O restante dos campos internos e preenchido automaticamente.
       </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>

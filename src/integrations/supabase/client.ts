@@ -25,7 +25,7 @@ let activeConfig = loadInitialConfig();
 let activeClient = createBrowserClient(activeConfig);
 const listeners = new Set<(config: SupabaseConnectionConfig) => void>();
 
-function extractProjectRef(url: string) {
+function extractProjectRef(url?: string) {
   if (!url) return "";
 
   try {
@@ -119,6 +119,6 @@ export function subscribeToSupabaseConnection(
 export const supabase = new Proxy({} as SupabaseClient<Database>, {
   get(_target, property) {
     const value = activeClient[property as keyof SupabaseClient<Database>];
-    return typeof value === "function"  value.bind(activeClient) : value;
+    return typeof value === "function" ? value.bind(activeClient) : value;
   },
 });

@@ -70,9 +70,9 @@ export default function Leads() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lançamento</CardTitle>
+            <CardTitle>Selecione um lancamento</CardTitle>
             <CardDescription>
-              Escolha um lançamento na barra lateral para visualizar a base tratada e deduplicada.
+              Escolha um lancamento na barra lateral para visualizar a base tratada e deduplicada.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -87,7 +87,7 @@ export default function Leads() {
         <div>
           <h1 className="text-2xl font-bold">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            Base canúnica do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revisão, automacao e futuras sincronizacoes.
+            Base canonica do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revisao, automacao e futuras sincronizacoes.
           </p>
         </div>
       </div>
@@ -100,11 +100,11 @@ export default function Leads() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading  (
+          {loading ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
-          ) : rows.length === 0  (
+          ) : rows.length === 0 ? (
             <div className="py-10 text-sm text-muted-foreground">
               Nenhum lead processado ainda. Assim que o backend ingerir contatos, a base tratada aparecera aqui.
             </div>
@@ -116,7 +116,7 @@ export default function Leads() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Telefone</TableHead>
-                    <TableHead>Última fonte</TableHead>
+                    <TableHead>Ultima fonte</TableHead>
                     <TableHead>Mesclas</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Atualizado</TableHead>
@@ -131,7 +131,7 @@ export default function Leads() {
                       <TableCell className="capitalize">{row.last_source || "-"}</TableCell>
                       <TableCell>{row.merged_from_count}</TableCell>
                       <TableCell>
-                        <Badge variant={row.status === "active"  "default" : "secondary"}>{row.status}</Badge>
+                        <Badge variant={row.status === "active" ? "default" : "secondary"}>{row.status}</Badge>
                       </TableCell>
                       <TableCell>{new Date(row.updated_at).toLocaleString("pt-BR")}</TableCell>
                     </TableRow>

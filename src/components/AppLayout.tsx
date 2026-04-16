@@ -9,9 +9,9 @@ import { MegafoneLogo } from "@/components/MegafoneLogo";
 import { AppSidebar } from "./AppSidebar";
 
 const pageTitles: Record<string, string> = {
-  "/": "Dashboard de amplificação",
-  "/launches": "Arquitetura de lançamentos",
-  "/sources": "Conexão de fontes",
+  "/": "Dashboard de amplificacao",
+  "/launches": "Arquitetura de lancamentos",
+  "/sources": "Conexao de fontes",
   "/rules": "Regras de tratamento",
   "/leads": "Base tratada de contatos",
   "/queue": "Fila operacional",
@@ -45,7 +45,7 @@ export function AppLayout() {
               <div className="hidden min-w-0 items-center gap-3 lg:flex">
                 <Badge variant="outline" className="brand-chip max-w-[280px] truncate border-white/10 bg-white/5 text-slate-200">
                   <Sparkles className="h-3.5 w-3.5 text-[#8feeff]" />
-                  {activeLaunch  activeLaunch.name : "Nenhum lançamento ativo"}
+                  {activeLaunch ? activeLaunch.name : "Nenhum lancamento ativo"}
                 </Badge>
                 <Badge variant="outline" className="brand-chip border-white/10 bg-white/5 text-slate-200">
                   Supabase {connection.projectRef}

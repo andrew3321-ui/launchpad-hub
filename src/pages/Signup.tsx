@@ -45,7 +45,7 @@ export default function Signup() {
     if (error) {
       toast({ title: "Erro ao criar conta", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Conta criada!", description: "Você já esta conectado ao painel." });
+      toast({ title: "Conta criada!", description: "Voce ja esta conectado ao painel." });
     }
 
     setSubmitting(false);
@@ -57,7 +57,7 @@ export default function Signup() {
         <AuthShowcase
           eyebrow="Equipe Megafone"
           title="Crie sua conta e entre na cabine de comando."
-          description="Convide seu time, acompanhe a operação dos lançamentos e mantenha o mesmo clima premium da identidade Megafone desde o primeiro acesso."
+          description="Convide seu time, acompanhe a operacao dos lancamentos e mantenha o mesmo clima premium da identidade Megafone desde o primeiro acesso."
         />
 
         <Card className="brand-card brand-panel border-white/10 bg-[linear-gradient(180deg,rgba(8,24,47,0.92),rgba(6,17,34,0.9))]">
@@ -66,7 +66,7 @@ export default function Signup() {
             <div className="space-y-2">
               <CardTitle className="text-3xl font-semibold text-white">Criar conta</CardTitle>
               <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
-                Prepare seu acesso ao cockpit de integrações, deduplicação e acompanhamento de resultados.
+                Prepare seu acesso ao cockpit de integracoes, deduplicacao e acompanhamento de resultados.
               </CardDescription>
             </div>
           </CardHeader>
@@ -97,7 +97,7 @@ export default function Signup() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   required
-                  placeholder="você@megafone.digital"
+                  placeholder="voce@megafone.digital"
                   className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
                 />
               </div>
@@ -121,12 +121,12 @@ export default function Signup() {
 
             <CardFooter className="flex flex-col items-stretch gap-4">
               <Button type="submit" className="h-12" disabled={submitting}>
-                {submitting  <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
                 Criar conta
               </Button>
 
               <p className="text-sm text-slate-400">
-                Já tem conta{" "}
+                Ja tem conta?{" "}
                 <Link to="/login" className="font-semibold text-[#8feeff] hover:text-white">
                   Entrar
                 </Link>

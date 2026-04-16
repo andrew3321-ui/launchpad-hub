@@ -2,33 +2,33 @@ import { ArrowUpRight, Bot, RadioTower, Workflow } from "lucide-react";
 import { MegafoneLogo } from "@/components/MegafoneLogo";
 
 interface AuthShowcaseProps {
-  eyebrow: string;
-  title: string;
-  description: string;
+  eyebrow?: string;
+  title?: string;
+  description?: string;
 }
 
 const highlights = [
   {
     icon: RadioTower,
     title: "Bases conectadas",
-    description: "Centralize ActiveCampaign, ManyChat e UChat em um único cockpit.",
+    description: "Centralize ActiveCampaign, ManyChat e UChat em um unico cockpit.",
   },
   {
     icon: Workflow,
-    title: "Tratamento automático",
+    title: "Tratamento automatico",
     description: "Padronize telefones, mescle duplicados e acompanhe tudo em logs claros.",
   },
   {
     icon: Bot,
-    title: "Operação previsível",
-    description: "Transforme fluxos de lançamento em um processo repetível e escalável.",
+    title: "Operacao previsivel",
+    description: "Transforme fluxos de lancamento em um processo repetivel e escalavel.",
   },
 ];
 
 export function AuthShowcase({
   eyebrow = "Megafone Digital",
-  title = "Quem tem um Megafone não precisa gritar.",
-  description = "Um painel feito para amplificar sua operação, acelerar lançamentos e organizar contatos com a mesma energia visual da marca.",
+  title = "Quem tem um Megafone nao precisa gritar.",
+  description = "Um painel feito para amplificar sua operacao, acelerar lancamentos e organizar contatos com a mesma energia visual da marca.",
 }: AuthShowcaseProps) {
   return (
     <section className="brand-card brand-panel relative overflow-hidden p-6 sm:p-8">
@@ -40,11 +40,11 @@ export function AuthShowcase({
           <div className="space-y-4">
             <p className="brand-kicker">{eyebrow}</p>
             <h2 className="font-display text-3xl font-semibold leading-[1.05] text-white sm:text-4xl">
-              {title.split("Megafone").length > 1  (
+              {title.split("Megafone").length > 1 ? (
                 <>
                   Quem tem um <span className="text-[#a9f0ff]">Megafone</span>
                   <br />
-                  não precisa gritar.
+                  nao precisa gritar.
                 </>
               ) : (
                 title

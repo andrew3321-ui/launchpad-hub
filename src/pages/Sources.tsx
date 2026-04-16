@@ -27,7 +27,7 @@ interface NamedTag {
 }
 
 interface UChatWorkspace {
-  id: string;
+  id?: string;
   workspace_name: string;
   workspace_id: string;
   bot_id: string;
@@ -96,7 +96,7 @@ function hasPendingSync(launchId: string, source: SyncSource) {
   if (!rawValue) return false;
 
   try {
-    const parsed = JSON.parse(rawValue) as { startedAt: number };
+    const parsed = JSON.parse(rawValue) as { startedAt?: number };
     if (!parsed.startedAt || Date.now() - parsed.startedAt > pendingSyncMaxAgeMs) {
       clearPendingSync(launchId, source);
       return false;
@@ -123,15 +123,15 @@ function loadSourcesDraft(launchId: string) {
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
-    <Badge variant={connected  "default" : "secondary"}>
-      {connected  "Configurado" : "Não configurado"}
+    <Badge variant={connected ? "default" : "secondary"}>
+      {connected ? "Configurado" : "Nao configurado"}
     </Badge>
   );
 }
 
 function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
   if (!run) {
-    return <Badge variant="outline">Nenhuma importação ainda</Badge>;
+    return <Badge variant="outline">Nenhuma importacao ainda</Badge>;
   }
 
   const normalizedRun = normalizeSyncRun(run);
@@ -144,7 +144,7 @@ function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
     return <Badge variant="secondary">Em andamento</Badge>;
   }
 
-  return <Badge variant="default">Concluída</Badge>;
+  return <Badge variant="default">Concluida</Badge>;
 }
 
 export default function Sources() {
@@ -215,9 +215,9 @@ export default function Sources() {
 
     (["activecampaign", "uchat"] as SyncSource[]).forEach((source) => {
       const latestRun = normalizedRows.find((run) => run.source === source) || null;
-      const backendStillRunning = latestRun.status === "running";
+      const backendStillRunning = latestRun?.status === "running";
 
-      if (latestRun.status === "completed" || latestRun.status === "failed") {
+      if (latestRun?.status === "completed" || latestRun?.status === "failed") {
         clearPendingSync(launchId, source);
       }
 
@@ -302,7 +302,7 @@ export default function Sources() {
       }
 
       const backendWorkspaces =
-        workspaceData.map((workspace) => ({
+        workspaceData?.map((workspace) => ({
           id: workspace.id,
           workspace_name: workspace.workspace_name,
           workspace_id: workspace.workspace_id,
@@ -310,22 +310,22 @@ export default function Sources() {
           api_token: workspace.api_token,
           max_subscribers: workspace.max_subscribers,
           current_count: workspace.current_count,
-        }))  [];
+        })) ?? [];
 
       const draft = loadSourcesDraft(activeLaunch.id);
 
-      setAcApiUrl(draft.acApiUrl  launchData.ac_api_url  "");
-      setAcApiKey(draft.acApiKey  launchData.ac_api_key  "");
-      setAcListId(draft.acListId  launchData.ac_default_list_id  "");
+      setAcApiUrl(draft?.acApiUrl ?? launchData?.ac_api_url ?? "");
+      setAcApiKey(draft?.acApiKey ?? launchData?.ac_api_key ?? "");
+      setAcListId(draft?.acListId ?? launchData?.ac_default_list_id ?? "");
       setAcNamedTags(
-        draft.acNamedTags 
-          (Array.isArray(launchData.ac_named_tags)  (launchData.ac_named_tags as unknown as NamedTag[]) : []),
+        draft?.acNamedTags ??
+          (Array.isArray(launchData?.ac_named_tags) ? (launchData.ac_named_tags as unknown as NamedTag[]) : []),
       );
 
-      setManychatApiUrl(draft.manychatApiUrl  launchData.manychat_api_url  "");
-      setManychatApiKey(draft.manychatApiKey  launchData.manychat_api_key  "");
-      setManychatAccountId(draft.manychatAccountId  launchData.manychat_account_id  "");
-      setUchatWorkspaces(draft.uchatWorkspaces  backendWorkspaces);
+      setManychatApiUrl(draft?.manychatApiUrl ?? launchData?.manychat_api_url ?? "");
+      setManychatApiKey(draft?.manychatApiKey ?? launchData?.manychat_api_key ?? "");
+      setManychatAccountId(draft?.manychatAccountId ?? launchData?.manychat_account_id ?? "");
+      setUchatWorkspaces(draft?.uchatWorkspaces ?? backendWorkspaces);
 
       await loadSyncRuns(activeLaunch.id, true);
       setLoading(false);
@@ -349,7 +349,7 @@ export default function Sources() {
     return () => window.clearInterval(intervalId);
   }, [activeLaunch, syncingState, syncRuns]);
 
-  const saveActiveCampaign = async ({ silent = false }: { silent: boolean } = {}) => {
+  const saveActiveCampaign = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!activeLaunch) return false;
 
     setSaving("activecampaign");
@@ -399,7 +399,7 @@ export default function Sources() {
     setSaving(null);
   };
 
-  const saveUChat = async ({ silent = false }: { silent: boolean } = {}) => {
+  const saveUChat = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!activeLaunch) return false;
 
     setSaving("uchat");
@@ -498,7 +498,7 @@ export default function Sources() {
 
     const saveSucceeded =
       source === "activecampaign"
-         await saveActiveCampaign({ silent: true })
+        ? await saveActiveCampaign({ silent: true })
         : await saveUChat({ silent: true });
 
     if (!saveSucceeded) return;
@@ -522,42 +522,42 @@ export default function Sources() {
             (run) => run.source === source && new Date(run.started_at).getTime() >= requestStartedAt - 15000,
           ) || null;
 
-        if (latestRun.status === "running") {
+        if (latestRun?.status === "running") {
           toast({
-            title: source === "activecampaign"  "Importação do ActiveCampaign em andamento" : "Importação do UChat em andamento",
+            title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
             description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
           });
           return;
         }
 
-        if (latestRun.status === "completed") {
+        if (latestRun?.status === "completed") {
           toast({
-            title: source === "activecampaign"  "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
+            title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
             description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
           });
           return;
         }
 
         toast({
-          title: `Erro ao importar ${source === "activecampaign"  "ActiveCampaign" : "UChat"}`,
-          description: latestRun.last_error || error.message,
+          title: `Erro ao importar ${source === "activecampaign" ? "ActiveCampaign" : "UChat"}`,
+          description: latestRun?.last_error || error.message,
           variant: "destructive",
         });
         return;
       }
 
       const summary = data as {
-        counters: {
-          createdCount: number;
-          mergedCount: number;
-          skippedCount: number;
-          errorCount: number;
+        counters?: {
+          createdCount?: number;
+          mergedCount?: number;
+          skippedCount?: number;
+          errorCount?: number;
         };
       };
 
       toast({
-        title: source === "activecampaign"  "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
-        description: `Novos: ${summary.counters.createdCount  0} | Mesclados: ${summary.counters.mergedCount  0} | Ignorados: ${summary.counters.skippedCount  0} | Erros: ${summary.counters.errorCount  0}`,
+        title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+        description: `Novos: ${summary.counters?.createdCount ?? 0} | Mesclados: ${summary.counters?.mergedCount ?? 0} | Ignorados: ${summary.counters?.skippedCount ?? 0} | Erros: ${summary.counters?.errorCount ?? 0}`,
       });
     } catch (error) {
       const refreshedRuns = await loadSyncRuns(activeLaunch.id, true);
@@ -566,26 +566,26 @@ export default function Sources() {
           (run) => run.source === source && new Date(run.started_at).getTime() >= requestStartedAt - 15000,
         ) || null;
 
-      if (latestRun.status === "running") {
+      if (latestRun?.status === "running") {
         toast({
-          title: source === "activecampaign"  "Importação do ActiveCampaign em andamento" : "Importação do UChat em andamento",
+          title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
           description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
         });
         return;
       }
 
-      if (latestRun.status === "completed") {
+      if (latestRun?.status === "completed") {
         toast({
-          title: source === "activecampaign"  "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
+          title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
           description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
         });
         return;
       }
 
-      const message = error instanceof Error  error.message : "Falha inesperada ao iniciar a importação.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar a importacao.";
       toast({
-        title: `Erro ao importar ${source === "activecampaign"  "ActiveCampaign" : "UChat"}`,
-        description: latestRun.last_error || message,
+        title: `Erro ao importar ${source === "activecampaign" ? "ActiveCampaign" : "UChat"}`,
+        description: latestRun?.last_error || message,
         variant: "destructive",
       });
     } finally {
@@ -602,9 +602,9 @@ export default function Sources() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lançamento</CardTitle>
+            <CardTitle>Selecione um lancamento</CardTitle>
             <CardDescription>
-              Escolha um lançamento na barra lateral para configurar as credenciais das bases conectadas.
+              Escolha um lancamento na barra lateral para configurar as credenciais das bases conectadas.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -620,7 +620,7 @@ export default function Sources() {
           <div>
             <h1 className="text-2xl font-bold">Fontes</h1>
             <p className="text-sm text-muted-foreground">
-              Centralize as credenciais do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+              Centralize as credenciais do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
             </p>
           </div>
         </div>
@@ -631,9 +631,9 @@ export default function Sources() {
         <CardContent className="flex items-start gap-3 p-6">
           <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
           <div className="space-y-1">
-            <p className="font-medium">Hub de integrações do lançamento</p>
+            <p className="font-medium">Hub de integracoes do lancamento</p>
             <p className="text-sm text-muted-foreground">
-              Aqui você conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configuração pela interface.
+              Aqui voce conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configuracao pela interface.
             </p>
           </div>
         </CardContent>
@@ -641,15 +641,15 @@ export default function Sources() {
 
       <SupabaseConnectionCard
         title="Projeto Supabase do app"
-        description="Vejá qual backend Supabase esta ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
+        description="Veja qual backend Supabase esta ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
       />
 
       <SchemaSetupCard
         title="Bootstrap do schema"
-        description="Se esse projeto Supabase ainda não recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
+        description="Se esse projeto Supabase ainda nao recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
       />
 
-      {loading  (
+      {loading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
@@ -660,7 +660,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">ActiveCampaign</CardTitle>
                 <CardDescription>
-                  Base principal do lançamento. Importa contatos, listas e tags para o hub antes do tratamento automático.
+                  Base principal do lancamento. Importa contatos, listas e tags para o hub antes do tratamento automatico.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={activeCampaignConnected} />
@@ -686,7 +686,7 @@ export default function Sources() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="ac-list-id">Lista padrão</Label>
+                <Label htmlFor="ac-list-id">Lista padrao</Label>
                 <Input
                   id="ac-list-id"
                   value={acListId}
@@ -700,10 +700,10 @@ export default function Sources() {
               </div>
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Última importação</span>
+                  <span className="font-medium text-foreground">Ultima importacao</span>
                   <SyncRunBadge run={latestActiveCampaignRun} />
                 </div>
-                {latestActiveCampaignRun  (
+                {latestActiveCampaignRun ? (
                   <div className="mt-3 space-y-1">
                     <p>
                       Processados: {normalizeSyncRun(latestActiveCampaignRun).processed_count} | Novos: {normalizeSyncRun(latestActiveCampaignRun).created_count} | Mesclados:{" "}
@@ -712,13 +712,13 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestActiveCampaignRun).skipped_count} | Erros: {normalizeSyncRun(latestActiveCampaignRun).error_count}
                     </p>
-                    <p>Início: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
+                    <p>Inicio: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
                     {normalizeSyncRun(latestActiveCampaignRun).last_error && (
-                      <p className="text-destructive">Último erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
+                      <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
                     )}
                   </div>
                 ) : (
-                  <p className="mt-3">Quando você importar a base, o resumo da rodada vai aparecer aqui.</p>
+                  <p className="mt-3">Quando voce importar a base, o resumo da rodada vai aparecer aqui.</p>
                 )}
               </div>
             </CardContent>
@@ -727,7 +727,7 @@ export default function Sources() {
                 onClick={() => void triggerSync("activecampaign")}
                 disabled={saving !== null || syncingState.activecampaign || syncingState.uchat}
               >
-                {syncingState.activecampaign  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DownloadCloud className="mr-2 h-4 w-4" />}
+                {syncingState.activecampaign ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DownloadCloud className="mr-2 h-4 w-4" />}
                 Importar contatos, listas e tags
               </Button>
               <Button
@@ -791,22 +791,22 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">UChat</CardTitle>
                 <CardDescription>
-                  Informe o Workspace ID e o API Token. O restante da configuração técnica e preenchido automáticamente.
+                  Informe o Workspace ID e o API Token. O restante da configuracao tecnica e preenchido automaticamente.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={uchatConnected} />
             </CardHeader>
             <CardContent className="space-y-4">
               <UChatWorkspacesEditor
-                workspaces={uchatWorkspaces.length > 0  uchatWorkspaces : [emptyUChatWorkspace]}
+                workspaces={uchatWorkspaces.length > 0 ? uchatWorkspaces : [emptyUChatWorkspace]}
                 onChange={setUchatWorkspaces}
               />
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Última importação</span>
+                  <span className="font-medium text-foreground">Ultima importacao</span>
                   <SyncRunBadge run={latestUchatRun} />
                 </div>
-                {latestUchatRun  (
+                {latestUchatRun ? (
                   <div className="mt-3 space-y-1">
                     <p>
                       Processados: {normalizeSyncRun(latestUchatRun).processed_count} | Novos: {normalizeSyncRun(latestUchatRun).created_count} | Mesclados: {normalizeSyncRun(latestUchatRun).merged_count}
@@ -814,8 +814,8 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestUchatRun).skipped_count} | Erros: {normalizeSyncRun(latestUchatRun).error_count}
                     </p>
-                    <p>Início: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
-                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Último erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
+                    <p>Inicio: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
+                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
                   </div>
                 ) : (
                   <p className="mt-3">Use o importador para puxar os subscribers de cada workspace configurado.</p>
@@ -827,7 +827,7 @@ export default function Sources() {
                 onClick={() => void triggerSync("uchat")}
                 disabled={saving !== null || syncingState.activecampaign || syncingState.uchat}
               >
-                {syncingState.uchat  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DownloadCloud className="mr-2 h-4 w-4" />}
+                {syncingState.uchat ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DownloadCloud className="mr-2 h-4 w-4" />}
                 Importar subscribers do UChat
               </Button>
               <Button
