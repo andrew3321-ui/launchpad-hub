@@ -67,7 +67,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       .single();
 
     if (error) {
-      toast({ title: "Erro ao carregar lancamento", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao carregar lançamento", description: error.message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -112,14 +112,14 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast({ title: "Nome obrigatorio", description: "Informe o nome do lancamento para continuar.", variant: "destructive" });
+      toast({ title: "Nome obrigatório", description: "Informe o nome do lançamento para continuar.", variant: "destructive" });
       return;
     }
 
     if (!user) {
       toast({
-        title: "Sessao indisponivel",
-        description: "Sua sessao nao foi reconhecida. Atualize a pagina e entre novamente antes de criar um lancamento.",
+        title: "Sessão indisponível",
+        description: "Sua sessão não foi reconhecida. Atualize a página e entre novamente antes de criar um lançamento.",
         variant: "destructive",
       });
       return;
@@ -132,8 +132,8 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
       if (!baseSlug) {
         toast({
-          title: "Slug invalido",
-          description: "Use um nome com letras ou numeros para gerar o identificador do lancamento.",
+          title: "Slug inválido",
+          description: "Use um nome com letras ou números para gerar o identificador do lançamento.",
           variant: "destructive",
         });
         setSaving(false);
@@ -157,13 +157,13 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
             .eq("id", launchId)
             .select("id")
             .single(),
-          "O backend demorou demais para responder ao salvar o lancamento. Tente novamente.",
+          "O backend demorou demais para responder ao salvar o lançamento. Tente novamente.",
         );
 
         if (error || !data) {
           toast({
             title: "Erro ao salvar",
-            description: error?.message || "O lancamento nao retornou confirmacao do backend.",
+            description: error?.message || "O lançamento não retornou confirmação do backend.",
             variant: "destructive",
           });
           return;
@@ -186,7 +186,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
           const { error, data } = await withTimeout(
             supabase.from("launches").insert(launchData).select("id, slug").single(),
-            "O backend demorou demais para responder ao criar o lancamento. Tente novamente.",
+            "O backend demorou demais para responder ao criar o lançamento. Tente novamente.",
           );
 
           if (!error && data?.id) {
@@ -199,7 +199,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           if (!isDuplicateSlugError(error)) {
             toast({
               title: "Erro ao criar",
-              description: error?.message || "O backend nao confirmou a criacao do lancamento.",
+              description: error?.message || "O backend não confirmou a criação do lançamento.",
               variant: "destructive",
             });
             return;
@@ -209,7 +209,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
         if (!created) {
           toast({
             title: "Slug em uso",
-            description: "Nao conseguimos reservar um identificador unico para esse lancamento. Tente outro nome ou slug.",
+            description: "Não conseguimos reservar um identificador único para esse lançamento. Tente outro nome ou slug.",
             variant: "destructive",
           });
           return;
@@ -220,17 +220,17 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           setSlugManual(true);
           toast({
             title: "Slug ajustado automaticamente",
-            description: `Ja existia um lancamento com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
+            description: `Já existia um lançamento com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
           });
         }
       }
 
-      toast({ title: isEditing ? "Lancamento atualizado!" : "Lancamento criado!" });
+      toast({ title: isEditing ? "Lançamento atualizado!" : "Lançamento criado!" });
       onSaved();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o lancamento.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o lançamento.";
       console.error("launch save failed", error);
-      toast({ title: "Erro no lancamento", description: message, variant: "destructive" });
+      toast({ title: "Erro no lançamento", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -240,7 +240,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Editar lancamento" : "Novo lancamento"}</DialogTitle>
+          <DialogTitle>{isEditing ? "Editar lançamento" : "Novo lançamento"}</DialogTitle>
         </DialogHeader>
 
         {loading ? (
@@ -254,7 +254,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
               <Input
                 value={name}
                 onChange={(event) => handleNameChange(event.target.value)}
-                placeholder="Ex: Lancamento Curso X - Abril 2026"
+                placeholder="Ex: Lançamento Curso X - Abril 2026"
               />
             </div>
 
@@ -269,7 +269,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
                 placeholder="auto-gerado-do-nome"
                 className="font-mono text-sm"
               />
-              <p className="text-xs text-muted-foreground">Identificador usado nas URLs e na organizacao interna.</p>
+              <p className="text-xs text-muted-foreground">Identificador usado nas URLs e na organização interna.</p>
             </div>
 
             <div className="space-y-2">

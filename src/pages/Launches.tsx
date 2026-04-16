@@ -37,7 +37,7 @@ export default function Launches() {
 
     if (error) {
       toast({
-        title: "Erro ao carregar lancamentos",
+        title: "Erro ao carregar lançamentos",
         description: error.message,
         variant: "destructive",
       });
