@@ -1,4 +1,6 @@
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+// deno-lint-ignore-file no-explicit-any
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+type AnySupabaseClient = ReturnType<typeof createClient>;
 
 export const validSources = ["activecampaign", "manychat", "uchat", "manual"] as const;
 
