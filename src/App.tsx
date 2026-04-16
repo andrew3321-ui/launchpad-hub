@@ -4,12 +4,14 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ProjectProvider } from "@/contexts/ProjectContext";
 import { LaunchProvider } from "@/contexts/LaunchContext";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppLayout } from "@/components/AppLayout";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Index from "./pages/Index";
+import Projects from "./pages/Projects";
 import Launches from "./pages/Launches";
 import Sources from "./pages/Sources";
 import Rules from "./pages/Rules";
@@ -33,13 +35,16 @@ const App = () => (
             <Route
               element={
                 <AuthGuard>
-                  <LaunchProvider>
-                    <AppLayout />
-                  </LaunchProvider>
+                  <ProjectProvider>
+                    <LaunchProvider>
+                      <AppLayout />
+                    </LaunchProvider>
+                  </ProjectProvider>
                 </AuthGuard>
               }
             >
               <Route path="/" element={<Index />} />
+              <Route path="/projects" element={<Projects />} />
               <Route path="/launches" element={<Launches />} />
               <Route path="/sources" element={<Sources />} />
               <Route path="/rules" element={<Rules />} />
