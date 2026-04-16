@@ -528,6 +528,7 @@ export type Database = {
           created_at: string
           current_count: number
           id: string
+          launch_id: string | null
           max_subscribers: number
           project_id: string | null
           workspace_id: string | null
@@ -539,6 +540,7 @@ export type Database = {
           created_at?: string
           current_count?: number
           id?: string
+          launch_id?: string | null
           max_subscribers?: number
           project_id?: string | null
           workspace_id?: string | null
@@ -550,12 +552,20 @@ export type Database = {
           created_at?: string
           current_count?: number
           id?: string
+          launch_id?: string | null
           max_subscribers?: number
           project_id?: string | null
           workspace_id?: string | null
           workspace_name?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "uchat_workspaces_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "uchat_workspaces_project_id_fkey"
             columns: ["project_id"]
