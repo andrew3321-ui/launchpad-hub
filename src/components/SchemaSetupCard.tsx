@@ -67,9 +67,9 @@ export function SchemaSetupCard({
   const copyToClipboard = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      toast({ title: `${label} copiado`, description: "Voce ja pode colar isso no Lovable ou guardar para o setup." });
+      toast({ title: `${label} copiado`, description: "Você já pode colar isso no Lovable ou guardar para o setup." });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel copiar para a area de transferencia.";
+      const message = error instanceof Error ? error.message : "Não foi possível copiar para a área de transferência.";
       toast({ title: "Falha ao copiar", description: message, variant: "destructive" });
     }
   };
@@ -101,7 +101,7 @@ export function SchemaSetupCard({
             <span className="font-medium text-white">Projeto validado:</span> {connection.projectName} ({connection.projectRef})
           </p>
           <p className="mt-1">
-            O app consegue trocar de projeto em runtime, mas criacao de tabela/coluna nao pode acontecer pelo front com chave publica.
+            O app consegue trocar de projeto em runtime, mas criação de tabela/coluna não pode acontecer pelo front com chave pública.
           </p>
         </div>
 
@@ -134,21 +134,21 @@ export function SchemaSetupCard({
             <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>Schema pronto</AlertTitle>
             <AlertDescription>
-              Esse projeto ja tem a estrutura minima esperada para autenticacao, fontes, regras, leads e logs.
+              Esse projeto já tem a estrutura mínima esperada para autenticação, fontes, regras, leads e logs.
             </AlertDescription>
           </Alert>
         ) : (
           <>
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Schema incompleto no backend atual</AlertTitle>
+               <AlertTitle>Schema incompleto no backend atual</AlertTitle>
               <AlertDescription>
                 O app detectou itens ausentes no Supabase conectado. Isso costuma acontecer quando o projeto foi aberto pela primeira vez no Lovable sem rodar as migrations.
               </AlertDescription>
             </Alert>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium">Itens ausentes ou nao validados</p>
+              <p className="text-sm font-medium">Itens ausentes ou não validados</p>
               <div className="flex flex-wrap gap-2">
                 {(status?.issues ?? []).map((issue) => (
                   <Badge key={`${issue.table}-${issue.column ?? "table"}`} variant="outline">
