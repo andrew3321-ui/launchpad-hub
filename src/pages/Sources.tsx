@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { Json } from "@/integrations/supabase/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
