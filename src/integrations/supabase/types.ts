@@ -185,10 +185,53 @@ export type Database = {
           },
         ]
       }
+      launch_uchat_workspaces: {
+        Row: {
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string
+          max_subscribers: number
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id: string
+          max_subscribers?: number
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id?: string
+          max_subscribers?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_uchat_workspaces_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "launch_uchat_workspaces_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "uchat_workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launches: {
         Row: {
           ac_api_key: string | null
           ac_api_url: string | null
+          ac_default_automation_id: string | null
           ac_default_list_id: string | null
           ac_named_tags: Json
           created_at: string
@@ -199,6 +242,7 @@ export type Database = {
           manychat_api_key: string | null
           manychat_api_url: string | null
           name: string
+          project_id: string | null
           slug: string | null
           status: string
           whatsapp_group_link: string | null
@@ -206,6 +250,7 @@ export type Database = {
         Insert: {
           ac_api_key?: string | null
           ac_api_url?: string | null
+          ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
           created_at?: string
@@ -216,6 +261,7 @@ export type Database = {
           manychat_api_key?: string | null
           manychat_api_url?: string | null
           name: string
+          project_id?: string | null
           slug?: string | null
           status?: string
           whatsapp_group_link?: string | null
@@ -223,6 +269,7 @@ export type Database = {
         Update: {
           ac_api_key?: string | null
           ac_api_url?: string | null
+          ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
           created_at?: string
@@ -233,11 +280,20 @@ export type Database = {
           manychat_api_key?: string | null
           manychat_api_url?: string | null
           name?: string
+          project_id?: string | null
           slug?: string | null
           status?: string
           whatsapp_group_link?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "launches_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       lead_contact_identities: {
         Row: {
@@ -354,7 +410,6 @@ export type Database = {
       }
       platform_sync_runs: {
         Row: {
-          created_at: string
           created_count: number
           error_count: number
           finished_at: string | null
@@ -368,10 +423,8 @@ export type Database = {
           source: string
           started_at: string
           status: string
-          updated_at: string
         }
         Insert: {
-          created_at?: string
           created_count?: number
           error_count?: number
           finished_at?: string | null
@@ -385,10 +438,8 @@ export type Database = {
           source: string
           started_at?: string
           status?: string
-          updated_at?: string
         }
         Update: {
-          created_at?: string
           created_count?: number
           error_count?: number
           finished_at?: string | null
@@ -402,7 +453,6 @@ export type Database = {
           source?: string
           started_at?: string
           status?: string
-          updated_at?: string
         }
         Relationships: [
           {
@@ -435,38 +485,77 @@ export type Database = {
         }
         Relationships: []
       }
+      projects: {
+        Row: {
+          ac_api_key: string | null
+          ac_api_url: string | null
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
+        }
+        Insert: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
+        }
+        Update: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          slug?: string | null
+          status?: string
+          whatsapp_group_link?: string | null
+        }
+        Relationships: []
+      }
       uchat_workspaces: {
         Row: {
           api_token: string
-          bot_id: string
+          bot_id: string | null
           created_at: string
           current_count: number
           id: string
-          launch_id: string
+          launch_id: string | null
           max_subscribers: number
-          workspace_id: string
+          project_id: string | null
+          workspace_id: string | null
           workspace_name: string
         }
         Insert: {
           api_token: string
-          bot_id: string
+          bot_id?: string | null
           created_at?: string
           current_count?: number
           id?: string
-          launch_id: string
+          launch_id?: string | null
           max_subscribers?: number
-          workspace_id: string
+          project_id?: string | null
+          workspace_id?: string | null
           workspace_name: string
         }
         Update: {
           api_token?: string
-          bot_id?: string
+          bot_id?: string | null
           created_at?: string
           current_count?: number
           id?: string
-          launch_id?: string
+          launch_id?: string | null
           max_subscribers?: number
-          workspace_id?: string
+          project_id?: string | null
+          workspace_id?: string | null
           workspace_name?: string
         }
         Relationships: [
@@ -475,6 +564,13 @@ export type Database = {
             columns: ["launch_id"]
             isOneToOne: false
             referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "uchat_workspaces_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
