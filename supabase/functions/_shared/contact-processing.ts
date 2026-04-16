@@ -205,7 +205,7 @@ function uniqueValues(values: string[]) {
 }
 
 export async function processIncomingContactEvent(
-  supabase: SupabaseClient,
+  supabase: AnySupabaseClient,
   body: IncomingEventBody,
 ): Promise<ProcessIncomingContactResult> {
   if (!body.source || !validSources.includes(body.source)) {
