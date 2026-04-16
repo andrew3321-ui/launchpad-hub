@@ -181,10 +181,66 @@
     position: relative;
     z-index: 1;
   }
+
+  .brand-astronaut-card::before {
+    content: "";
+    position: absolute;
+    inset: 8% 10% auto auto;
+    width: 46%;
+    height: 46%;
+    pointer-events: none;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(94, 237, 255, 0.34), transparent 68%);
+    filter: blur(14px);
+    opacity: 0.85;
+    animation: astronaut-glow 7s ease-in-out infinite;
+  }
+
+  .brand-astronaut-image {
+    transform-origin: 55% 92%;
+    animation: astronaut-float 7.5s ease-in-out infinite;
+    will-change: transform, filter;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+@keyframes astronaut-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-1.1deg) scale(1);
+    filter: drop-shadow(0 18px 36px rgba(7, 20, 40, 0.3));
+  }
+
+  25% {
+    transform: translate3d(-6px, -10px, 0) rotate(0.6deg) scale(1.015);
+    filter: drop-shadow(0 24px 42px rgba(20, 206, 255, 0.18));
+  }
+
+  50% {
+    transform: translate3d(6px, -18px, 0) rotate(1.2deg) scale(1.03);
+    filter: drop-shadow(0 30px 52px rgba(20, 206, 255, 0.28));
+  }
+
+  75% {
+    transform: translate3d(-4px, -9px, 0) rotate(0deg) scale(1.018);
+    filter: drop-shadow(0 24px 42px rgba(20, 206, 255, 0.2));
+  }
+}
+
+@keyframes astronaut-glow {
+  0%,
+  100% {
+    transform: scale(0.98);
+    opacity: 0.65;
+  }
+
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
   }
 }

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowUpRight, DatabaseZap, Orbit, RadioTower, Sparkles, Users } from "lucide-react";
+import { ArrowUpRight, Orbit, RadioTower, Sparkles, Users } from "lucide-react";
 import { SchemaSetupCard } from "@/components/SchemaSetupCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +25,7 @@ const operationalCards = [
 ];
 
 export default function Dashboard() {
-  const { profile, connection } = useAuth();
+  const { connection } = useAuth();
   const { launches, activeLaunch } = useLaunch();
 
   return (
@@ -48,8 +48,8 @@ export default function Dashboard() {
                 Quem tem um <span className="text-[#a9f0ff]">Megafone</span> nao precisa gritar.
               </h2>
               <p className="max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-                Centralize suas bases, deixe o tratamento de contatos no automatico e transforme seu operacao digital
-                em um fluxo mais previsivel, escalavel e visualmente alinhado com a marca Megafone.
+                Centralize suas bases, deixe o tratamento de contatos no automatico e transforme sua operacao digital
+                em um fluxo mais previsivel, escalavel e alinhado com a marca Megafone.
               </p>
             </div>
 
@@ -79,14 +79,11 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="relative min-h-[360px] rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(57,213,255,0.28),transparent_45%),linear-gradient(180deg,rgba(9,24,46,0.9),rgba(5,14,29,0.96))] p-5 shadow-[0_28px_80px_rgba(3,9,21,0.46)]">
-            <div className="brand-chip absolute left-5 top-5 border-white/10 bg-[#09172d]/80 text-[#aef4ff]">
-              {profile?.full_name || "Time Megafone"}
-            </div>
+          <div className="brand-astronaut-card relative min-h-[360px] rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(57,213,255,0.28),transparent_45%),linear-gradient(180deg,rgba(9,24,46,0.9),rgba(5,14,29,0.96))] p-5 shadow-[0_28px_80px_rgba(3,9,21,0.46)]">
             <img
               src="/megafone-astronaut.webp"
               alt="Astronauta Megafone"
-              className="absolute bottom-0 right-0 h-full w-full object-contain object-bottom"
+              className="brand-astronaut-image absolute bottom-0 right-0 h-full w-full object-contain object-bottom"
             />
             <div className="absolute inset-x-0 bottom-0 rounded-b-[2rem] bg-gradient-to-t from-[#051020] via-[#051020]/85 to-transparent p-5 pt-20">
               <p className="brand-kicker">Operacao em orbita</p>
@@ -108,7 +105,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="text-white">Panorama rapido</CardTitle>
             <CardDescription className="text-slate-300">
-              Um resumo do ambiente atual enquanto voce constrói a operacao.
+              Um resumo do ambiente atual enquanto voce constroi a operacao.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -119,13 +116,6 @@ export default function Dashboard() {
             <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4">
               <p className="text-sm text-slate-400">Backend ativo</p>
               <p className="mt-3 break-all text-sm font-semibold text-[#aef4ff]">{connection.projectRef}</p>
-            </div>
-            <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4 sm:col-span-2">
-              <p className="text-sm text-slate-400">Linguagem visual</p>
-              <p className="mt-3 text-sm leading-7 text-slate-200">
-                Fundo azul profundo, grid luminoso, glow ciano e composições com ar espacial para aproximar o painel do
-                clima do site oficial da Megafone.
-              </p>
             </div>
           </CardContent>
         </Card>
