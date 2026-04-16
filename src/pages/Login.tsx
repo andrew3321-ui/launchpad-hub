@@ -3,8 +3,6 @@ import { Link, Navigate } from "react-router-dom";
 import { Loader2, LockKeyhole, Sparkles } from "lucide-react";
 import { AuthShowcase } from "@/components/AuthShowcase";
 import { MegafoneLogo } from "@/components/MegafoneLogo";
-import { SchemaSetupCard } from "@/components/SchemaSetupCard";
-import { SupabaseConnectionCard } from "@/components/SupabaseConnectionCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,7 +50,7 @@ export default function Login() {
       const { error } = await withTimeout(
         supabase.auth.signInWithPassword({ email, password }),
         8000,
-        "O login demorou demais para responder. Atualize a página e tente novamente.",
+        "O login demorou demais para responder. Atualize a pagina e tente novamente.",
       );
 
       if (error) {
@@ -136,16 +134,6 @@ export default function Login() {
               </CardFooter>
             </form>
           </Card>
-
-          <SupabaseConnectionCard
-            title="Conexão Supabase"
-            description="Troque rapidamente o backend ativo durante desenvolvimento e homologação, sem rebuild."
-          />
-
-          <SchemaSetupCard
-            title="Validação do schema"
-            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
-          />
         </div>
       </div>
     </div>

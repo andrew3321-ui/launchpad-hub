@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Orbit, RadioTower, Sparkles, Users } from "lucide-react";
+import { ArrowUpRight, Orbit, RadioTower, Settings2, Sparkles, Users } from "lucide-react";
 import { SchemaSetupCard } from "@/components/SchemaSetupCard";
+import { SupabaseConnectionCard } from "@/components/SupabaseConnectionCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
@@ -100,7 +101,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid gap-6 xl:grid-cols-2">
         <Card className="brand-card border-white/10 bg-[linear-gradient(180deg,rgba(8,23,46,0.92),rgba(4,12,24,0.84))]">
           <CardHeader>
             <CardTitle className="text-white">Panorama rápido</CardTitle>
@@ -119,12 +120,32 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-
-        <SchemaSetupCard
-          title="Schema do backend"
-          description="Continue usando esse card para validar rapidamente se o banco conectado já recebeu tudo o que o app precisa."
-        />
       </div>
+
+      <section className="space-y-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-[#8feeff]">
+            <Settings2 className="h-5 w-5" />
+          </span>
+          <div className="space-y-1">
+            <h2 className="text-2xl font-semibold text-white">Configurações do ambiente</h2>
+            <p className="max-w-2xl text-sm leading-7 text-slate-300">
+              Centralize aqui a conexão do Supabase e a validação do schema para acompanhar o estado técnico do app sem sair do dashboard.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <SupabaseConnectionCard
+            title="Conexão Supabase"
+            description="Troque rapidamente o backend ativo durante desenvolvimento e homologação, sem rebuild."
+          />
+          <SchemaSetupCard
+            title="Validação do schema"
+            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
+          />
+        </div>
+      </section>
     </div>
   );
 }

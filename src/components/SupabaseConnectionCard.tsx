@@ -72,7 +72,7 @@ export function SupabaseConnectionCard({
         description:
           discoveredProjects.length > 0
             ? `Encontramos ${discoveredProjects.length} projeto(s) nesse token.`
-            : "Esse token nao retornou nenhum projeto acessivel.",
+            : "Esse token não retornou nenhum projeto acessível.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao consultar os projetos do Supabase.";
@@ -109,7 +109,7 @@ export function SupabaseConnectionCard({
 
       toast({
         title: "Projeto conectado",
-        description: `O app agora esta apontando para ${runtimeConnection.projectName}.`,
+        description: `O app agora está apontando para ${runtimeConnection.projectName}.`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Não foi possível conectar o projeto selecionado.";

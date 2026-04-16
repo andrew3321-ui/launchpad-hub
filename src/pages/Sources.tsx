@@ -12,8 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NamedTagsEditor } from "@/components/launches/NamedTagsEditor";
-import { SchemaSetupCard } from "@/components/SchemaSetupCard";
-import { SupabaseConnectionCard } from "@/components/SupabaseConnectionCard";
 import { UChatWorkspacesEditor } from "@/components/launches/UChatWorkspacesEditor";
 import { useLaunch } from "@/contexts/LaunchContext";
 import { useToast } from "@/hooks/use-toast";
@@ -524,7 +522,7 @@ export default function Sources() {
 
         if (latestRun?.status === "running") {
           toast({
-            title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
+            title: source === "activecampaign" ? "Importação do ActiveCampaign em andamento" : "Importação do UChat em andamento",
             description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
           });
           return;
@@ -532,7 +530,7 @@ export default function Sources() {
 
         if (latestRun?.status === "completed") {
           toast({
-            title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+            title: source === "activecampaign" ? "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
             description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
           });
           return;
@@ -556,7 +554,7 @@ export default function Sources() {
       };
 
       toast({
-        title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+        title: source === "activecampaign" ? "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
         description: `Novos: ${summary.counters?.createdCount ?? 0} | Mesclados: ${summary.counters?.mergedCount ?? 0} | Ignorados: ${summary.counters?.skippedCount ?? 0} | Erros: ${summary.counters?.errorCount ?? 0}`,
       });
     } catch (error) {
@@ -568,7 +566,7 @@ export default function Sources() {
 
       if (latestRun?.status === "running") {
         toast({
-          title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
+          title: source === "activecampaign" ? "Importação do ActiveCampaign em andamento" : "Importação do UChat em andamento",
           description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
         });
         return;
@@ -576,7 +574,7 @@ export default function Sources() {
 
       if (latestRun?.status === "completed") {
         toast({
-          title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+          title: source === "activecampaign" ? "Importação do ActiveCampaign concluída" : "Importação do UChat concluída",
           description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
         });
         return;
@@ -639,16 +637,6 @@ export default function Sources() {
         </CardContent>
       </Card>
 
-      <SupabaseConnectionCard
-        title="Projeto Supabase do app"
-        description="Veja qual backend Supabase está ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
-      />
-
-      <SchemaSetupCard
-        title="Bootstrap do schema"
-        description="Se esse projeto Supabase ainda não recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
-      />
-
       {loading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -700,7 +688,7 @@ export default function Sources() {
               </div>
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                   <span className="font-medium text-foreground">Última importação</span>
+                  <span className="font-medium text-foreground">Última importação</span>
                   <SyncRunBadge run={latestActiveCampaignRun} />
                 </div>
                 {latestActiveCampaignRun ? (
@@ -814,8 +802,8 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestUchatRun).skipped_count} | Erros: {normalizeSyncRun(latestUchatRun).error_count}
                     </p>
-                     <p>Início: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
-                     {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Último erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
+                    <p>Início: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
+                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Último erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
                   </div>
                 ) : (
                   <p className="mt-3">Use o importador para puxar os subscribers de cada workspace configurado.</p>

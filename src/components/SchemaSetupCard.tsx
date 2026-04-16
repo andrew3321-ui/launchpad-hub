@@ -26,7 +26,7 @@ function formatIssueLabel(issue: SchemaIssue) {
 
 export function SchemaSetupCard({
   title = "Schema do backend",
-  description = "Valide se o projeto Supabase atual ja tem todas as tabelas e colunas esperadas pelo app.",
+  description = "Valide se o projeto Supabase atual já tem todas as tabelas e colunas esperadas pelo app.",
 }: Props) {
   const { connection } = useAuth();
   const { toast } = useToast();
@@ -101,7 +101,7 @@ export function SchemaSetupCard({
             <span className="font-medium text-white">Projeto validado:</span> {connection.projectName} ({connection.projectRef})
           </p>
           <p className="mt-1">
-            O app consegue trocar de projeto em runtime, mas criação de tabela/coluna não pode acontecer pelo front com chave pública.
+            O app consegue trocar de projeto em runtime, mas criação de tabela ou coluna não pode acontecer pelo front com chave pública.
           </p>
         </div>
 
@@ -127,7 +127,7 @@ export function SchemaSetupCard({
         {checking ? (
           <div className="flex items-center gap-2 text-sm text-slate-400">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Validando tabelas e colunas obrigatorias...
+            Validando tabelas e colunas obrigatórias...
           </div>
         ) : status?.ready ? (
           <Alert>
@@ -141,7 +141,7 @@ export function SchemaSetupCard({
           <>
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-               <AlertTitle>Schema incompleto no backend atual</AlertTitle>
+              <AlertTitle>Schema incompleto no backend atual</AlertTitle>
               <AlertDescription>
                 O app detectou itens ausentes no Supabase conectado. Isso costuma acontecer quando o projeto foi aberto pela primeira vez no Lovable sem rodar as migrations.
               </AlertDescription>
