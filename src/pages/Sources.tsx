@@ -582,7 +582,7 @@ export default function Sources() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar a importacao.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar a importação.";
       toast({
         title: `Erro ao importar ${source === "activecampaign" ? "ActiveCampaign" : "UChat"}`,
         description: latestRun?.last_error || message,
@@ -602,9 +602,9 @@ export default function Sources() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lançamento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para configurar as credenciais das bases conectadas.
+              Escolha um lançamento na barra lateral para configurar as credenciais das bases conectadas.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -620,7 +620,7 @@ export default function Sources() {
           <div>
             <h1 className="text-2xl font-bold">Fontes</h1>
             <p className="text-sm text-muted-foreground">
-              Centralize as credenciais do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+              Centralize as credenciais do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
             </p>
           </div>
         </div>
@@ -631,9 +631,9 @@ export default function Sources() {
         <CardContent className="flex items-start gap-3 p-6">
           <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
           <div className="space-y-1">
-            <p className="font-medium">Hub de integracoes do lancamento</p>
+            <p className="font-medium">Hub de integrações do lançamento</p>
             <p className="text-sm text-muted-foreground">
-              Aqui voce conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configuracao pela interface.
+              Aqui você conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configuração pela interface.
             </p>
           </div>
         </CardContent>
@@ -641,12 +641,12 @@ export default function Sources() {
 
       <SupabaseConnectionCard
         title="Projeto Supabase do app"
-        description="Veja qual backend Supabase esta ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
+        description="Veja qual backend Supabase está ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
       />
 
       <SchemaSetupCard
         title="Bootstrap do schema"
-        description="Se esse projeto Supabase ainda nao recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
+        description="Se esse projeto Supabase ainda não recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
       />
 
       {loading ? (
@@ -660,7 +660,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">ActiveCampaign</CardTitle>
                 <CardDescription>
-                  Base principal do lancamento. Importa contatos, listas e tags para o hub antes do tratamento automatico.
+                  Base principal do lançamento. Importa contatos, listas e tags para o hub antes do tratamento automático.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={activeCampaignConnected} />
@@ -686,7 +686,7 @@ export default function Sources() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="ac-list-id">Lista padrao</Label>
+                <Label htmlFor="ac-list-id">Lista padrão</Label>
                 <Input
                   id="ac-list-id"
                   value={acListId}
@@ -700,7 +700,7 @@ export default function Sources() {
               </div>
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Ultima importacao</span>
+                   <span className="font-medium text-foreground">Última importação</span>
                   <SyncRunBadge run={latestActiveCampaignRun} />
                 </div>
                 {latestActiveCampaignRun ? (
@@ -712,13 +712,13 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestActiveCampaignRun).skipped_count} | Erros: {normalizeSyncRun(latestActiveCampaignRun).error_count}
                     </p>
-                    <p>Inicio: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
+                    <p>Início: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
                     {normalizeSyncRun(latestActiveCampaignRun).last_error && (
-                      <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
+                      <p className="text-destructive">Último erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
                     )}
                   </div>
                 ) : (
-                  <p className="mt-3">Quando voce importar a base, o resumo da rodada vai aparecer aqui.</p>
+                  <p className="mt-3">Quando você importar a base, o resumo da rodada vai aparecer aqui.</p>
                 )}
               </div>
             </CardContent>
@@ -791,7 +791,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">UChat</CardTitle>
                 <CardDescription>
-                  Informe o Workspace ID e o API Token. O restante da configuracao tecnica e preenchido automaticamente.
+                  Informe o Workspace ID e o API Token. O restante da configuração técnica é preenchido automaticamente.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={uchatConnected} />
@@ -803,7 +803,7 @@ export default function Sources() {
               />
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Ultima importacao</span>
+                  <span className="font-medium text-foreground">Última importação</span>
                   <SyncRunBadge run={latestUchatRun} />
                 </div>
                 {latestUchatRun ? (
@@ -814,8 +814,8 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestUchatRun).skipped_count} | Erros: {normalizeSyncRun(latestUchatRun).error_count}
                     </p>
-                    <p>Inicio: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
-                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
+                     <p>Início: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
+                     {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Último erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
                   </div>
                 ) : (
                   <p className="mt-3">Use o importador para puxar os subscribers de cada workspace configurado.</p>
