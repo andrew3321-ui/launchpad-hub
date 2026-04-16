@@ -70,9 +70,9 @@ export default function Leads() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lançamento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para visualizar a base tratada e deduplicada.
+              Escolha um lançamento na barra lateral para visualizar a base tratada e deduplicada.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -87,7 +87,7 @@ export default function Leads() {
         <div>
           <h1 className="text-2xl font-bold">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            Base canonica do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revisao, automacao e futuras sincronizacoes.
+            Base canônica do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revisão, automação e futuras sincronizações.
           </p>
         </div>
       </div>
@@ -96,7 +96,7 @@ export default function Leads() {
         <CardHeader>
           <CardTitle className="text-xl">Contatos tratados</CardTitle>
           <CardDescription>
-            Cada linha representa um contato final depois do processo de normalizacao e merge.
+            Cada linha representa um contato final depois do processo de normalização e merge.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,7 +106,7 @@ export default function Leads() {
             </div>
           ) : rows.length === 0 ? (
             <div className="py-10 text-sm text-muted-foreground">
-              Nenhum lead processado ainda. Assim que o backend ingerir contatos, a base tratada aparecera aqui.
+              Nenhum lead processado ainda. Assim que o backend ingerir contatos, a base tratada aparecerá aqui.
             </div>
           ) : (
             <div className="rounded-lg border">
@@ -116,7 +116,7 @@ export default function Leads() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Telefone</TableHead>
-                    <TableHead>Ultima fonte</TableHead>
+                    <TableHead>Última fonte</TableHead>
                     <TableHead>Mesclas</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Atualizado</TableHead>
