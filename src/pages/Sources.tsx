@@ -124,14 +124,14 @@ function loadSourcesDraft(launchId: string) {
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
     <Badge variant={connected ? "default" : "secondary"}>
-      {connected ? "Configurado" : "Nao configurado"}
+      {connected ? "Configurado" : "Não configurado"}
     </Badge>
   );
 }
 
 function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
   if (!run) {
-    return <Badge variant="outline">Nenhuma importacao ainda</Badge>;
+    return <Badge variant="outline">Nenhuma importação ainda</Badge>;
   }
 
   const normalizedRun = normalizeSyncRun(run);
@@ -144,7 +144,7 @@ function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
     return <Badge variant="secondary">Em andamento</Badge>;
   }
 
-  return <Badge variant="default">Concluida</Badge>;
+  return <Badge variant="default">Concluída</Badge>;
 }
 
 export default function Sources() {
@@ -182,7 +182,7 @@ export default function Sources() {
 
     if (error) {
       if (!silent) {
-        toast({ title: "Erro ao carregar sincronizacoes", description: error.message, variant: "destructive" });
+        toast({ title: "Erro ao carregar sincronizações", description: error.message, variant: "destructive" });
       }
       setSyncRuns([]);
       return [] as SyncRunRow[];
