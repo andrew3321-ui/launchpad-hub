@@ -157,7 +157,7 @@ export default function Sources() {
         ac_api_url: acApiUrl || null,
         ac_api_key: acApiKey || null,
         ac_default_list_id: acListId || null,
-        ac_named_tags: acNamedTags,
+        ac_named_tags: acNamedTags as unknown as Json,
       })
       .eq("id", activeLaunch.id)
       .select("id, name, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
