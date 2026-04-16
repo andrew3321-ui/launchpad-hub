@@ -229,6 +229,8 @@ export type Database = {
       }
       launches: {
         Row: {
+          ac_api_key: string | null
+          ac_api_url: string | null
           ac_default_automation_id: string | null
           ac_default_list_id: string | null
           ac_named_tags: Json
@@ -243,8 +245,11 @@ export type Database = {
           project_id: string | null
           slug: string | null
           status: string
+          whatsapp_group_link: string | null
         }
         Insert: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
           ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
@@ -259,8 +264,11 @@ export type Database = {
           project_id?: string | null
           slug?: string | null
           status?: string
+          whatsapp_group_link?: string | null
         }
         Update: {
+          ac_api_key?: string | null
+          ac_api_url?: string | null
           ac_default_automation_id?: string | null
           ac_default_list_id?: string | null
           ac_named_tags?: Json
@@ -275,6 +283,7 @@ export type Database = {
           project_id?: string | null
           slug?: string | null
           status?: string
+          whatsapp_group_link?: string | null
         }
         Relationships: [
           {
