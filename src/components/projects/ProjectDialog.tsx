@@ -11,20 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
-import { NamedTagsEditor } from "@/components/launches/NamedTagsEditor";
 import { UChatWorkspacesEditor } from "@/components/launches/UChatWorkspacesEditor";
-
-interface NamedTag {
-  alias: string;
-  tag: string;
-}
 
 interface UChatWorkspace {
   id?: string;
   workspace_name: string;
   api_token: string;
-  max_subscribers: number;
-  current_count: number;
 }
 
 interface Props {
@@ -46,8 +38,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
 
   const [acApiUrl, setAcApiUrl] = useState("");
   const [acApiKey, setAcApiKey] = useState("");
-  const [acListId, setAcListId] = useState("");
-  const [acNamedTags, setAcNamedTags] = useState<NamedTag[]>([]);
 
   const [uchatWorkspaces, setUchatWorkspaces] = useState<UChatWorkspace[]>([]);
 
@@ -68,8 +58,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
     setSlugManual(false);
     setAcApiUrl("");
     setAcApiKey("");
-    setAcListId("");
-    setAcNamedTags([]);
     setUchatWorkspaces([]);
   };
 
@@ -82,8 +70,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
       setSlugManual(true);
       setAcApiUrl(data.ac_api_url || "");
       setAcApiKey(data.ac_api_key || "");
-      setAcListId(data.ac_default_list_id || "");
-      setAcNamedTags(Array.isArray(data.ac_named_tags) ? (data.ac_named_tags as unknown as NamedTag[]) : []);
     }
 
     const { data: ws } = await supabase
@@ -96,8 +82,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
         id: w.id,
         workspace_name: w.workspace_name,
         api_token: w.api_token,
-        max_subscribers: w.max_subscribers,
-        current_count: w.current_count,
       })));
     }
     setLoading(false);
@@ -117,8 +101,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
       slug: slug.trim() || slugify(name),
       ac_api_url: acApiUrl || null,
       ac_api_key: acApiKey || null,
-      ac_default_list_id: acListId || null,
-      ac_named_tags: acNamedTags as unknown as import("@/integrations/supabase/types").Json,
     };
 
     let savedId = projectId;
@@ -152,8 +134,6 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
           project_id: savedId!,
           workspace_name: w.workspace_name,
           api_token: w.api_token,
-          max_subscribers: w.max_subscribers,
-          current_count: w.current_count,
         }));
         const { error } = await supabase.from("uchat_workspaces").insert(rows);
         if (error) {
@@ -204,6 +184,7 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
             </TabsContent>
 
             <TabsContent value="activecampaign" className="space-y-4 mt-4">
+              <p className="text-sm text-muted-foreground">Credenciais de acesso à conta ActiveCampaign deste projeto.</p>
               <div className="space-y-2">
                 <Label>API URL</Label>
                 <Input value={acApiUrl} onChange={(e) => setAcApiUrl(e.target.value)} placeholder="https://conta.api-us1.com" />
@@ -212,22 +193,11 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
                 <Label>API Key</Label>
                 <Input type="password" value={acApiKey} onChange={(e) => setAcApiKey(e.target.value)} placeholder="••••••••" />
               </div>
-              <div className="space-y-2">
-                <Label>ID da Lista padrão</Label>
-                <Input value={acListId} onChange={(e) => setAcListId(e.target.value)} placeholder="Ex: 1" />
-              </div>
-              <div className="space-y-2">
-                <Label>Tags nomeadas</Label>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Defina apelidos internos para tags do ActiveCampaign. Permite reusar regras entre lançamentos.
-                </p>
-                <NamedTagsEditor tags={acNamedTags} onChange={setAcNamedTags} />
-              </div>
             </TabsContent>
 
             <TabsContent value="uchat" className="space-y-4 mt-4">
               <p className="text-sm text-muted-foreground">
-                Cadastre múltiplos workspaces do UChat para distribuir leads e evitar rate limit.
+                Cadastre os workspaces UChat que este projeto tem acesso. A configuração de uso (limites, distribuição) é feita em cada lançamento.
               </p>
               <UChatWorkspacesEditor workspaces={uchatWorkspaces} onChange={setUchatWorkspaces} />
             </TabsContent>
