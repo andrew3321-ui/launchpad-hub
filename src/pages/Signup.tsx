@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { Loader2, UserPlus } from "lucide-react";
+import { AuthShowcase } from "@/components/AuthShowcase";
+import { MegafoneLogo } from "@/components/MegafoneLogo";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Rocket } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Signup() {
   const { session, loading } = useAuth();
@@ -27,9 +29,10 @@ export default function Signup() {
 
   if (session) return <Navigate to="/" replace />;
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSignup = async (event: React.FormEvent) => {
+    event.preventDefault();
     setSubmitting(true);
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -38,51 +41,100 @@ export default function Signup() {
         emailRedirectTo: window.location.origin,
       },
     });
+
     if (error) {
       toast({ title: "Erro ao criar conta", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Conta criada!", description: "Você já está logado." });
+      toast({ title: "Conta criada!", description: "Voce ja esta conectado ao painel." });
     }
+
     setSubmitting(false);
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Rocket className="h-6 w-6" />
-          </div>
-          <CardTitle className="text-2xl">Criar conta</CardTitle>
-          <CardDescription>Cadastre-se na equipe Launch Hub</CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSignup}>
-          <CardContent className="space-y-4">
+    <div className="brand-page min-h-screen px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <AuthShowcase
+          eyebrow="Equipe Megafone"
+          title="Crie sua conta e entre na cabine de comando."
+          description="Convide seu time, acompanhe a operacao dos lancamentos e mantenha o mesmo clima premium da identidade Megafone desde o primeiro acesso."
+        />
+
+        <Card className="brand-card brand-panel border-white/10 bg-[linear-gradient(180deg,rgba(8,24,47,0.92),rgba(6,17,34,0.9))]">
+          <CardHeader className="space-y-5">
+            <MegafoneLogo />
             <div className="space-y-2">
-              <Label htmlFor="name">Nome completo</Label>
-              <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="Seu nome" />
+              <CardTitle className="text-3xl font-semibold text-white">Criar conta</CardTitle>
+              <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
+                Prepare seu acesso ao cockpit de integracoes, deduplicacao e acompanhamento de resultados.
+              </CardDescription>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="seu@email.com" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} placeholder="Mínimo 6 caracteres" />
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Criar conta
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              Já tem conta?{" "}
-              <Link to="/login" className="text-primary hover:underline font-medium">Entrar</Link>
-            </p>
-          </CardFooter>
-        </form>
-      </Card>
+          </CardHeader>
+
+          <form onSubmit={handleSignup}>
+            <CardContent className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-slate-200">
+                  Nome completo
+                </Label>
+                <Input
+                  id="name"
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  required
+                  placeholder="Seu nome"
+                  className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-slate-200">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                  placeholder="voce@megafone.digital"
+                  className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-slate-200">
+                  Senha
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  minLength={6}
+                  placeholder="Minimo de 6 caracteres"
+                  className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
+                />
+              </div>
+            </CardContent>
+
+            <CardFooter className="flex flex-col items-stretch gap-4">
+              <Button type="submit" className="h-12" disabled={submitting}>
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                Criar conta
+              </Button>
+
+              <p className="text-sm text-slate-400">
+                Ja tem conta?{" "}
+                <Link to="/login" className="font-semibold text-[#8feeff] hover:text-white">
+                  Entrar
+                </Link>
+              </p>
+            </CardFooter>
+          </form>
+        </Card>
+      </div>
     </div>
   );
 }
