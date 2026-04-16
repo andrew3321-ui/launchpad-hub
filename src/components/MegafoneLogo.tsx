@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
 
 interface MegafoneLogoProps {
-  compact?: boolean;
-  className?: string;
-  showSubtitle?: boolean;
+  compact: boolean;
+  className: string;
+  showSubtitle: boolean;
 }
 
 export function MegafoneLogo({ compact = false, className, showSubtitle = true }: MegafoneLogoProps) {

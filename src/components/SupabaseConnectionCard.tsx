@@ -27,12 +27,12 @@ import { useToast } from "@/hooks/use-toast";
 import { DatabaseZap, Loader2, PlugZap, Unplug } from "lucide-react";
 
 interface Props {
-  title?: string;
-  description?: string;
+  title: string;
+  description: string;
 }
 
 export function SupabaseConnectionCard({
-  title = "Conex?o Supabase",
+  title = "Conexão Supabase",
   description = "Conecte outro projeto Supabase por personal access token e troque a base sem rebuild.",
 }: Props) {
   const { toast } = useToast();
@@ -53,8 +53,8 @@ export function SupabaseConnectionCard({
   const handleFetchProjects = async () => {
     if (!token.trim()) {
       toast({
-        title: "Token obrigat?rio",
-        description: "Informe um personal access token do Supabase para descobrir os projetos dispon?veis.",
+        title: "Token obrigatório",
+        description: "Informe um personal access token do Supabase para descobrir os projetos disponíveis.",
         variant: "destructive",
       });
       return;
@@ -65,17 +65,17 @@ export function SupabaseConnectionCard({
     try {
       const discoveredProjects = await listSupabaseProjects(token.trim());
       setProjects(discoveredProjects);
-      setSelectedProjectRef(discoveredProjects[0]?.ref || "");
+      setSelectedProjectRef(discoveredProjects[0].ref || "");
 
       toast({
         title: "Projetos carregados",
         description:
           discoveredProjects.length > 0
-            ? `Encontramos ${discoveredProjects.length} projeto(s) nesse token.`
-            : "Esse token n?o retornou nenhum projeto acessivel.",
+             `Encontramos ${discoveredProjects.length} projeto(s) nesse token.`
+            : "Esse token não retornou nenhum projeto acessivel.",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha ao consultar os projetos do Supabase.";
+      const message = error instanceof Error  error.message : "Falha ao consultar os projetos do Supabase.";
       toast({ title: "Erro ao consultar token", description: message, variant: "destructive" });
       setProjects([]);
       setSelectedProjectRef("");
@@ -87,7 +87,7 @@ export function SupabaseConnectionCard({
   const handleConnectProject = async () => {
     if (!token.trim() || !selectedProjectRef) {
       toast({
-        title: "Projeto n?o selecionado",
+        title: "Projeto não selecionado",
         description: "Busque os projetos com o token e selecione o destino antes de conectar.",
         variant: "destructive",
       });
@@ -101,7 +101,7 @@ export function SupabaseConnectionCard({
       const runtimeConnection = await buildSupabaseRuntimeConnection(
         token.trim(),
         selectedProjectRef,
-        selectedProject?.name,
+        selectedProject.name,
       );
 
       setRuntimeSupabaseConnection(runtimeConnection);
@@ -112,7 +112,7 @@ export function SupabaseConnectionCard({
         description: `O app agora esta apontando para ${runtimeConnection.projectName}.`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "N?o foi poss?vel conectar o projeto selecionado.";
+      const message = error instanceof Error  error.message : "Não foi possível conectar o projeto selecionado.";
       toast({ title: "Erro ao conectar projeto", description: message, variant: "destructive" });
     } finally {
       setConnecting(false);
@@ -125,7 +125,7 @@ export function SupabaseConnectionCard({
     setSelectedProjectRef("");
     setToken("");
     toast({
-      title: "Conex?o resetada",
+      title: "Conexão resetada",
       description: "O app voltou a usar o projeto Supabase embutido nas variaveis de ambiente.",
     });
   };
@@ -143,8 +143,8 @@ export function SupabaseConnectionCard({
         <div className="rounded-[1.35rem] border border-white/10 bg-white/5 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-white">Projeto ativo</span>
-            <Badge variant={connection.source === "runtime" ? "default" : "outline"} className="border-white/10">
-              {connection.source === "runtime" ? "Conectado por token" : "Projeto embutido"}
+            <Badge variant={connection.source === "runtime"  "default" : "outline"} className="border-white/10">
+              {connection.source === "runtime"  "Conectado por token" : "Projeto embutido"}
             </Badge>
             {hasRuntimeSupabaseConnection() && <Badge variant="secondary">Override ativo</Badge>}
           </div>
@@ -182,7 +182,7 @@ export function SupabaseConnectionCard({
             className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
           />
           <p className="text-xs text-slate-400">
-            O token e usado apenas para descobrir projetos e chaves. Ele n?o fica salvo na configura??o runtime do app.
+            O token e usado apenas para descobrir projetos e chaves. Ele não fica salvo na configuração runtime do app.
           </p>
         </div>
 

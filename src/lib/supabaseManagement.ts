@@ -12,9 +12,9 @@ export interface SupabaseManagementProject {
 
 interface SupabaseApiKey {
   api_key: string;
-  id?: string;
-  name?: string;
-  type?: string;
+  id: string;
+  name: string;
+  type: string;
 }
 
 async function parseResponse(response: Response) {
@@ -39,7 +39,7 @@ async function managementRequest<T>(path: string, token: string): Promise<T> {
     const errorBody = await parseResponse(response);
     const errorMessage =
       typeof errorBody === "object" && errorBody !== null && "message" in errorBody
-        ? String(errorBody.message)
+         String(errorBody.message)
         : "Falha ao consultar a API de gerenciamento do Supabase.";
     throw new Error(errorMessage);
   }
@@ -58,15 +58,15 @@ export async function getSupabaseProjectApiKeys(token: string, projectRef: strin
 export async function buildSupabaseRuntimeConnection(
   token: string,
   projectRef: string,
-  projectName?: string,
+  projectName: string,
 ): Promise<Omit<SupabaseConnectionConfig, "source" | "connectedAt">> {
   const apiKeys = await getSupabaseProjectApiKeys(token, projectRef);
   const publishableKey =
-    apiKeys.find((key) => key.type === "publishable")?.api_key ||
-    apiKeys.find((key) => key.id === "anon" || key.name === "anon")?.api_key;
+    apiKeys.find((key) => key.type === "publishable").api_key ||
+    apiKeys.find((key) => key.id === "anon" || key.name === "anon").api_key;
 
   if (!publishableKey) {
-    throw new Error("N?o foi poss?vel localizar uma publishable key ou anon key para esse projeto.");
+    throw new Error("Não foi possível localizar uma publishable key ou anon key para esse projeto.");
   }
 
   return {

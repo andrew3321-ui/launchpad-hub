@@ -85,7 +85,7 @@ export default function Queue() {
       if (!silent && (syncError || logError)) {
         toast({
           title: "Erro ao carregar a fila",
-          description: syncError?.message || logError?.message || "N?o foi poss?vel carregar o estado da importa??o.",
+          description: syncError.message || logError.message || "Não foi possível carregar o estado da importação.",
           variant: "destructive",
         });
       }
@@ -138,8 +138,8 @@ export default function Queue() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lan?amento</CardTitle>
-            <CardDescription>Escolha um lan?amento para acompanhar as importacoes em andamento.</CardDescription>
+            <CardTitle>Selecione um lançamento</CardTitle>
+            <CardDescription>Escolha um lançamento para acompanhar as importacoes em andamento.</CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -153,7 +153,7 @@ export default function Queue() {
         <div>
           <h1 className="text-2xl font-bold">Fila</h1>
           <p className="text-sm text-muted-foreground">
-            Acompanhe as rodadas de importa??o e os eventos recentes do lan?amento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Acompanhe as rodadas de importação e os eventos recentes do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
       </div>
@@ -179,7 +179,7 @@ export default function Queue() {
         </Card>
       </div>
 
-      {loading ? (
+      {loading  (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
@@ -187,20 +187,20 @@ export default function Queue() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Rodadas de sincroniza??o</CardTitle>
-              <CardDescription>A tela atualiza sozinha enquanto houver importa??o acontecendo.</CardDescription>
+              <CardTitle>Rodadas de sincronização</CardTitle>
+              <CardDescription>A tela atualiza sozinha enquanto houver importação acontecendo.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {runs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhuma importa??o iniciada ainda para esse lan?amento.</p>
+              {runs.length === 0  (
+                <p className="text-sm text-muted-foreground">Nenhuma importação iniciada ainda para esse lançamento.</p>
               ) : (
                 runs.map((run) => (
                   <div key={run.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">{run.source === "activecampaign" ? "ActiveCampaign" : "UChat"}</p>
+                        <p className="font-medium">{run.source === "activecampaign"  "ActiveCampaign" : "UChat"}</p>
                         <Badge variant={statusVariant(normalizeSyncRun(run).status)}>
-                          {normalizeSyncRun(run).status === "running" ? "Em andamento" : normalizeSyncRun(run).status === "failed" ? "Falhou" : "Conclu?da"}
+                          {normalizeSyncRun(run).status === "running"  "Em andamento" : normalizeSyncRun(run).status === "failed"  "Falhou" : "Concluída"}
                         </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">{new Date(run.started_at).toLocaleString("pt-BR")}</p>
@@ -213,7 +213,7 @@ export default function Queue() {
                       <p>Erros: {run.error_count}</p>
                     </div>
 
-                    {normalizeSyncRun(run).last_error && <p className="mt-3 text-sm text-destructive">?ltimo erro: {normalizeSyncRun(run).last_error}</p>}
+                    {normalizeSyncRun(run).last_error && <p className="mt-3 text-sm text-destructive">Último erro: {normalizeSyncRun(run).last_error}</p>}
                   </div>
                 ))
               )}
@@ -223,10 +223,10 @@ export default function Queue() {
           <Card>
             <CardHeader>
               <CardTitle>Eventos recentes</CardTitle>
-              <CardDescription>Os logs tamb?m atualizam autom?ticamente enquanto a importa??o roda.</CardDescription>
+              <CardDescription>Os logs também atualizam automáticamente enquanto a importação roda.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {logs.length === 0 ? (
+              {logs.length === 0  (
                 <p className="text-sm text-muted-foreground">Nenhum evento recente ainda.</p>
               ) : (
                 logs.map((log) => (

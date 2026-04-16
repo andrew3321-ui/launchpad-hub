@@ -7,7 +7,7 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to autom?tically instantiate createClient with right options
+  // Allows to automátically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
@@ -30,11 +30,11 @@ export type Database = {
         }
         Insert: {
           code: string
-          contact_id?: string | null
-          created_at?: string
-          details?: Json
-          event_id?: string | null
-          id?: string
+          contact_id: string | null
+          created_at: string
+          details: Json
+          event_id: string | null
+          id: string
           launch_id: string
           level: string
           message: string
@@ -42,17 +42,17 @@ export type Database = {
           title: string
         }
         Update: {
-          code?: string
-          contact_id?: string | null
-          created_at?: string
-          details?: Json
-          event_id?: string | null
-          id?: string
-          launch_id?: string
-          level?: string
-          message?: string
-          source?: string
-          title?: string
+          code: string
+          contact_id: string | null
+          created_at: string
+          details: Json
+          event_id: string | null
+          id: string
+          launch_id: string
+          level: string
+          message: string
+          source: string
+          title: string
         }
         Relationships: [
           {
@@ -94,29 +94,29 @@ export type Database = {
         }
         Insert: {
           event_type: string
-          external_contact_id?: string | null
-          id?: string
+          external_contact_id: string | null
+          id: string
           launch_id: string
-          payload?: Json
-          processed_at?: string | null
-          processed_contact_id?: string | null
-          processing_status?: string
-          processing_summary?: Json
-          received_at?: string
+          payload: Json
+          processed_at: string | null
+          processed_contact_id: string | null
+          processing_status: string
+          processing_summary: Json
+          received_at: string
           source: string
         }
         Update: {
-          event_type?: string
-          external_contact_id?: string | null
-          id?: string
-          launch_id?: string
-          payload?: Json
-          processed_at?: string | null
-          processed_contact_id?: string | null
-          processing_status?: string
-          processing_summary?: Json
-          received_at?: string
-          source?: string
+          event_type: string
+          external_contact_id: string | null
+          id: string
+          launch_id: string
+          payload: Json
+          processed_at: string | null
+          processed_contact_id: string | null
+          processing_status: string
+          processing_summary: Json
+          received_at: string
+          source: string
         }
         Relationships: [
           {
@@ -150,30 +150,30 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          auto_add_country_code?: boolean
-          auto_add_ninth_digit?: boolean
-          auto_merge_duplicates?: boolean
-          compare_digits_only?: boolean
-          created_at?: string
-          default_country_code?: string
+          auto_add_country_code: boolean
+          auto_add_ninth_digit: boolean
+          auto_merge_duplicates: boolean
+          compare_digits_only: boolean
+          created_at: string
+          default_country_code: string
           launch_id: string
-          merge_on_exact_email?: boolean
-          merge_on_exact_phone?: boolean
-          prefer_most_complete_record?: boolean
-          updated_at?: string
+          merge_on_exact_email: boolean
+          merge_on_exact_phone: boolean
+          prefer_most_complete_record: boolean
+          updated_at: string
         }
         Update: {
-          auto_add_country_code?: boolean
-          auto_add_ninth_digit?: boolean
-          auto_merge_duplicates?: boolean
-          compare_digits_only?: boolean
-          created_at?: string
-          default_country_code?: string
-          launch_id?: string
-          merge_on_exact_email?: boolean
-          merge_on_exact_phone?: boolean
-          prefer_most_complete_record?: boolean
-          updated_at?: string
+          auto_add_country_code: boolean
+          auto_add_ninth_digit: boolean
+          auto_merge_duplicates: boolean
+          compare_digits_only: boolean
+          created_at: string
+          default_country_code: string
+          launch_id: string
+          merge_on_exact_email: boolean
+          merge_on_exact_phone: boolean
+          prefer_most_complete_record: boolean
+          updated_at: string
         }
         Relationships: [
           {
@@ -195,20 +195,20 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
-          created_at?: string
-          current_count?: number
-          id?: string
+          created_at: string
+          current_count: number
+          id: string
           launch_id: string
-          max_subscribers?: number
+          max_subscribers: number
           workspace_id: string
         }
         Update: {
-          created_at?: string
-          current_count?: number
-          id?: string
-          launch_id?: string
-          max_subscribers?: number
-          workspace_id?: string
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string
+          max_subscribers: number
+          workspace_id: string
         }
         Relationships: [
           {
@@ -248,42 +248,42 @@ export type Database = {
           whatsapp_group_link: string | null
         }
         Insert: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
-          ac_default_automation_id?: string | null
-          ac_default_list_id?: string | null
-          ac_named_tags?: Json
-          created_at?: string
+          ac_api_key: string | null
+          ac_api_url: string | null
+          ac_default_automation_id: string | null
+          ac_default_list_id: string | null
+          ac_named_tags: Json
+          created_at: string
           created_by: string
-          custom_states?: Json
-          id?: string
-          manychat_account_id?: string | null
-          manychat_api_key?: string | null
-          manychat_api_url?: string | null
+          custom_states: Json
+          id: string
+          manychat_account_id: string | null
+          manychat_api_key: string | null
+          manychat_api_url: string | null
           name: string
-          project_id?: string | null
-          slug?: string | null
-          status?: string
-          whatsapp_group_link?: string | null
+          project_id: string | null
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
         }
         Update: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
-          ac_default_automation_id?: string | null
-          ac_default_list_id?: string | null
-          ac_named_tags?: Json
-          created_at?: string
-          created_by?: string
-          custom_states?: Json
-          id?: string
-          manychat_account_id?: string | null
-          manychat_api_key?: string | null
-          manychat_api_url?: string | null
-          name?: string
-          project_id?: string | null
-          slug?: string | null
-          status?: string
-          whatsapp_group_link?: string | null
+          ac_api_key: string | null
+          ac_api_url: string | null
+          ac_default_automation_id: string | null
+          ac_default_list_id: string | null
+          ac_named_tags: Json
+          created_at: string
+          created_by: string
+          custom_states: Json
+          id: string
+          manychat_account_id: string | null
+          manychat_api_key: string | null
+          manychat_api_url: string | null
+          name: string
+          project_id: string | null
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
         }
         Relationships: [
           {
@@ -311,29 +311,29 @@ export type Database = {
         }
         Insert: {
           contact_id: string
-          created_at?: string
-          external_contact_id?: string | null
-          external_email?: string | null
-          external_phone?: string | null
-          id?: string
+          created_at: string
+          external_contact_id: string | null
+          external_email: string | null
+          external_phone: string | null
+          id: string
           launch_id: string
-          normalized_phone?: string | null
-          raw_snapshot?: Json
+          normalized_phone: string | null
+          raw_snapshot: Json
           source: string
-          updated_at?: string
+          updated_at: string
         }
         Update: {
-          contact_id?: string
-          created_at?: string
-          external_contact_id?: string | null
-          external_email?: string | null
-          external_phone?: string | null
-          id?: string
-          launch_id?: string
-          normalized_phone?: string | null
-          raw_snapshot?: Json
-          source?: string
-          updated_at?: string
+          contact_id: string
+          created_at: string
+          external_contact_id: string | null
+          external_email: string | null
+          external_phone: string | null
+          id: string
+          launch_id: string
+          normalized_phone: string | null
+          raw_snapshot: Json
+          source: string
+          updated_at: string
         }
         Relationships: [
           {
@@ -369,34 +369,34 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          created_at?: string
-          data?: Json
-          first_source?: string | null
-          id?: string
-          last_source?: string | null
+          created_at: string
+          data: Json
+          first_source: string | null
+          id: string
+          last_source: string | null
           launch_id: string
-          merged_from_count?: number
-          normalized_phone?: string | null
-          primary_email?: string | null
-          primary_name?: string | null
-          primary_phone?: string | null
-          status?: string
-          updated_at?: string
+          merged_from_count: number
+          normalized_phone: string | null
+          primary_email: string | null
+          primary_name: string | null
+          primary_phone: string | null
+          status: string
+          updated_at: string
         }
         Update: {
-          created_at?: string
-          data?: Json
-          first_source?: string | null
-          id?: string
-          last_source?: string | null
-          launch_id?: string
-          merged_from_count?: number
-          normalized_phone?: string | null
-          primary_email?: string | null
-          primary_name?: string | null
-          primary_phone?: string | null
-          status?: string
-          updated_at?: string
+          created_at: string
+          data: Json
+          first_source: string | null
+          id: string
+          last_source: string | null
+          launch_id: string
+          merged_from_count: number
+          normalized_phone: string | null
+          primary_email: string | null
+          primary_name: string | null
+          primary_phone: string | null
+          status: string
+          updated_at: string
         }
         Relationships: [
           {
@@ -425,34 +425,34 @@ export type Database = {
           status: string
         }
         Insert: {
-          created_count?: number
-          error_count?: number
-          finished_at?: string | null
-          id?: string
-          last_error?: string | null
+          created_count: number
+          error_count: number
+          finished_at: string | null
+          id: string
+          last_error: string | null
           launch_id: string
-          merged_count?: number
-          metadata?: Json
-          processed_count?: number
-          skipped_count?: number
+          merged_count: number
+          metadata: Json
+          processed_count: number
+          skipped_count: number
           source: string
-          started_at?: string
-          status?: string
+          started_at: string
+          status: string
         }
         Update: {
-          created_count?: number
-          error_count?: number
-          finished_at?: string | null
-          id?: string
-          last_error?: string | null
-          launch_id?: string
-          merged_count?: number
-          metadata?: Json
-          processed_count?: number
-          skipped_count?: number
-          source?: string
-          started_at?: string
-          status?: string
+          created_count: number
+          error_count: number
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          launch_id: string
+          merged_count: number
+          metadata: Json
+          processed_count: number
+          skipped_count: number
+          source: string
+          started_at: string
+          status: string
         }
         Relationships: [
           {
@@ -472,16 +472,16 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          created_at?: string
-          full_name?: string | null
-          id?: string
+          created_at: string
+          full_name: string | null
+          id: string
           user_id: string
         }
         Update: {
-          created_at?: string
-          full_name?: string | null
-          id?: string
-          user_id?: string
+          created_at: string
+          full_name: string | null
+          id: string
+          user_id: string
         }
         Relationships: []
       }
@@ -498,26 +498,26 @@ export type Database = {
           whatsapp_group_link: string | null
         }
         Insert: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
-          created_at?: string
+          ac_api_key: string | null
+          ac_api_url: string | null
+          created_at: string
           created_by: string
-          id?: string
+          id: string
           name: string
-          slug?: string | null
-          status?: string
-          whatsapp_group_link?: string | null
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
         }
         Update: {
-          ac_api_key?: string | null
-          ac_api_url?: string | null
-          created_at?: string
-          created_by?: string
-          id?: string
-          name?: string
-          slug?: string | null
-          status?: string
-          whatsapp_group_link?: string | null
+          ac_api_key: string | null
+          ac_api_url: string | null
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          slug: string | null
+          status: string
+          whatsapp_group_link: string | null
         }
         Relationships: []
       }
@@ -536,27 +536,27 @@ export type Database = {
         }
         Insert: {
           api_token: string
-          bot_id?: string | null
-          created_at?: string
-          current_count?: number
-          id?: string
-          launch_id?: string | null
-          max_subscribers?: number
-          project_id?: string | null
-          workspace_id?: string | null
+          bot_id: string | null
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string | null
+          max_subscribers: number
+          project_id: string | null
+          workspace_id: string | null
           workspace_name: string
         }
         Update: {
-          api_token?: string
-          bot_id?: string | null
-          created_at?: string
-          current_count?: number
-          id?: string
-          launch_id?: string | null
-          max_subscribers?: number
-          project_id?: string | null
-          workspace_id?: string | null
-          workspace_name?: string
+          api_token: string
+          bot_id: string | null
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string | null
+          max_subscribers: number
+          project_id: string | null
+          workspace_id: string | null
+          workspace_name: string
         }
         Relationships: [
           {
@@ -602,25 +602,25 @@ export type Tables<
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+     keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
-  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+   (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
       DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
     }
-    ? R
+     R
     : never
   : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
         DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
+     (DefaultSchema["Tables"] &
         DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
         Row: infer R
       }
-      ? R
+       R
       : never
     : never
 
@@ -631,21 +631,21 @@ export type TablesInsert<
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+     keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+   DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Insert: infer I
     }
-    ? I
+     I
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+     DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
         Insert: infer I
       }
-      ? I
+       I
       : never
     : never
 
@@ -656,21 +656,21 @@ export type TablesUpdate<
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+     keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+   DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Update: infer U
     }
-    ? U
+     U
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+     DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
         Update: infer U
       }
-      ? U
+       U
       : never
     : never
 
@@ -681,14 +681,14 @@ export type Enums<
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+     keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+   DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+     DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
 
 export type CompositeTypes<
@@ -698,14 +698,14 @@ export type CompositeTypes<
   CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+     keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
     : never = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+   DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+     DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
 
 export const Constants = {

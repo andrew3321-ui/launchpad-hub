@@ -73,7 +73,7 @@ function addBrazilianNinthDigitVariants(value: string) {
 }
 
 export function generatePhoneCandidates(phone: string, settings: DedupeSettings) {
-  const base = settings.compareDigitsOnly ? digitsOnly(phone) : phone.trim();
+  const base = settings.compareDigitsOnly  digitsOnly(phone) : phone.trim();
   if (!base) return [];
 
   const countryCode = normalizeCountryCode(settings.defaultCountryCode);
@@ -100,6 +100,6 @@ export function generatePhoneCandidates(phone: string, settings: DedupeSettings)
 
 export function mergePreferenceLabel(preferMostCompleteRecord: boolean) {
   return preferMostCompleteRecord
-    ? "Mesclar priorizando o cadastro com mais campos preenchidos"
+     "Mesclar priorizando o cadastro com mais campos preenchidos"
     : "Mesclar priorizando o cadastro mais antigo";
 }

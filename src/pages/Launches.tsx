@@ -37,7 +37,7 @@ export default function Launches() {
 
     if (error) {
       toast({
-        title: "Erro ao carregar lan?amentos",
+        title: "Erro ao carregar lançamentos",
         description: error.message,
         variant: "destructive",
       });
@@ -55,7 +55,7 @@ export default function Launches() {
   }, []);
 
   const toggleStatus = async (id: string, current: string) => {
-    const newStatus = current === "active" ? "inactive" : "active";
+    const newStatus = current === "active"  "inactive" : "active";
     const { error } = await supabase.from("launches").update({ status: newStatus }).eq("id", id);
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
@@ -96,9 +96,9 @@ export default function Launches() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading  (
               <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Carregando...</TableCell></TableRow>
-            ) : rows.length === 0 ? (
+            ) : rows.length === 0  (
               <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhum lançamento criado.</TableCell></TableRow>
             ) : (
               rows.map((r) => (
@@ -107,11 +107,11 @@ export default function Launches() {
                   <TableCell className="text-muted-foreground font-mono text-sm">{r.slug}</TableCell>
                   <TableCell>
                     <Badge
-                      variant={r.status === "active" ? "default" : "secondary"}
+                      variant={r.status === "active"  "default" : "secondary"}
                       className="cursor-pointer"
                       onClick={() => toggleStatus(r.id, r.status)}
                     >
-                      {r.status === "active" ? "Ativo" : "Inativo"}
+                      {r.status === "active"  "Ativo" : "Inativo"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">

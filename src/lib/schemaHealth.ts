@@ -4,7 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 export interface SchemaIssue {
   kind: "table" | "column" | "unknown";
   table: string;
-  column?: string;
+  column: string;
   description: string;
 }
 
@@ -18,28 +18,28 @@ interface SchemaProbe {
   table: keyof Database["public"]["Tables"];
   select: string;
   kind: "table" | "column";
-  column?: string;
+  column: string;
   description: string;
 }
 
 const schemaProbes: SchemaProbe[] = [
-  { table: "profiles", select: "id", kind: "table", description: "Tabela de perfis de autentica??o" },
-  { table: "launches", select: "id", kind: "table", description: "Tabela principal de lan?amentos" },
+  { table: "profiles", select: "id", kind: "table", description: "Tabela de perfis de autenticação" },
+  { table: "launches", select: "id", kind: "table", description: "Tabela principal de lançamentos" },
   {
     table: "launches",
     select: "manychat_api_url",
     kind: "column",
     column: "manychat_api_url",
-    description: "Colunas de conex?o do ManyChat em launches",
+    description: "Colunas de conexão do ManyChat em launches",
   },
   { table: "uchat_workspaces", select: "id", kind: "table", description: "Tabela de workspaces do UChat" },
   {
     table: "launch_dedupe_settings",
     select: "launch_id",
     kind: "table",
-    description: "Tabela de regras de deduplica??o por lan?amento",
+    description: "Tabela de regras de deduplicação por lançamento",
   },
-  { table: "lead_contacts", select: "id", kind: "table", description: "Tabela can?nica de contatos tratados" },
+  { table: "lead_contacts", select: "id", kind: "table", description: "Tabela canúnica de contatos tratados" },
   {
     table: "lead_contact_identities",
     select: "id",
@@ -50,7 +50,7 @@ const schemaProbes: SchemaProbe[] = [
     table: "inbound_contact_events",
     select: "id",
     kind: "table",
-    description: "Tabela de eventos recebidos via integra??o",
+    description: "Tabela de eventos recebidos via integração",
   },
   {
     table: "contact_processing_logs",
@@ -62,7 +62,7 @@ const schemaProbes: SchemaProbe[] = [
     table: "platform_sync_runs",
     select: "id",
     kind: "table",
-    description: "Tabela de rodadas de sincroniza??o com plataformas externas",
+    description: "Tabela de rodadas de sincronização com plataformas externas",
   },
 ];
 
@@ -76,7 +76,7 @@ function describeMissingProbe(probe: SchemaProbe): SchemaIssue {
 }
 
 function isMissingTable(error: PostgrestError) {
-  const message = `${error.code} ${error.message} ${error.details ?? ""}`.toLowerCase();
+  const message = `${error.code} ${error.message} ${error.details  ""}`.toLowerCase();
   return (
     error.code === "42P01" ||
     message.includes("could not find the table") ||
@@ -85,12 +85,12 @@ function isMissingTable(error: PostgrestError) {
 }
 
 function isMissingColumn(error: PostgrestError) {
-  const message = `${error.code} ${error.message} ${error.details ?? ""}`.toLowerCase();
+  const message = `${error.code} ${error.message} ${error.details  ""}`.toLowerCase();
   return error.code === "42703" || (message.includes("could not find the") && message.includes("column"));
 }
 
 function isPermissionDenied(error: PostgrestError) {
-  const message = `${error.code} ${error.message} ${error.details ?? ""}`.toLowerCase();
+  const message = `${error.code} ${error.message} ${error.details  ""}`.toLowerCase();
   return error.code === "42501" || error.code === "PGRST301" || message.includes("permission denied");
 }
 
@@ -118,7 +118,7 @@ function classifyProbeError(probe: SchemaProbe, error: PostgrestError): SchemaIs
     kind: "unknown",
     table: probe.table,
     column: probe.column,
-    description: `N?o foi poss?vel validar ${probe.table}${probe.column ? `.${probe.column}` : ""}: ${error.message}`,
+    description: `Não foi possível validar ${probe.table}${probe.column  `.${probe.column}` : ""}: ${error.message}`,
   };
 }
 
@@ -144,7 +144,7 @@ export async function checkSchemaHealth(client: SupabaseClient<Database>): Promi
 
 export function buildLovableBootstrapPrompt(issues: SchemaIssue[]) {
   const missingItems = issues
-    .map((issue) => (issue.kind === "column" && issue.column ? `${issue.table}.${issue.column}` : issue.table))
+    .map((issue) => (issue.kind === "column" && issue.column  `${issue.table}.${issue.column}` : issue.table))
     .join(", ");
 
   return [

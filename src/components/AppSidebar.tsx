@@ -39,7 +39,7 @@ import {
 
 const menuItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Lan?amentos", url: "/launches", icon: Rocket },
+  { title: "Lançamentos", url: "/launches", icon: Rocket },
   { title: "Fontes", url: "/sources", icon: Radio },
   { title: "Regras", url: "/rules", icon: GitBranch },
   { title: "Leads", url: "/leads", icon: Users },
@@ -69,7 +69,7 @@ export function AppSidebar() {
   return (
     <Sidebar variant="floating" collapsible="icon" className="border-none">
       <SidebarHeader className="space-y-4 p-4">
-        {collapsed ? (
+        {collapsed  (
           <div className="flex justify-center">
             <MegafoneLogo compact showSubtitle={false} />
           </div>
@@ -80,7 +80,7 @@ export function AppSidebar() {
             <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-[0_18px_45px_rgba(2,8,20,0.26)]">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white">{profile?.full_name || "Operador Megafone"}</p>
+                  <p className="text-sm font-semibold text-white">{profile.full_name || "Operador Megafone"}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.28em] text-[#91ecff]/75">Painel de controle</p>
                 </div>
                 <Badge variant="outline" className="border-white/10 bg-white/5 text-[#aef4ff]">
@@ -89,20 +89,20 @@ export function AppSidebar() {
               </div>
 
               <div className="mt-4 space-y-2">
-                <p className="text-[0.7rem] font-medium uppercase tracking-[0.32em] text-slate-400">Lan?amento ativo</p>
+                <p className="text-[0.7rem] font-medium uppercase tracking-[0.32em] text-slate-400">Lançamento ativo</p>
                 <Select
-                  value={activeLaunch?.id || ""}
+                  value={activeLaunch.id || ""}
                   onValueChange={(id) => {
                     const launch = launches.find((item) => item.id === id);
                     setActiveLaunch(launch || null);
                   }}
                 >
                   <SelectTrigger className="h-11 rounded-full border-white/10 bg-[#09182f]/85 text-left text-sm text-slate-100">
-                    <SelectValue placeholder="Selecionar lan?amento" />
+                    <SelectValue placeholder="Selecionar lançamento" />
                   </SelectTrigger>
                   <SelectContent className="border-white/10 bg-[#08162b] text-slate-100">
-                    {launches.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-400">Nenhum lan?amento</div>
+                    {launches.length === 0  (
+                      <div className="px-3 py-2 text-sm text-slate-400">Nenhum lançamento</div>
                     ) : (
                       launches.map((launch) => (
                         <SelectItem key={launch.id} value={launch.id}>
@@ -154,8 +154,8 @@ export function AppSidebar() {
           onClick={handleSignOut}
           disabled={signingOut}
         >
-          {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-          {!collapsed && <span>{signingOut ? "Saindo..." : "Sair"}</span>}
+          {signingOut  <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+          {!collapsed && <span>{signingOut  "Saindo..." : "Sair"}</span>}
         </Button>
       </SidebarFooter>
     </Sidebar>

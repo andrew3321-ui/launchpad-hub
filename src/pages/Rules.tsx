@@ -121,7 +121,7 @@ export default function Rules() {
     if (error) {
       toast({ title: "Erro ao salvar regras", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Regras de deduplica??o atualizadas" });
+      toast({ title: "Regras de deduplicação atualizadas" });
     }
     setSaving(false);
   };
@@ -135,9 +135,9 @@ export default function Rules() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lan?amento</CardTitle>
+            <CardTitle>Selecione um lançamento</CardTitle>
             <CardDescription>
-              Escolha um lan?amento na barra lateral para definir as regras de deduplica??o e merge.
+              Escolha um lançamento na barra lateral para definir as regras de deduplicação e merge.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -152,13 +152,13 @@ export default function Rules() {
         <div>
           <h1 className="text-2xl font-bold">Regras</h1>
           <p className="text-sm text-muted-foreground">
-            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lan?amento{" "}
+            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lançamento{" "}
             <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
       </div>
 
-      {loading ? (
+      {loading  (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
@@ -174,19 +174,19 @@ export default function Rules() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <RuleRow
-                  title="Comparar apenas os d?gitos"
+                  title="Comparar apenas os dígitos"
                   description="Ignora espacos, parenteses, hifens e outros caracteres na hora de deduplicar."
                   checked={settings.compareDigitsOnly}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, compareDigitsOnly: checked }))}
                 />
                 <RuleRow
-                  title="Adicionar +55 autom?ticamente"
-                  description="Tenta casar n?meros com e sem c?digo do pa?s brasileiro."
+                  title="Adicionar +55 automáticamente"
+                  description="Tenta casar números com e sem código do país brasileiro."
                   checked={settings.autoAddCountryCode}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddCountryCode: checked }))}
                 />
                 <div className="space-y-2">
-                  <Label htmlFor="country-code">C?digo do pa?s padr?o</Label>
+                  <Label htmlFor="country-code">Código do país padrão</Label>
                   <Input
                     id="country-code"
                     value={settings.defaultCountryCode}
@@ -198,7 +198,7 @@ export default function Rules() {
                   />
                 </div>
                 <RuleRow
-                  title="Tentar adicionar ou remover o nono d?gito"
+                  title="Tentar adicionar ou remover o nono dígito"
                   description="Ajuda a reconhecer contatos quando uma base salva 11999998888 e outra 1199998888."
                   checked={settings.autoAddNinthDigit}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddNinthDigit: checked }))}
@@ -208,26 +208,26 @@ export default function Rules() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Crit?rios de merge</CardTitle>
+                <CardTitle className="text-xl">Critérios de merge</CardTitle>
                 <CardDescription>
-                  Quando duas entradas representam a mesma pessoa, o sistema pode unificar autom?ticamente os dados.
+                  Quando duas entradas representam a mesma pessoa, o sistema pode unificar automáticamente os dados.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <RuleRow
                   title="Detectar duplicata por telefone normalizado"
-                  description="Marca como mesmo contato quando os n?meros baterem apos os tratamentos acima."
+                  description="Marca como mesmo contato quando os números baterem apos os tratamentos acima."
                   checked={settings.mergeOnExactPhone}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactPhone: checked }))}
                 />
                 <RuleRow
                   title="Detectar duplicata por email exato"
-                  description="Mescla autom?ticamente quando o email for id?ntico, mesmo vindo de canais diferentes."
+                  description="Mescla automáticamente quando o email for idêntico, mesmo vindo de canais diferentes."
                   checked={settings.mergeOnExactEmail}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactEmail: checked }))}
                 />
                 <RuleRow
-                  title="Mesclar duplicatas autom?ticamente"
+                  title="Mesclar duplicatas automáticamente"
                   description="Quando a duplicata for confirmada, consolida os dados sem mandar para triagem manual."
                   checked={settings.autoMergeDuplicates}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoMergeDuplicates: checked }))}
@@ -256,10 +256,10 @@ export default function Rules() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <Sparkles className="h-5 w-5 text-primary" />
-                  Preview de deduplica??o
+                  Preview de deduplicação
                 </CardTitle>
                 <CardDescription>
-                  Teste um n?mero real e vej? quais varia??es vao entrar no comparador antes do merge.
+                  Teste um número real e vejá quais variações vao entrar no comparador antes do merge.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -273,9 +273,9 @@ export default function Rules() {
                   />
                 </div>
 
-                {samplePhone ? (
+                {samplePhone  (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium">Varia??es geradas para busca de duplicatas</p>
+                    <p className="text-sm font-medium">Variações geradas para busca de duplicatas</p>
                     <div className="flex flex-wrap gap-2">
                       {phoneCandidates.map((candidate) => (
                         <Badge key={candidate} variant="outline" className="font-mono">
@@ -287,7 +287,7 @@ export default function Rules() {
                 ) : (
                   <div className="flex items-start gap-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                     <Unplug className="mt-0.5 h-4 w-4" />
-                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono d?gito.
+                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono dígito.
                   </div>
                 )}
               </CardContent>
@@ -303,10 +303,10 @@ export default function Rules() {
                   Se dois contatos tiverem o mesmo email ou telefone normalizado, o sistema pode trata-los como a mesma pessoa.
                 </p>
                 <p>
-                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro ?nico.
+                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro único.
                 </p>
                 <p>
-                  Com estas regras salvas, o pr?ximo passo natural e aplicar esse crit?rio dentro dos webhooks e da fila de processamento.
+                  Com estas regras salvas, o próximo passo natural e aplicar esse critério dentro dos webhooks e da fila de processamento.
                 </p>
               </CardContent>
             </Card>

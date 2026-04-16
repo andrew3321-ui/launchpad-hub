@@ -59,7 +59,7 @@ export default function Login() {
         toast({ title: "Erro ao entrar", description: error.message, variant: "destructive" });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "N?o foi poss?vel concluir o login.";
+      const message = error instanceof Error  error.message : "Não foi possível concluir o login.";
       toast({ title: "Erro ao entrar", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
@@ -81,9 +81,9 @@ export default function Login() {
                   <Sparkles className="h-3.5 w-3.5" />
                   Acesso ao painel
                 </div>
-                <CardTitle className="text-3xl font-semibold text-white">Entre na opera??o Megafone</CardTitle>
+                <CardTitle className="text-3xl font-semibold text-white">Entre na operação Megafone</CardTitle>
                 <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
-                  Conecte suas bases, monitore o tratamento autom?tico e acompanhe cada lead em um ambiente com identidade Megafone.
+                  Conecte suas bases, monitore o tratamento automático e acompanhe cada lead em um ambiente com identidade Megafone.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -100,7 +100,7 @@ export default function Login() {
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    placeholder="voc?@megafone.digital"
+                    placeholder="você@megafone.digital"
                     className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
                   />
                 </div>
@@ -123,12 +123,12 @@ export default function Login() {
 
               <CardFooter className="flex flex-col items-stretch gap-4">
                 <Button type="submit" className="h-12" disabled={submitting}>
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
+                  {submitting  <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
                   Entrar no painel
                 </Button>
 
                 <p className="text-sm text-slate-400">
-                  N?o tem conta?{" "}
+                  Não tem conta{" "}
                   <Link to="/signup" className="font-semibold text-[#8feeff] hover:text-white">
                     Criar conta
                   </Link>
@@ -138,13 +138,13 @@ export default function Login() {
           </Card>
 
           <SupabaseConnectionCard
-            title="Conex?o Supabase"
-            description="Troque rapidamente o backend ativo durante desenvolvimento e homologa??o, sem rebuild."
+            title="Conexão Supabase"
+            description="Troque rapidamente o backend ativo durante desenvolvimento e homologação, sem rebuild."
           />
 
           <SchemaSetupCard
-            title="Valida??o do schema"
-            description="Confira se o backend conectado j? recebeu todas as estruturas que o app precisa para operar."
+            title="Validação do schema"
+            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
           />
         </div>
       </div>
