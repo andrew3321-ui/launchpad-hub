@@ -14,8 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      launch_uchat_workspaces: {
+        Row: {
+          created_at: string
+          current_count: number
+          id: string
+          launch_id: string
+          max_subscribers: number
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id: string
+          max_subscribers?: number
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          current_count?: number
+          id?: string
+          launch_id?: string
+          max_subscribers?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_uchat_workspaces_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "launch_uchat_workspaces_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "uchat_workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launches: {
         Row: {
+          ac_default_automation_id: string | null
+          ac_default_list_id: string | null
+          ac_named_tags: Json
           created_at: string
           created_by: string
           custom_states: Json
@@ -26,6 +71,9 @@ export type Database = {
           status: string
         }
         Insert: {
+          ac_default_automation_id?: string | null
+          ac_default_list_id?: string | null
+          ac_named_tags?: Json
           created_at?: string
           created_by: string
           custom_states?: Json
@@ -36,6 +84,9 @@ export type Database = {
           status?: string
         }
         Update: {
+          ac_default_automation_id?: string | null
+          ac_default_list_id?: string | null
+          ac_named_tags?: Json
           created_at?: string
           created_by?: string
           custom_states?: Json
@@ -80,8 +131,6 @@ export type Database = {
         Row: {
           ac_api_key: string | null
           ac_api_url: string | null
-          ac_default_list_id: string | null
-          ac_named_tags: Json
           created_at: string
           created_by: string
           id: string
@@ -93,8 +142,6 @@ export type Database = {
         Insert: {
           ac_api_key?: string | null
           ac_api_url?: string | null
-          ac_default_list_id?: string | null
-          ac_named_tags?: Json
           created_at?: string
           created_by: string
           id?: string
@@ -106,8 +153,6 @@ export type Database = {
         Update: {
           ac_api_key?: string | null
           ac_api_url?: string | null
-          ac_default_list_id?: string | null
-          ac_named_tags?: Json
           created_at?: string
           created_by?: string
           id?: string
@@ -122,27 +167,21 @@ export type Database = {
         Row: {
           api_token: string
           created_at: string
-          current_count: number
           id: string
-          max_subscribers: number
           project_id: string | null
           workspace_name: string
         }
         Insert: {
           api_token: string
           created_at?: string
-          current_count?: number
           id?: string
-          max_subscribers?: number
           project_id?: string | null
           workspace_name: string
         }
         Update: {
           api_token?: string
           created_at?: string
-          current_count?: number
           id?: string
-          max_subscribers?: number
           project_id?: string | null
           workspace_name?: string
         }
