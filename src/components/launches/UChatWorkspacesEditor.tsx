@@ -8,8 +8,6 @@ import {
 interface UChatWorkspace {
   id?: string;
   workspace_name: string;
-  workspace_id: string;
-  bot_id: string;
   api_token: string;
   max_subscribers: number;
   current_count: number;
@@ -24,7 +22,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
   const addWorkspace = () => {
     onChange([
       ...workspaces,
-      { workspace_name: "", workspace_id: "", bot_id: "", api_token: "", max_subscribers: 1000, current_count: 0 },
+      { workspace_name: "", api_token: "", max_subscribers: 1000, current_count: 0 },
     ]);
   };
 
@@ -46,8 +44,6 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
             <TableHeader>
               <TableRow>
                 <TableHead>Nome</TableHead>
-                <TableHead>Workspace ID</TableHead>
-                <TableHead>Bot ID</TableHead>
                 <TableHead>API Token</TableHead>
                 <TableHead>Máx. subs</TableHead>
                 <TableHead>Atual</TableHead>
@@ -58,16 +54,10 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
               {workspaces.map((w, i) => (
                 <TableRow key={i}>
                   <TableCell>
-                    <Input value={w.workspace_name} onChange={(e) => update(i, "workspace_name", e.target.value)} placeholder="Nome" className="min-w-[120px]" />
+                    <Input value={w.workspace_name} onChange={(e) => update(i, "workspace_name", e.target.value)} placeholder="ex: teacher_elza_03" className="min-w-[180px]" />
                   </TableCell>
                   <TableCell>
-                    <Input value={w.workspace_id} onChange={(e) => update(i, "workspace_id", e.target.value)} placeholder="ID" className="min-w-[100px]" />
-                  </TableCell>
-                  <TableCell>
-                    <Input value={w.bot_id} onChange={(e) => update(i, "bot_id", e.target.value)} placeholder="Bot ID" className="min-w-[100px]" />
-                  </TableCell>
-                  <TableCell>
-                    <Input type="password" value={w.api_token} onChange={(e) => update(i, "api_token", e.target.value)} placeholder="Token" className="min-w-[100px]" />
+                    <Input type="password" value={w.api_token} onChange={(e) => update(i, "api_token", e.target.value)} placeholder="Token" className="min-w-[120px]" />
                   </TableCell>
                   <TableCell>
                     <Input type="number" value={w.max_subscribers} onChange={(e) => update(i, "max_subscribers", parseInt(e.target.value) || 0)} className="w-20" />
