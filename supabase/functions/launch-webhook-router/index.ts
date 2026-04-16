@@ -1,0 +1,1463 @@
+// deno-lint-ignore-file no-explicit-any
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  ProcessContactError,
+  processIncomingContactEvent,
+  type IncomingEventBody,
+} from "../_shared/contact-processing.ts";
+
+type JsonRecord = Record<string, unknown>;
+type AnySupabaseClient = ReturnType<typeof createClient>;
+type WebhookSource = "activecampaign" | "manychat" | "typebot" | "sendflow" | "uchat";
+
+interface LaunchRow {
+  id: string;
+  slug: string | null;
+  name: string;
+  webhook_secret: string;
+  ac_api_url: string | null;
+  ac_api_key: string | null;
+  ac_default_list_id: string | null;
+  ac_named_tags: unknown;
+}
+
+interface LeadContactRow {
+  id: string;
+  primary_name: string | null;
+  primary_email: string | null;
+  primary_phone: string | null;
+  normalized_phone: string | null;
+  data: unknown;
+}
+
+interface UChatWorkspaceRow {
+  id: string;
+  workspace_name: string;
+  workspace_id: string | null;
+  api_token: string;
+  welcome_subflow_ns: string | null;
+  default_tag_name: string | null;
+}
+
+interface RoutingActionRow {
+  id: string;
+}
+
+interface NamedTag {
+  alias: string;
+  tag: string;
+}
+
+interface UchatSubscriberLookup {
+  workspace: UChatWorkspaceRow;
+  userNs: string;
+  snapshot: JsonRecord;
+  currentTags: string[];
+}
+
+interface NormalizedWebhookEvent {
+  source: WebhookSource;
+  eventType: string;
+  externalContactId: string | null;
+  contact: {
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  payload: JsonRecord;
+}
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders,
+    },
+  });
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map(nonEmptyString).filter((value): value is string => Boolean(value)))];
+}
+
+function splitName(fullName?: string | null) {
+  const value = nonEmptyString(fullName);
+  if (!value) return { firstName: null, lastName: null };
+
+  const parts = value.split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || null,
+    lastName: parts.slice(1).join(" ") || null,
+  };
+}
+
+function assignNestedValue(target: JsonRecord, key: string, value: string) {
+  const tokens = key
+    .replace(/\]/g, "")
+    .split(/\[|\./)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) return;
+
+  let current: JsonRecord = target;
+  tokens.forEach((token, index) => {
+    if (index === tokens.length - 1) {
+      current[token] = value;
+      return;
+    }
+
+    if (!isRecord(current[token])) {
+      current[token] = {};
+    }
+
+    current = current[token] as JsonRecord;
+  });
+}
+
+function parseUrlEncodedBody(text: string) {
+  const params = new URLSearchParams(text);
+  const payload: JsonRecord = {};
+
+  for (const [key, value] of params.entries()) {
+    assignNestedValue(payload, key, value);
+  }
+
+  return payload;
+}
+
+async function parseRequestBody(request: Request) {
+  const contentType = request.headers.get("content-type") || "";
+  const rawText = await request.text();
+
+  if (!rawText.trim()) {
+    return {} as JsonRecord;
+  }
+
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(rawText) as JsonRecord;
+    } catch {
+      throw new ProcessContactError("Invalid JSON body", 400);
+    }
+  }
+
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    return parseUrlEncodedBody(rawText);
+  }
+
+  try {
+    return JSON.parse(rawText) as JsonRecord;
+  } catch {
+    return parseUrlEncodedBody(rawText);
+  }
+}
+
+function findStringDeep(node: unknown, keys: string[]): string | null {
+  const normalizedKeys = new Set(keys.map(normalizeKey));
+
+  function walk(value: unknown): string | null {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const nested = walk(item);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    if (!isRecord(value)) return null;
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (normalizedKeys.has(normalizeKey(key))) {
+        if (typeof nestedValue === "string" || typeof nestedValue === "number") {
+          return String(nestedValue).trim() || null;
+        }
+      }
+
+      const nested = walk(nestedValue);
+      if (nested) return nested;
+    }
+
+    return null;
+  }
+
+  return walk(node);
+}
+
+function collectStringListDeep(node: unknown, keys: string[]) {
+  const normalizedKeys = new Set(keys.map(normalizeKey));
+  const values: string[] = [];
+
+  function pushValue(value: unknown) {
+    if (typeof value === "string") {
+      value
+        .split(/[,\n|]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .forEach((item) => values.push(item));
+      return;
+    }
+
+    if (typeof value === "number") {
+      values.push(String(value));
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => pushValue(item));
+    }
+  }
+
+  function walk(value: unknown) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item));
+      return;
+    }
+
+    if (!isRecord(value)) return;
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (normalizedKeys.has(normalizeKey(key))) {
+        pushValue(nestedValue);
+      }
+      walk(nestedValue);
+    }
+  }
+
+  walk(node);
+  return uniqueStrings(values);
+}
+
+function extractGenericContact(payload: JsonRecord) {
+  const name =
+    findStringDeep(payload, ["name", "full_name", "fullname"]) ||
+    uniqueStrings([
+      findStringDeep(payload, ["first_name", "firstname", "first"]),
+      findStringDeep(payload, ["last_name", "lastname", "last"]),
+    ]).join(" ") ||
+    null;
+
+  return {
+    name,
+    email: findStringDeep(payload, ["email"]),
+    phone:
+      findStringDeep(payload, ["phone", "telephone", "whatsapp", "mobile", "cellphone"]) ||
+      null,
+  };
+}
+
+function normalizeWebhookSource(value: string | null) {
+  if (!value) return null;
+  const normalized = normalizeKey(value);
+
+  if (normalized === "activecampaign") return "activecampaign";
+  if (normalized === "manychat") return "manychat";
+  if (normalized === "typebot") return "typebot";
+  if (normalized === "sendflow") return "sendflow";
+  if (normalized === "uchat") return "uchat";
+
+  return null;
+}
+
+function normalizeIncomingWebhook(
+  source: WebhookSource,
+  payload: JsonRecord,
+): NormalizedWebhookEvent {
+  const contact = extractGenericContact(payload);
+  const eventType =
+    findStringDeep(payload, ["event_type", "event", "type", "trigger_name"]) ||
+    "webhook_received";
+
+  const externalContactId =
+    findStringDeep(payload, [
+      "external_contact_id",
+      "contact_id",
+      "user_ns",
+      "subscriber_id",
+      "contactid",
+      "id",
+      "result_id",
+    ]) || null;
+
+  if (source === "activecampaign") {
+    return {
+      source,
+      eventType,
+      externalContactId,
+      contact: {
+        name:
+          uniqueStrings([
+            findStringDeep(payload, ["first_name", "firstname"]),
+            findStringDeep(payload, ["last_name", "lastname"]),
+          ]).join(" ") || contact.name,
+        email: findStringDeep(payload, ["email"]) || contact.email,
+        phone: findStringDeep(payload, ["phone"]) || contact.phone,
+      },
+      payload,
+    };
+  }
+
+  return {
+    source,
+    eventType,
+    externalContactId,
+    contact,
+    payload,
+  };
+}
+
+async function requestJson(
+  url: string,
+  init: RequestInit,
+) {
+  const response = await fetch(url, init);
+  const rawText = await response.text();
+  let parsed: unknown = {};
+
+  if (rawText.trim()) {
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = { rawText };
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${rawText}`);
+  }
+
+  return parsed;
+}
+
+function normalizeActiveCampaignBaseUrl(apiUrl: string) {
+  const trimmed = apiUrl.trim().replace(/\/+$/, "");
+  return trimmed.endsWith("/api/3") ? trimmed.slice(0, -6) : trimmed;
+}
+
+async function activeCampaignRequest(
+  apiUrl: string,
+  apiKey: string,
+  path: string,
+  method = "GET",
+  body?: unknown,
+  query: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(`${normalizeActiveCampaignBaseUrl(apiUrl)}${path}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  return await requestJson(url.toString(), {
+    method,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Api-Token": apiKey,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function uchatRequest(
+  apiToken: string,
+  path: string,
+  method = "GET",
+  body?: unknown,
+  query: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(`https://www.uchat.com.au/api${path}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  return await requestJson(url.toString(), {
+    method,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiToken}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+function parseNamedTags(value: unknown) {
+  if (!Array.isArray(value)) return [] as NamedTag[];
+
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const alias = nonEmptyString(item.alias);
+      const tag = nonEmptyString(item.tag);
+      if (!alias || !tag) return null;
+      return { alias, tag };
+    })
+    .filter((item): item is NamedTag => Boolean(item));
+}
+
+function extractTagNames(payload: JsonRecord) {
+  return collectStringListDeep(payload, ["tags", "tag", "tag_name"]);
+}
+
+function extractTagAliases(payload: JsonRecord) {
+  return uniqueStrings([
+    ...collectStringListDeep(payload, ["tag_aliases", "tag_alias", "state", "states", "status"]),
+    findStringDeep(payload, ["event_type", "event"]),
+  ]);
+}
+
+function extractUchatSubscriberTags(payload: JsonRecord) {
+  return uniqueStrings([
+    ...collectStringListDeep(payload, [
+      "tags",
+      "tag",
+      "tag_name",
+      "tag_names",
+      "user_tags",
+      "labels",
+      "subscriber_tags",
+    ]),
+    ...collectStringListDeep(payload, ["state", "states", "status"]),
+  ]);
+}
+
+function resolveActiveCampaignTags(payload: JsonRecord, namedTags: NamedTag[]) {
+  const directTags = extractTagNames(payload);
+  const aliases = extractTagAliases(payload).map(normalizeKey);
+  const mappedTags = namedTags
+    .filter((item) => aliases.includes(normalizeKey(item.alias)))
+    .map((item) => item.tag);
+
+  return uniqueStrings([...directTags, ...mappedTags]);
+}
+
+async function fetchLaunch(
+  supabase: AnySupabaseClient,
+  launchId: string | null,
+  launchSlug: string | null,
+) {
+  const query = launchId
+    ? supabase
+        .from("launches")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+        .eq("id", launchId)
+    : supabase
+        .from("launches")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+        .eq("slug", launchSlug);
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error || !data) {
+    throw new ProcessContactError("Launch not found", 404, error?.message);
+  }
+
+  return data as LaunchRow;
+}
+
+async function fetchLaunchWorkspaces(
+  supabase: AnySupabaseClient,
+  launchId: string,
+) {
+  const { data, error } = await supabase
+    .from("uchat_workspaces")
+    .select("id, workspace_name, workspace_id, api_token, welcome_subflow_ns, default_tag_name")
+    .eq("launch_id", launchId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new ProcessContactError("Failed to load UChat workspaces", 500, error.message);
+  }
+
+  return (data || []) as UChatWorkspaceRow[];
+}
+
+async function fetchLeadContact(
+  supabase: AnySupabaseClient,
+  contactId: string,
+) {
+  const { data, error } = await supabase
+    .from("lead_contacts")
+    .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
+    .eq("id", contactId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new ProcessContactError("Canonical contact not found after processing", 500, error?.message);
+  }
+
+  return data as LeadContactRow;
+}
+
+async function fetchLeadIdentity(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string,
+  source: string,
+) {
+  const { data } = await supabase
+    .from("lead_contact_identities")
+    .select("id, external_contact_id, raw_snapshot")
+    .eq("launch_id", launchId)
+    .eq("contact_id", contactId)
+    .eq("source", source)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return data as { id: string; external_contact_id: string | null; raw_snapshot: unknown } | null;
+}
+
+async function upsertLeadIdentity(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string,
+  source: string,
+  externalContactId: string,
+  email: string | null,
+  phone: string | null,
+  rawSnapshot: JsonRecord,
+) {
+  const { data: existing } = await supabase
+    .from("lead_contact_identities")
+    .select("id")
+    .eq("launch_id", launchId)
+    .eq("source", source)
+    .eq("external_contact_id", externalContactId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    await supabase
+      .from("lead_contact_identities")
+      .update({
+        contact_id: contactId,
+        external_email: email,
+        external_phone: phone,
+        normalized_phone: phone,
+        raw_snapshot: rawSnapshot,
+      })
+      .eq("id", existing.id);
+    return;
+  }
+
+  await supabase.from("lead_contact_identities").insert({
+    launch_id: launchId,
+    contact_id: contactId,
+    source,
+    external_contact_id: externalContactId,
+    external_email: email,
+    external_phone: phone,
+    normalized_phone: phone,
+    raw_snapshot: rawSnapshot,
+  });
+}
+
+async function insertProcessingLog(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string | null,
+  eventId: string | null,
+  source: string,
+  level: "info" | "warning" | "error" | "success",
+  code: string,
+  title: string,
+  message: string,
+  details: JsonRecord = {},
+) {
+  await supabase.from("contact_processing_logs").insert({
+    launch_id: launchId,
+    contact_id: contactId,
+    event_id: eventId,
+    source,
+    level,
+    code,
+    title,
+    message,
+    details,
+  });
+}
+
+async function createRoutingAction(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string,
+  eventId: string,
+  source: string,
+  target: string,
+  actionType: string,
+  actionKey: string | null,
+  requestPayload: JsonRecord,
+) {
+  const { data, error } = await supabase
+    .from("contact_routing_actions")
+    .insert({
+      launch_id: launchId,
+      contact_id: contactId,
+      event_id: eventId,
+      source,
+      target,
+      action_type: actionType,
+      action_key: actionKey,
+      request_payload: requestPayload,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new ProcessContactError("Failed to create routing action", 500, error?.message);
+  }
+
+  return (data as RoutingActionRow).id;
+}
+
+async function updateRoutingAction(
+  supabase: AnySupabaseClient,
+  actionId: string,
+  status: "success" | "failed" | "skipped",
+  responsePayload: JsonRecord,
+  errorMessage?: string | null,
+) {
+  await supabase
+    .from("contact_routing_actions")
+    .update({
+      status,
+      response_payload: responsePayload,
+      error_message: errorMessage || null,
+    })
+    .eq("id", actionId);
+}
+
+async function hasSuccessfulRoutingAction(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string,
+  source: string,
+  target: string,
+  actionType: string,
+  actionKey: string | null,
+) {
+  const query = supabase
+    .from("contact_routing_actions")
+    .select("id")
+    .eq("launch_id", launchId)
+    .eq("contact_id", contactId)
+    .eq("source", source)
+    .eq("target", target)
+    .eq("action_type", actionType)
+    .eq("status", "success");
+
+  const { data } = actionKey
+    ? await query.eq("action_key", actionKey).limit(1).maybeSingle()
+    : await query.is("action_key", null).limit(1).maybeSingle();
+
+  return Boolean(data?.id);
+}
+
+async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
+  const tags: Array<{ id: string; tag: string }> = [];
+  let offset = 0;
+
+  while (true) {
+    const payload = await activeCampaignRequest(apiUrl, apiKey, "/api/3/tags", "GET", undefined, {
+      limit: 100,
+      offset,
+    });
+
+    const batch = Array.isArray((payload as JsonRecord).tags)
+      ? ((payload as JsonRecord).tags as JsonRecord[])
+      : [];
+
+    if (batch.length === 0) break;
+
+    batch.forEach((item) => {
+      const id = nonEmptyString(item.id);
+      const tag = nonEmptyString(item.tag);
+      if (id && tag) tags.push({ id, tag });
+    });
+
+    offset += batch.length;
+    if (batch.length < 100) break;
+  }
+
+  return tags;
+}
+
+async function resolveActiveCampaignTagId(
+  launch: LaunchRow,
+  tagLabel: string,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) {
+    throw new ProcessContactError("ActiveCampaign is not configured for this launch", 400);
+  }
+
+  if (/^\d+$/.test(tagLabel)) {
+    return tagLabel;
+  }
+
+  const existingTags = await loadAllActiveCampaignTags(launch.ac_api_url, launch.ac_api_key);
+  const match = existingTags.find((item) => normalizeKey(item.tag) === normalizeKey(tagLabel));
+
+  if (match?.id) return match.id;
+
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    "/api/3/tags",
+    "POST",
+    {
+      tag: {
+        tag: tagLabel,
+        tagType: "contact",
+        description: `Launch Hub auto-created tag for ${launch.name}`,
+      },
+    },
+  );
+
+  const createdTag = isRecord((payload as JsonRecord).tag) ? ((payload as JsonRecord).tag as JsonRecord) : {};
+  const createdId = nonEmptyString(createdTag.id);
+
+  if (!createdId) {
+    throw new ProcessContactError("Failed to create ActiveCampaign tag", 500);
+  }
+
+  return createdId;
+}
+
+async function syncContactToActiveCampaign(
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  tagNames: string[],
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) {
+    throw new ProcessContactError("ActiveCampaign is not configured for this launch", 400);
+  }
+
+  if (!contact.primary_email && !contact.primary_phone) {
+    throw new ProcessContactError("The contact does not have email or phone to send to ActiveCampaign", 400);
+  }
+
+  const { firstName, lastName } = splitName(contact.primary_name);
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    "/api/3/contact/sync",
+    "POST",
+    {
+      contact: {
+        email: contact.primary_email || undefined,
+        phone: contact.primary_phone || undefined,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+      },
+    },
+  );
+
+  const syncedContact = isRecord((payload as JsonRecord).contact) ? ((payload as JsonRecord).contact as JsonRecord) : {};
+  const activeContactId = nonEmptyString(syncedContact.id);
+
+  if (!activeContactId) {
+    throw new ProcessContactError("ActiveCampaign did not return the synced contact id", 500);
+  }
+
+  if (launch.ac_default_list_id) {
+    await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      "/api/3/contactLists",
+      "POST",
+      {
+        contactList: {
+          list: launch.ac_default_list_id,
+          contact: activeContactId,
+          status: 1,
+        },
+      },
+    );
+  }
+
+  const appliedTags: string[] = [];
+  for (const tagName of uniqueStrings(tagNames)) {
+    const tagId = await resolveActiveCampaignTagId(launch, tagName);
+    await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      "/api/3/contactTags",
+      "POST",
+      {
+        contactTag: {
+          contact: activeContactId,
+          tag: tagId,
+        },
+      },
+    );
+    appliedTags.push(tagName);
+  }
+
+  return {
+    activeContactId,
+    appliedTags,
+  };
+}
+
+function pickPreferredWorkspace(
+  workspaces: UChatWorkspaceRow[],
+  payload: JsonRecord,
+) {
+  const requestedWorkspaceId =
+    findStringDeep(payload, ["workspace_id", "workspaceId"]) ||
+    findStringDeep(payload, ["workspace"]) ||
+    null;
+
+  if (requestedWorkspaceId) {
+    const match = workspaces.find((workspace) =>
+      [workspace.id, workspace.workspace_id].filter(Boolean).includes(requestedWorkspaceId)
+    );
+    if (match) return match;
+  }
+
+  return workspaces.find((workspace) => nonEmptyString(workspace.api_token)) || null;
+}
+
+function pickFirstSubscriberRow(payload: unknown) {
+  if (Array.isArray((payload as JsonRecord)?.data)) {
+    return (((payload as JsonRecord).data as JsonRecord[])[0] || null) as JsonRecord | null;
+  }
+
+  if (isRecord((payload as JsonRecord)?.subscriber)) {
+    return ((payload as JsonRecord).subscriber as JsonRecord) || null;
+  }
+
+  if (isRecord(payload)) {
+    return payload;
+  }
+
+  return null;
+}
+
+async function fetchUchatSubscriberByQuery(
+  workspace: UChatWorkspaceRow,
+  query: Record<string, string | number | undefined>,
+) {
+  const response = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
+    limit: 1,
+    page: 1,
+    ...query,
+  });
+
+  return pickFirstSubscriberRow(response);
+}
+
+async function findUchatSubscriberForContact(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  workspace: UChatWorkspaceRow,
+) {
+  const inboundUserNs =
+    findStringDeep(payload, ["user_ns", "subscriber_id", "subscriber.user_ns"]) || null;
+  const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
+  const knownUserNs = inboundUserNs || nonEmptyString(existingIdentity?.external_contact_id);
+
+  if (knownUserNs) {
+    const match = await fetchUchatSubscriberByQuery(workspace, { user_ns: knownUserNs });
+    if (match) {
+      return {
+        userNs: knownUserNs,
+        snapshot: match,
+      };
+    }
+  }
+
+  if (contact.primary_phone) {
+    const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
+      phone: contact.primary_phone,
+    });
+
+    const userNs = nonEmptyString(phoneMatch?.user_ns);
+    if (phoneMatch && userNs) {
+      return {
+        userNs,
+        snapshot: phoneMatch,
+      };
+    }
+  }
+
+  if (contact.primary_email) {
+    const emailMatch = await fetchUchatSubscriberByQuery(workspace, {
+      email: contact.primary_email,
+    });
+
+    const userNs = nonEmptyString(emailMatch?.user_ns);
+    if (emailMatch && userNs) {
+      return {
+        userNs,
+        snapshot: emailMatch,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function loadUchatSubscriberState(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+) {
+  const workspaces = await fetchLaunchWorkspaces(supabase, launchId);
+  const workspace = pickPreferredWorkspace(workspaces, payload);
+
+  if (!workspace) {
+    return null;
+  }
+
+  const subscriber = await findUchatSubscriberForContact(
+    supabase,
+    launchId,
+    contact,
+    payload,
+    workspace,
+  );
+
+  if (!subscriber) {
+    return null;
+  }
+
+  return {
+    workspace,
+    userNs: subscriber.userNs,
+    snapshot: subscriber.snapshot,
+    currentTags: extractUchatSubscriberTags(subscriber.snapshot),
+  } satisfies UchatSubscriberLookup;
+}
+
+function enrichPayloadWithUchatState(
+  payload: JsonRecord,
+  subscriberState: UchatSubscriberLookup | null,
+) {
+  if (!subscriberState) {
+    return payload;
+  }
+
+  const mergedTags = uniqueStrings([
+    ...extractTagNames(payload),
+    ...subscriberState.currentTags,
+  ]);
+  const mergedAliases = uniqueStrings([
+    ...extractTagAliases(payload),
+    ...subscriberState.currentTags,
+  ]);
+
+  return {
+    ...payload,
+    tags: mergedTags,
+    tag_names: mergedTags,
+    tag_aliases: mergedAliases,
+    uchat_current_tags: subscriberState.currentTags,
+    uchat_workspace_id: subscriberState.workspace.workspace_id,
+    uchat_user_ns: subscriberState.userNs,
+    uchat_subscriber: subscriberState.snapshot,
+  } satisfies JsonRecord;
+}
+
+async function findOrCreateUchatUser(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contact: LeadContactRow,
+  workspace: UChatWorkspaceRow,
+) {
+  const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
+  const existingUserNs = nonEmptyString(existingIdentity?.external_contact_id);
+
+  if (existingUserNs) {
+    return existingUserNs;
+  }
+
+  if (contact.primary_phone) {
+    const phoneSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
+      limit: 1,
+      page: 1,
+      phone: contact.primary_phone,
+    });
+
+    const phoneMatch = Array.isArray((phoneSearch as JsonRecord).data)
+      ? (((phoneSearch as JsonRecord).data as JsonRecord[])[0] || null)
+      : null;
+
+    const userNs = nonEmptyString(phoneMatch?.user_ns);
+    if (userNs) return userNs;
+  }
+
+  if (contact.primary_email) {
+    const emailSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
+      limit: 1,
+      page: 1,
+      email: contact.primary_email,
+    });
+
+    const emailMatch = Array.isArray((emailSearch as JsonRecord).data)
+      ? (((emailSearch as JsonRecord).data as JsonRecord[])[0] || null)
+      : null;
+
+    const userNs = nonEmptyString(emailMatch?.user_ns);
+    if (userNs) return userNs;
+  }
+
+  const { firstName, lastName } = splitName(contact.primary_name);
+  const created = await uchatRequest(workspace.api_token, "/subscriber/create", "POST", {
+    first_name: firstName || undefined,
+    last_name: lastName || undefined,
+    name: contact.primary_name || undefined,
+    phone: contact.primary_phone || undefined,
+    email: contact.primary_email || undefined,
+  });
+
+  const createdUserNs =
+    findStringDeep(created, ["user_ns"]) ||
+    findStringDeep(created, ["subscriber.user_ns"]) ||
+    null;
+
+  if (!createdUserNs) {
+    throw new ProcessContactError("UChat did not return user_ns after subscriber creation", 500);
+  }
+
+  return createdUserNs;
+}
+
+async function routeToUchat(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  eventId: string,
+  source: WebhookSource,
+  payload: JsonRecord,
+) {
+  const workspaces = await fetchLaunchWorkspaces(supabase, launch.id);
+  const workspace = pickPreferredWorkspace(workspaces, payload);
+
+  if (!workspace) {
+    throw new ProcessContactError("No valid UChat workspace configured for this launch", 400);
+  }
+
+  const userNs = await findOrCreateUchatUser(supabase, launch.id, contact, workspace);
+
+  await upsertLeadIdentity(
+    supabase,
+    launch.id,
+    contact.id,
+    "uchat",
+    userNs,
+    contact.primary_email,
+    contact.primary_phone,
+    {
+      workspace_id: workspace.workspace_id,
+      workspace_name: workspace.workspace_name,
+      user_ns: userNs,
+    },
+  );
+
+  const subflowNs =
+    findStringDeep(payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) ||
+    nonEmptyString(workspace.welcome_subflow_ns);
+  const tagName =
+    findStringDeep(payload, ["tag_name", "uchat_tag"]) ||
+    nonEmptyString(workspace.default_tag_name);
+
+  const responses: JsonRecord[] = [];
+
+  if (subflowNs) {
+    const actionKey = `${workspace.id}:subflow:${subflowNs}`;
+    if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "send-sub-flow", actionKey))) {
+      const actionId = await createRoutingAction(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        source,
+        "uchat",
+        "send-sub-flow",
+        actionKey,
+        { workspaceId: workspace.workspace_id, userNs, subflowNs },
+      );
+
+      try {
+        const response = (await uchatRequest(workspace.api_token, "/subscriber/send-sub-flow", "POST", {
+          user_ns: userNs,
+          sub_flow_ns: subflowNs,
+        })) as JsonRecord;
+
+        await updateRoutingAction(supabase, actionId, "success", response);
+        responses.push({ action: "send-sub-flow", response });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await updateRoutingAction(supabase, actionId, "failed", {}, message);
+        throw error;
+      }
+    }
+  }
+
+  if (tagName) {
+    const actionKey = `${workspace.id}:tag:${tagName}`;
+    if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "add-tag", actionKey))) {
+      const actionId = await createRoutingAction(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        source,
+        "uchat",
+        "add-tag",
+        actionKey,
+        { workspaceId: workspace.workspace_id, userNs, tagName },
+      );
+
+      try {
+        const response = (await uchatRequest(workspace.api_token, "/subscriber/add-tag-by-name", "POST", {
+          user_ns: userNs,
+          tag_name: tagName,
+        })) as JsonRecord;
+
+        await updateRoutingAction(supabase, actionId, "success", response);
+        responses.push({ action: "add-tag", response });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await updateRoutingAction(supabase, actionId, "failed", {}, message);
+        throw error;
+      }
+    }
+  }
+
+  if (!subflowNs && !tagName) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "warning",
+      "UCHAT_NO_ACTION_CONFIGURED",
+      "Roteamento sem acao no UChat",
+      "O evento chegou ao Launch Hub, mas nao existe subflow ou tag padrao configurados para enviar de volta ao UChat.",
+      { workspaceId: workspace.workspace_id },
+    );
+  }
+
+  return {
+    target: "uchat",
+    workspaceId: workspace.workspace_id,
+    userNs,
+    dispatched: responses.length,
+  };
+}
+
+async function routeToActiveCampaign(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  eventId: string,
+  source: WebhookSource,
+  payload: JsonRecord,
+) {
+  const tagNames = resolveActiveCampaignTags(payload, parseNamedTags(launch.ac_named_tags));
+
+  if (source === "uchat" && tagNames.length === 0) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "info",
+      "UCHAT_TAG_NOT_ELIGIBLE",
+      "Contato do UChat sem tag elegivel",
+      "O webhook do UChat chegou, mas o subscriber nao estava com nenhuma tag/estado mapeados para envio ao ActiveCampaign.",
+      {
+        inboundTags: extractTagNames(payload),
+        inboundAliases: extractTagAliases(payload),
+        subscriberTags: Array.isArray(payload.uchat_current_tags) ? payload.uchat_current_tags : [],
+      },
+    );
+
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "uchat_no_matching_tag",
+    };
+  }
+
+  const actionKey = JSON.stringify({
+    listId: launch.ac_default_list_id || null,
+    tags: [...tagNames].sort(),
+  });
+
+  if (await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "activecampaign", "sync-contact", actionKey)) {
+    return {
+      target: "activecampaign",
+      skipped: true,
+    };
+  }
+
+  const actionId = await createRoutingAction(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    source,
+    "activecampaign",
+    "sync-contact",
+    actionKey,
+    {
+      email: contact.primary_email,
+      phone: contact.primary_phone,
+      tags: tagNames,
+      listId: launch.ac_default_list_id,
+    },
+  );
+
+  try {
+    const response = await syncContactToActiveCampaign(launch, contact, tagNames);
+
+    await upsertLeadIdentity(
+      supabase,
+      launch.id,
+      contact.id,
+      "activecampaign",
+      response.activeContactId,
+      contact.primary_email,
+      contact.primary_phone,
+      {
+        contact_id: response.activeContactId,
+        applied_tags: response.appliedTags,
+      },
+    );
+
+    await updateRoutingAction(supabase, actionId, "success", response as unknown as JsonRecord);
+    return {
+      target: "activecampaign",
+      contactId: response.activeContactId,
+      tagsApplied: response.appliedTags,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await updateRoutingAction(supabase, actionId, "failed", {}, message);
+    throw error;
+  }
+}
+
+async function dispatchRoutes(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+  processedContactId: string,
+  eventId: string,
+) {
+  const contact = await fetchLeadContact(supabase, processedContactId);
+  const namedTags = parseNamedTags(launch.ac_named_tags);
+  const activePayloadTags = extractTagNames(normalizedEvent.payload);
+  const configuredTagNames = namedTags.map((item) => item.tag);
+  const routingPayload =
+    normalizedEvent.source === "uchat"
+      ? enrichPayloadWithUchatState(
+          normalizedEvent.payload,
+          await loadUchatSubscriberState(
+            supabase,
+            launch.id,
+            contact,
+            normalizedEvent.payload,
+          ),
+        )
+      : normalizedEvent.payload;
+
+  if (
+    normalizedEvent.source === "activecampaign" &&
+    activePayloadTags.some((tagName) =>
+      configuredTagNames.some((configuredTag) => normalizeKey(configuredTag) === normalizeKey(tagName))
+    )
+  ) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "info",
+      "ACTIVE_ALREADY_TAGGED",
+      "Contato ja possui as tags",
+      "O evento vindo do ActiveCampaign ja chegou com tags do lancamento. Nenhum retorno para o UChat foi disparado.",
+      { inboundTags: activePayloadTags, configuredTags: configuredTagNames },
+    );
+
+    return {
+      skipped: true,
+      reason: "activecampaign_already_tagged",
+    };
+  }
+
+  if (["uchat", "manychat", "typebot"].includes(normalizedEvent.source)) {
+    const routed = await routeToActiveCampaign(
+      supabase,
+      launch,
+      contact,
+      eventId,
+      normalizedEvent.source,
+      routingPayload,
+    );
+
+    if (!("skipped" in routed) || !routed.skipped) {
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "success",
+        "ROUTED_TO_ACTIVECAMPAIGN",
+        "Contato enviado ao ActiveCampaign",
+        "O Launch Hub enviou o contato tratado para o ActiveCampaign depois da verificacao de estado.",
+        routed as unknown as JsonRecord,
+      );
+    }
+
+    return routed;
+  }
+
+  if (["activecampaign", "sendflow"].includes(normalizedEvent.source)) {
+    const routed = await routeToUchat(
+      supabase,
+      launch,
+      contact,
+      eventId,
+      normalizedEvent.source,
+      normalizedEvent.payload,
+    );
+
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "success",
+      "ROUTED_TO_UCHAT",
+      "Contato enviado ao UChat",
+      "O Launch Hub encaminhou o contato tratado para o UChat com a acao configurada do lancamento.",
+      routed as unknown as JsonRecord,
+    );
+
+    return routed;
+  }
+
+  return { skipped: true, reason: "no_route_defined" };
+}
+
+Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return jsonResponse({ error: "Missing Supabase environment variables" }, 500);
+  }
+
+  const url = new URL(request.url);
+  const source = normalizeWebhookSource(url.searchParams.get("source"));
+  const launchId = nonEmptyString(url.searchParams.get("launchId"));
+  const launchSlug = nonEmptyString(url.searchParams.get("launchSlug"));
+  const token = nonEmptyString(url.searchParams.get("token"));
+
+  if (!source) {
+    return jsonResponse({ error: "Missing or invalid source" }, 400);
+  }
+
+  if (!launchId && !launchSlug) {
+    return jsonResponse({ error: "launchId or launchSlug is required" }, 400);
+  }
+
+  try {
+    const payload = await parseRequestBody(request);
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const launch = await fetchLaunch(supabase, launchId, launchSlug);
+
+    if (!token || token !== launch.webhook_secret) {
+      return jsonResponse({ error: "Invalid webhook token" }, 403);
+    }
+
+    const normalizedEvent = normalizeIncomingWebhook(source, payload);
+
+    const processingResult = await processIncomingContactEvent(supabase, {
+      launchId: launch.id,
+      source: normalizedEvent.source,
+      eventType: normalizedEvent.eventType,
+      externalContactId: normalizedEvent.externalContactId,
+      contact: normalizedEvent.contact,
+      payload: normalizedEvent.payload,
+    } as IncomingEventBody);
+
+    if (processingResult.status === "rejected" || !processingResult.contactId || !processingResult.eventId) {
+      return jsonResponse({
+        accepted: false,
+        processing: processingResult,
+      });
+    }
+
+    const routingResult = await dispatchRoutes(
+      supabase,
+      launch,
+      normalizedEvent,
+      processingResult.contactId,
+      processingResult.eventId,
+    );
+
+    return jsonResponse({
+      accepted: true,
+      processing: processingResult,
+      routing: routingResult,
+    });
+  } catch (error) {
+    if (error instanceof ProcessContactError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          details: error.details ?? null,
+        },
+        error.statusCode,
+      );
+    }
+
+    console.error("launch-webhook-router failed", error);
+    return jsonResponse({ error: "Unexpected routing error" }, 500);
+  }
+});

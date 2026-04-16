@@ -27,12 +27,19 @@ const schemaProbes: SchemaProbe[] = [
   { table: "launches", select: "id", kind: "table", description: "Tabela principal de lancamentos" },
   {
     table: "launches",
-    select: "manychat_api_url",
+    select: "webhook_secret",
     kind: "column",
-    column: "manychat_api_url",
-    description: "Colunas de conexao do ManyChat em launches",
+    column: "webhook_secret",
+    description: "Segredo de webhook por lancamento",
   },
   { table: "uchat_workspaces", select: "id", kind: "table", description: "Tabela de workspaces do UChat" },
+  {
+    table: "uchat_workspaces",
+    select: "welcome_subflow_ns",
+    kind: "column",
+    column: "welcome_subflow_ns",
+    description: "Acao padrao de boas-vindas no UChat",
+  },
   {
     table: "launch_dedupe_settings",
     select: "launch_id",
@@ -59,10 +66,10 @@ const schemaProbes: SchemaProbe[] = [
     description: "Tabela de logs operacionais do processamento",
   },
   {
-    table: "platform_sync_runs",
+    table: "contact_routing_actions",
     select: "id",
     kind: "table",
-    description: "Tabela de rodadas de sincronizacao com plataformas externas",
+    description: "Tabela de acoes de roteamento para ActiveCampaign e UChat",
   },
 ];
 
@@ -151,8 +158,8 @@ export function buildLovableBootstrapPrompt(issues: SchemaIssue[]) {
     "Conecte este projeto ao backend Supabase atual do Lovable e aplique o schema do app.",
     "Use o arquivo supabase/bootstrap.sql como fonte principal ou execute os arquivos de supabase/migrations em ordem cronologica.",
     "Garanta que as estruturas abaixo existam antes de continuar:",
-    missingItems || "profiles, launches, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, platform_sync_runs",
-    "Depois publique ou atualize as edge functions process-contact-event, sync-platform-contacts e supabase-project-connector.",
-    "Depois confirme que o frontend pode ler launches, launch_dedupe_settings e contact_processing_logs sem erro de schema ausente.",
+    missingItems || "profiles, launches, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, contact_routing_actions",
+    "Depois publique ou atualize as edge functions process-contact-event, launch-webhook-router e supabase-project-connector.",
+    "Depois confirme que o frontend pode ler launches, uchat_workspaces, inbound_contact_events e contact_routing_actions sem erro de schema ausente.",
   ].join("\n");
 }

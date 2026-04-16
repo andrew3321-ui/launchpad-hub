@@ -3,37 +3,45 @@ import { Input } from "@/components/ui/input";
 import { Plus, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-interface UChatWorkspace {
+export interface UChatWorkspaceDraft {
   id?: string;
   workspace_name: string;
   workspace_id: string;
-  bot_id: string;
   api_token: string;
-  max_subscribers: number;
-  current_count: number;
+  welcome_subflow_ns: string;
+  default_tag_name: string;
 }
 
 interface Props {
-  workspaces: UChatWorkspace[];
-  onChange: (workspaces: UChatWorkspace[]) => void;
+  workspaces: UChatWorkspaceDraft[];
+  onChange: (workspaces: UChatWorkspaceDraft[]) => void;
 }
+
+const emptyWorkspace: UChatWorkspaceDraft = {
+  workspace_name: "",
+  workspace_id: "",
+  api_token: "",
+  welcome_subflow_ns: "",
+  default_tag_name: "",
+};
 
 export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
   const addWorkspace = () => {
-    onChange([
-      ...workspaces,
-      { workspace_name: "", workspace_id: "", bot_id: "", api_token: "", max_subscribers: 1000, current_count: 0 },
-    ]);
+    onChange([...workspaces, { ...emptyWorkspace }]);
   };
 
-  const update = (index: number, field: keyof UChatWorkspace, value: string | number) => {
+  const update = (
+    index: number,
+    field: keyof UChatWorkspaceDraft,
+    value: string,
+  ) => {
     const updated = [...workspaces];
     updated[index] = { ...updated[index], [field]: value };
     onChange(updated);
   };
 
   const remove = (index: number) => {
-    onChange(workspaces.filter((_, i) => i !== index));
+    onChange(workspaces.filter((_, currentIndex) => currentIndex !== index));
   };
 
   return (
@@ -43,9 +51,11 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nome (opcional)</TableHead>
+                <TableHead>Nome</TableHead>
                 <TableHead>Workspace ID</TableHead>
                 <TableHead>API Token</TableHead>
+                <TableHead>Subflow de boas-vindas</TableHead>
+                <TableHead>Tag padrao</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -56,7 +66,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                     <Input
                       value={workspace.workspace_name}
                       onChange={(event) => update(index, "workspace_name", event.target.value)}
-                      placeholder="Ex: Libras Principal"
+                      placeholder="Ex: Libras principal"
                       className="min-w-[170px]"
                     />
                   </TableCell>
@@ -64,7 +74,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                     <Input
                       value={workspace.workspace_id}
                       onChange={(event) => update(index, "workspace_id", event.target.value)}
-                      placeholder="ID do workspace"
+                      placeholder="Workspace ID"
                       className="min-w-[150px]"
                     />
                   </TableCell>
@@ -73,8 +83,24 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                       type="password"
                       value={workspace.api_token}
                       onChange={(event) => update(index, "api_token", event.target.value)}
-                      placeholder="Cole o token da API"
-                      className="min-w-[230px]"
+                      placeholder="API token"
+                      className="min-w-[210px]"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={workspace.welcome_subflow_ns}
+                      onChange={(event) => update(index, "welcome_subflow_ns", event.target.value)}
+                      placeholder="subflow_ns"
+                      className="min-w-[170px]"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={workspace.default_tag_name}
+                      onChange={(event) => update(index, "default_tag_name", event.target.value)}
+                      placeholder="tag padrao"
+                      className="min-w-[160px]"
                     />
                   </TableCell>
                   <TableCell>
@@ -90,8 +116,8 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
       )}
 
       <p className="text-sm text-muted-foreground">
-        Para importar do UChat, usamos somente o <span className="font-medium text-foreground">Workspace ID</span> e o{" "}
-        <span className="font-medium text-foreground">API Token</span>. O restante dos campos internos e preenchido automaticamente.
+        O Launch Hub usa o primeiro workspace valido como destino padrao para mandar de volta
+        o contato tratado ao UChat. Configure o subflow e/ou a tag que devem ser acionados.
       </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>

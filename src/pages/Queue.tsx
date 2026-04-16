@@ -4,39 +4,36 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useLaunch } from "@/contexts/LaunchContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { normalizeSyncRun, STALE_SYNC_ERROR_MESSAGE } from "@/lib/syncRuns";
 import { ListOrdered, Loader2 } from "lucide-react";
 
-type SyncSource = "activecampaign" | "uchat";
-type SyncStatus = "running" | "completed" | "failed";
+type EventSource = "activecampaign" | "manychat" | "typebot" | "sendflow" | "uchat" | "manual";
+type EventStatus = "pending" | "processed" | "ignored" | "error";
+type ActionStatus = "pending" | "success" | "failed" | "skipped";
 
-interface SyncRunRow {
+interface EventRow {
   id: string;
-  source: SyncSource;
-  status: SyncStatus;
-  processed_count: number;
-  created_count: number;
-  merged_count: number;
-  error_count: number;
-  skipped_count: number;
-  started_at: string;
-  finished_at: string | null;
-  last_error: string | null;
+  source: EventSource;
+  event_type: string;
+  processing_status: EventStatus;
+  received_at: string;
+  processing_summary: Record<string, unknown> | null;
 }
 
-interface ProcessingLogRow {
+interface ActionRow {
   id: string;
-  code: string;
+  source: EventSource;
+  target: string;
+  action_type: string;
+  status: ActionStatus;
+  action_key: string | null;
   created_at: string;
-  level: "info" | "warning" | "error" | "success";
-  message: string;
-  source: "activecampaign" | "manychat" | "uchat" | "manual";
-  title: string;
+  error_message: string | null;
 }
 
-function statusVariant(status: SyncStatus): "default" | "secondary" | "destructive" {
-  if (status === "failed") return "destructive";
-  if (status === "running") return "secondary";
+function statusVariant(status: ActionStatus | EventStatus): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "failed" || status === "error") return "destructive";
+  if (status === "pending") return "secondary";
+  if (status === "ignored" || status === "skipped") return "outline";
   return "default";
 }
 
@@ -44,8 +41,8 @@ export default function Queue() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [runs, setRuns] = useState<SyncRunRow[]>([]);
-  const [logs, setLogs] = useState<ProcessingLogRow[]>([]);
+  const [events, setEvents] = useState<EventRow[]>([]);
+  const [actions, setActions] = useState<ActionRow[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -53,8 +50,8 @@ export default function Queue() {
     const load = async (silent = false) => {
       if (!activeLaunch) {
         if (mounted) {
-          setRuns([]);
-          setLogs([]);
+          setEvents([]);
+          setActions([]);
           setLoading(false);
         }
         return;
@@ -65,58 +62,42 @@ export default function Queue() {
       }
 
       const [
-        { data: syncData, error: syncError },
-        { data: logData, error: logError },
+        { data: eventData, error: eventError },
+        { data: actionData, error: actionError },
       ] = await Promise.all([
         supabase
-          .from("platform_sync_runs")
-          .select("id, source, status, processed_count, created_count, merged_count, error_count, skipped_count, started_at, finished_at, last_error")
+          .from("inbound_contact_events")
+          .select("id, source, event_type, processing_status, received_at, processing_summary")
           .eq("launch_id", activeLaunch.id)
-          .order("started_at", { ascending: false })
-          .limit(12),
+          .order("received_at", { ascending: false })
+          .limit(20),
         supabase
-          .from("contact_processing_logs")
-          .select("id, code, created_at, level, message, source, title")
+          .from("contact_routing_actions")
+          .select("id, source, target, action_type, status, action_key, created_at, error_message")
           .eq("launch_id", activeLaunch.id)
           .order("created_at", { ascending: false })
-          .limit(20),
+          .limit(30),
       ]);
 
-      if (!silent && (syncError || logError)) {
+      if (!silent && (eventError || actionError)) {
         toast({
           title: "Erro ao carregar a fila",
-          description: syncError?.message || logError?.message || "Não foi possível carregar o estado da importação.",
+          description:
+            eventError?.message ||
+            actionError?.message ||
+            "Nao foi possivel carregar a fila operacional.",
           variant: "destructive",
         });
       }
 
       if (mounted) {
-        const fetchedRuns = (syncData || []) as SyncRunRow[];
-        const normalizedRuns = fetchedRuns.map((run) => normalizeSyncRun(run));
-        const staleRunIds = normalizedRuns
-          .filter((run, index) => fetchedRuns[index].status === "running" && run.status === "failed")
-          .map((run) => run.id);
-
-        if (staleRunIds.length > 0 && activeLaunch) {
-          void supabase
-            .from("platform_sync_runs")
-            .update({
-              status: "failed",
-              finished_at: new Date().toISOString(),
-              last_error: STALE_SYNC_ERROR_MESSAGE,
-            })
-            .in("id", staleRunIds)
-            .eq("launch_id", activeLaunch.id);
-        }
-
-        setRuns(normalizedRuns);
-        setLogs((logData || []) as ProcessingLogRow[]);
+        setEvents((eventData || []) as EventRow[]);
+        setActions((actionData || []) as ActionRow[]);
         setLoading(false);
       }
     };
 
     void load();
-
     const intervalId = window.setInterval(() => {
       void load(true);
     }, 4000);
@@ -127,7 +108,10 @@ export default function Queue() {
     };
   }, [activeLaunch, toast]);
 
-  const runningRuns = useMemo(() => runs.filter((run) => normalizeSyncRun(run).status === "running"), [runs]);
+  const pendingActions = useMemo(
+    () => actions.filter((action) => action.status === "pending").length,
+    [actions],
+  );
 
   if (!activeLaunch) {
     return (
@@ -138,8 +122,11 @@ export default function Queue() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lançamento</CardTitle>
-            <CardDescription>Escolha um lançamento para acompanhar as importações em andamento.</CardDescription>
+            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardDescription>
+              Escolha um lancamento para acompanhar os webhooks recebidos e as acoes que o
+              Launch Hub esta disparando.
+            </CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -153,7 +140,8 @@ export default function Queue() {
         <div>
           <h1 className="text-2xl font-bold">Fila</h1>
           <p className="text-sm text-muted-foreground">
-            Acompanhe as rodadas de importação e os eventos recentes do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Acompanhe os webhooks e o roteamento em tempo real do lancamento{" "}
+            <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
       </div>
@@ -161,21 +149,21 @@ export default function Queue() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Em andamento</CardTitle>
+            <CardTitle className="text-base">Eventos recebidos</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{runningRuns.length}</CardContent>
+          <CardContent className="text-3xl font-semibold">{events.length}</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Rodadas carregadas</CardTitle>
+            <CardTitle className="text-base">Acoes registradas</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{runs.length}</CardContent>
+          <CardContent className="text-3xl font-semibold">{actions.length}</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Logs recentes</CardTitle>
+            <CardTitle className="text-base">Pendentes agora</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{logs.length}</CardContent>
+          <CardContent className="text-3xl font-semibold">{pendingActions}</CardContent>
         </Card>
       </div>
 
@@ -187,33 +175,36 @@ export default function Queue() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Rodadas de sincronização</CardTitle>
-              <CardDescription>A tela atualiza sozinha enquanto houver importação acontecendo.</CardDescription>
+              <CardTitle>Webhooks recentes</CardTitle>
+              <CardDescription>
+                Cada evento recebido vira uma entrada na fila antes de passar pela base canonica.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {runs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhuma importação iniciada ainda para esse lançamento.</p>
+              {events.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nenhum webhook recebido ainda para esse lancamento.
+                </p>
               ) : (
-                runs.map((run) => (
-                  <div key={run.id} className="rounded-xl border p-4">
+                events.map((event) => (
+                  <div key={event.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">{run.source === "activecampaign" ? "ActiveCampaign" : "UChat"}</p>
-                        <Badge variant={statusVariant(normalizeSyncRun(run).status)}>
-                          {normalizeSyncRun(run).status === "running" ? "Em andamento" : normalizeSyncRun(run).status === "failed" ? "Falhou" : "Concluída"}
+                        <p className="font-medium">{event.source}</p>
+                        <Badge variant={statusVariant(event.processing_status)}>
+                          {event.processing_status}
                         </Badge>
+                        <Badge variant="outline">{event.event_type}</Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">{new Date(run.started_at).toLocaleString("pt-BR")}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(event.received_at).toLocaleString("pt-BR")}
+                      </p>
                     </div>
-
-                    <div className="mt-3 grid gap-2 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
-                      <p>Processados: {run.processed_count}</p>
-                      <p>Novos: {run.created_count}</p>
-                      <p>Mesclados: {run.merged_count}</p>
-                      <p>Erros: {run.error_count}</p>
-                    </div>
-
-                    {normalizeSyncRun(run).last_error && <p className="mt-3 text-sm text-destructive">Último erro: {normalizeSyncRun(run).last_error}</p>}
+                    {event.processing_summary && (
+                      <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border bg-muted/20 p-3 text-xs">
+                        {JSON.stringify(event.processing_summary, null, 2)}
+                      </pre>
+                    )}
                   </div>
                 ))
               )}
@@ -222,24 +213,38 @@ export default function Queue() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Eventos recentes</CardTitle>
-              <CardDescription>Os logs também atualizam automaticamente enquanto a importação roda.</CardDescription>
+              <CardTitle>Acoes disparadas</CardTitle>
+              <CardDescription>
+                Aqui ficam as saidas que o Launch Hub tentou mandar para ActiveCampaign e UChat.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {logs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum evento recente ainda.</p>
+            <CardContent className="space-y-4">
+              {actions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma acao de roteamento ainda para esse lancamento.
+                </p>
               ) : (
-                logs.map((log) => (
-                  <div key={log.id} className="rounded-xl border p-4">
+                actions.map((action) => (
+                  <div key={action.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">
-                        <p className="font-medium">{log.title}</p>
-                        <p className="text-sm text-muted-foreground">{log.message}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">
+                            {action.source} -&gt; {action.target}
+                          </p>
+                          <Badge variant={statusVariant(action.status)}>{action.status}</Badge>
+                          <Badge variant="outline">{action.action_type}</Badge>
+                        </div>
+                        {action.action_key && (
+                          <p className="text-xs text-muted-foreground">{action.action_key}</p>
+                        )}
+                        {action.error_message && (
+                          <p className="text-sm text-destructive">{action.error_message}</p>
+                        )}
                       </div>
-                      <div className="text-right">
-                        <Badge variant="outline">{log.source}</Badge>
-                        <p className="mt-2 text-xs text-muted-foreground">{new Date(log.created_at).toLocaleString("pt-BR")}</p>
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(action.created_at).toLocaleString("pt-BR")}
+                      </p>
                     </div>
                   </div>
                 ))

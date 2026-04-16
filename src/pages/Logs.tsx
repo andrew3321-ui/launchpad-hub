@@ -16,7 +16,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { FileText, Loader2 } from "lucide-react";
 
 type LogLevel = "info" | "warning" | "error" | "success";
-type LogSource = "activecampaign" | "manychat" | "uchat" | "manual";
+type LogSource =
+  | "activecampaign"
+  | "manychat"
+  | "typebot"
+  | "sendflow"
+  | "uchat"
+  | "manual";
 
 interface ProcessingLogRow {
   id: string;
@@ -39,6 +45,8 @@ const levelLabels: Record<LogLevel, string> = {
 const sourceLabels: Record<LogSource, string> = {
   activecampaign: "ActiveCampaign",
   manychat: "ManyChat",
+  typebot: "Typebot",
+  sendflow: "Sendflow",
   uchat: "UChat",
   manual: "Manual",
 };
@@ -144,9 +152,9 @@ export default function Logs() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lançamento</CardTitle>
+            <CardTitle>Selecione um lancamento</CardTitle>
             <CardDescription>
-              Escolha um lançamento na barra lateral para acompanhar os eventos processados e os erros de integração.
+              Escolha um lancamento na barra lateral para acompanhar os eventos processados e os erros de integracao.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -161,7 +169,8 @@ export default function Logs() {
         <div>
           <h1 className="text-2xl font-bold">Logs</h1>
           <p className="text-sm text-muted-foreground">
-            Veja o que aconteceu com cada contato do lançamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Veja o que aconteceu com cada contato do lancamento{" "}
+            <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
       </div>
@@ -170,7 +179,7 @@ export default function Logs() {
         <CardHeader>
           <CardTitle className="text-xl">Painel operacional</CardTitle>
           <CardDescription>
-            Filtre por fonte, severidade e texto para encontrar rapidamente erros como número inválido ou merge de duplicatas.
+            Filtre por fonte, severidade e texto para encontrar rapidamente erros como numero invalido ou merge de duplicatas.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -180,12 +189,12 @@ export default function Logs() {
               id="search-log"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder='Ex: "Número inválido" ou "duplicado"'
+              placeholder='Ex: "Numero invalido" ou "duplicado"'
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Nível</Label>
+            <Label>Nivel</Label>
             <Select value={levelFilter} onValueChange={setLevelFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Todos" />
@@ -210,6 +219,8 @@ export default function Logs() {
                 <SelectItem value="all">Todas</SelectItem>
                 <SelectItem value="activecampaign">ActiveCampaign</SelectItem>
                 <SelectItem value="manychat">ManyChat</SelectItem>
+                <SelectItem value="typebot">Typebot</SelectItem>
+                <SelectItem value="sendflow">Sendflow</SelectItem>
                 <SelectItem value="uchat">UChat</SelectItem>
                 <SelectItem value="manual">Manual</SelectItem>
               </SelectContent>
@@ -225,7 +236,7 @@ export default function Logs() {
       ) : filteredRows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-sm text-muted-foreground">
-            Nenhum log encontrado para os filtros atuais. Quando o backend começar a ingerir contatos, eventos como número inválido, merge de duplicata e importação aparecerão aqui.
+            Nenhum log encontrado para os filtros atuais. Quando o backend comecar a ingerir contatos, eventos como numero invalido, merge de duplicata e importacao aparecerao aqui.
           </CardContent>
         </Card>
       ) : (

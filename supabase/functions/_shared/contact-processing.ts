@@ -2,7 +2,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 type AnySupabaseClient = ReturnType<typeof createClient>;
 
-export const validSources = ["activecampaign", "manychat", "uchat", "manual"] as const;
+export const validSources = [
+  "activecampaign",
+  "manychat",
+  "typebot",
+  "sendflow",
+  "uchat",
+  "manual",
+] as const;
 
 export type ValidSource = (typeof validSources)[number];
 type JsonRecord = Record<string, unknown>;
