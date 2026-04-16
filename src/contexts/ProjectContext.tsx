@@ -41,21 +41,31 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data } = await supabase
-      .from("projects")
-      .select("id, name, slug, status")
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, name, slug, status")
+        .order("created_at", { ascending: false });
 
-    if (data) {
-      setProjects(data);
-      setActiveProject((prev) => {
-        if (prev && data.find((p) => p.id === prev.id)) {
-          return data.find((p) => p.id === prev.id)!;
-        }
-        return data.length > 0 ? data[0] : null;
-      });
+      if (error) {
+        console.error("Error fetching projects:", error);
+        return;
+      }
+
+      if (data) {
+        setProjects(data);
+        setActiveProject((prev) => {
+          if (prev && data.find((p) => p.id === prev.id)) {
+            return data.find((p) => p.id === prev.id)!;
+          }
+          return data.length > 0 ? data[0] : null;
+        });
+      }
+    } catch (err) {
+      console.error("Error in fetchProjects:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [user]);
 
   useEffect(() => {

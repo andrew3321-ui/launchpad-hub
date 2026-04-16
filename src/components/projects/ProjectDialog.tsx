@@ -96,55 +96,60 @@ export function ProjectDialog({ open, onOpenChange, projectId, onSaved }: Props)
     if (!name.trim() || !user) return;
     setSaving(true);
 
-    const projectData = {
-      name: name.trim(),
-      slug: slug.trim() || slugify(name),
-      ac_api_url: acApiUrl || null,
-      ac_api_key: acApiKey || null,
-    };
+    try {
+      const projectData = {
+        name: name.trim(),
+        slug: slug.trim() || slugify(name),
+        ac_api_url: acApiUrl || null,
+        ac_api_key: acApiKey || null,
+      };
 
-    let savedId = projectId;
+      let savedId = projectId;
 
-    if (isEditing) {
-      const { error } = await supabase.from("projects").update(projectData).eq("id", projectId);
-      if (error) {
-        toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-    } else {
-      const { data, error } = await supabase
-        .from("projects")
-        .insert({ ...projectData, created_by: user.id })
-        .select("id")
-        .single();
-      if (error) {
-        toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-      savedId = data.id;
-    }
-
-    // Save uchat workspaces
-    if (savedId) {
-      await supabase.from("uchat_workspaces").delete().eq("project_id", savedId);
-      if (uchatWorkspaces.length > 0) {
-        const rows = uchatWorkspaces.map((w) => ({
-          project_id: savedId!,
-          workspace_name: w.workspace_name,
-          api_token: w.api_token,
-        }));
-        const { error } = await supabase.from("uchat_workspaces").insert(rows);
+      if (isEditing) {
+        const { error } = await supabase.from("projects").update(projectData).eq("id", projectId);
         if (error) {
-          toast({ title: "Erro ao salvar workspaces", description: error.message, variant: "destructive" });
+          toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
+          return;
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("projects")
+          .insert({ ...projectData, created_by: user.id })
+          .select("id")
+          .maybeSingle();
+        if (error) {
+          toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
+          return;
+        }
+        savedId = data?.id ?? null;
+      }
+
+      // Save uchat workspaces
+      if (savedId) {
+        await supabase.from("uchat_workspaces").delete().eq("project_id", savedId);
+        if (uchatWorkspaces.length > 0) {
+          const rows = uchatWorkspaces.map((w) => ({
+            project_id: savedId!,
+            workspace_name: w.workspace_name,
+            api_token: w.api_token,
+          }));
+          const { error } = await supabase.from("uchat_workspaces").insert(rows);
+          if (error) {
+            console.error("Error saving workspaces:", error);
+            toast({ title: "Erro ao salvar workspaces", description: error.message, variant: "destructive" });
+          }
         }
       }
-    }
 
-    toast({ title: isEditing ? "Projeto atualizado!" : "Projeto criado!" });
-    setSaving(false);
-    onSaved();
+      toast({ title: isEditing ? "Projeto atualizado!" : "Projeto criado!" });
+      onSaved();
+    } catch (err) {
+      console.error("Error in handleSave:", err);
+      toast({ title: "Erro inesperado", description: "Tente novamente.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
