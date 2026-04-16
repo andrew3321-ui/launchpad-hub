@@ -23,23 +23,23 @@ interface SchemaProbe {
 }
 
 const schemaProbes: SchemaProbe[] = [
-  { table: "profiles", select: "id", kind: "table", description: "Tabela de perfis de autenticacao" },
-  { table: "launches", select: "id", kind: "table", description: "Tabela principal de lancamentos" },
+  { table: "profiles", select: "id", kind: "table", description: "Tabela de perfis de autentica??o" },
+  { table: "launches", select: "id", kind: "table", description: "Tabela principal de lan?amentos" },
   {
     table: "launches",
     select: "manychat_api_url",
     kind: "column",
     column: "manychat_api_url",
-    description: "Colunas de conexao do ManyChat em launches",
+    description: "Colunas de conex?o do ManyChat em launches",
   },
   { table: "uchat_workspaces", select: "id", kind: "table", description: "Tabela de workspaces do UChat" },
   {
     table: "launch_dedupe_settings",
     select: "launch_id",
     kind: "table",
-    description: "Tabela de regras de deduplicacao por lancamento",
+    description: "Tabela de regras de deduplica??o por lan?amento",
   },
-  { table: "lead_contacts", select: "id", kind: "table", description: "Tabela canonica de contatos tratados" },
+  { table: "lead_contacts", select: "id", kind: "table", description: "Tabela can?nica de contatos tratados" },
   {
     table: "lead_contact_identities",
     select: "id",
@@ -50,7 +50,7 @@ const schemaProbes: SchemaProbe[] = [
     table: "inbound_contact_events",
     select: "id",
     kind: "table",
-    description: "Tabela de eventos recebidos via integracao",
+    description: "Tabela de eventos recebidos via integra??o",
   },
   {
     table: "contact_processing_logs",
@@ -62,7 +62,7 @@ const schemaProbes: SchemaProbe[] = [
     table: "platform_sync_runs",
     select: "id",
     kind: "table",
-    description: "Tabela de rodadas de sincronizacao com plataformas externas",
+    description: "Tabela de rodadas de sincroniza??o com plataformas externas",
   },
 ];
 
@@ -118,7 +118,7 @@ function classifyProbeError(probe: SchemaProbe, error: PostgrestError): SchemaIs
     kind: "unknown",
     table: probe.table,
     column: probe.column,
-    description: `Nao foi possivel validar ${probe.table}${probe.column ? `.${probe.column}` : ""}: ${error.message}`,
+    description: `N?o foi poss?vel validar ${probe.table}${probe.column ? `.${probe.column}` : ""}: ${error.message}`,
   };
 }
 

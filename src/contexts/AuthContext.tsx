@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     withTimeout(
       supabase.auth.getSession(),
       5000,
-      "A sessao demorou demais para carregar.",
+      "A sess?o demorou demais para carregar.",
     )
       .then(({ data: { session }, error }) => {
         if (!mounted) return;

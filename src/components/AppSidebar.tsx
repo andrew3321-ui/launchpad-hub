@@ -39,7 +39,7 @@ import {
 
 const menuItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Lancamentos", url: "/launches", icon: Rocket },
+  { title: "Lan?amentos", url: "/launches", icon: Rocket },
   { title: "Fontes", url: "/sources", icon: Radio },
   { title: "Regras", url: "/rules", icon: GitBranch },
   { title: "Leads", url: "/leads", icon: Users },
@@ -89,7 +89,7 @@ export function AppSidebar() {
               </div>
 
               <div className="mt-4 space-y-2">
-                <p className="text-[0.7rem] font-medium uppercase tracking-[0.32em] text-slate-400">Lancamento ativo</p>
+                <p className="text-[0.7rem] font-medium uppercase tracking-[0.32em] text-slate-400">Lan?amento ativo</p>
                 <Select
                   value={activeLaunch?.id || ""}
                   onValueChange={(id) => {
@@ -98,11 +98,11 @@ export function AppSidebar() {
                   }}
                 >
                   <SelectTrigger className="h-11 rounded-full border-white/10 bg-[#09182f]/85 text-left text-sm text-slate-100">
-                    <SelectValue placeholder="Selecionar lancamento" />
+                    <SelectValue placeholder="Selecionar lan?amento" />
                   </SelectTrigger>
                   <SelectContent className="border-white/10 bg-[#08162b] text-slate-100">
                     {launches.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-400">Nenhum lancamento</div>
+                      <div className="px-3 py-2 text-sm text-slate-400">Nenhum lan?amento</div>
                     ) : (
                       launches.map((launch) => (
                         <SelectItem key={launch.id} value={launch.id}>

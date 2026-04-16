@@ -66,7 +66,7 @@ export async function buildSupabaseRuntimeConnection(
     apiKeys.find((key) => key.id === "anon" || key.name === "anon")?.api_key;
 
   if (!publishableKey) {
-    throw new Error("Nao foi possivel localizar uma publishable key ou anon key para esse projeto.");
+    throw new Error("N?o foi poss?vel localizar uma publishable key ou anon key para esse projeto.");
   }
 
   return {

@@ -32,7 +32,7 @@ interface Props {
 }
 
 export function SupabaseConnectionCard({
-  title = "Conexao Supabase",
+  title = "Conex?o Supabase",
   description = "Conecte outro projeto Supabase por personal access token e troque a base sem rebuild.",
 }: Props) {
   const { toast } = useToast();
@@ -53,8 +53,8 @@ export function SupabaseConnectionCard({
   const handleFetchProjects = async () => {
     if (!token.trim()) {
       toast({
-        title: "Token obrigatorio",
-        description: "Informe um personal access token do Supabase para descobrir os projetos disponiveis.",
+        title: "Token obrigat?rio",
+        description: "Informe um personal access token do Supabase para descobrir os projetos dispon?veis.",
         variant: "destructive",
       });
       return;
@@ -72,7 +72,7 @@ export function SupabaseConnectionCard({
         description:
           discoveredProjects.length > 0
             ? `Encontramos ${discoveredProjects.length} projeto(s) nesse token.`
-            : "Esse token nao retornou nenhum projeto acessivel.",
+            : "Esse token n?o retornou nenhum projeto acessivel.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao consultar os projetos do Supabase.";
@@ -87,7 +87,7 @@ export function SupabaseConnectionCard({
   const handleConnectProject = async () => {
     if (!token.trim() || !selectedProjectRef) {
       toast({
-        title: "Projeto nao selecionado",
+        title: "Projeto n?o selecionado",
         description: "Busque os projetos com o token e selecione o destino antes de conectar.",
         variant: "destructive",
       });
@@ -112,7 +112,7 @@ export function SupabaseConnectionCard({
         description: `O app agora esta apontando para ${runtimeConnection.projectName}.`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel conectar o projeto selecionado.";
+      const message = error instanceof Error ? error.message : "N?o foi poss?vel conectar o projeto selecionado.";
       toast({ title: "Erro ao conectar projeto", description: message, variant: "destructive" });
     } finally {
       setConnecting(false);
@@ -125,7 +125,7 @@ export function SupabaseConnectionCard({
     setSelectedProjectRef("");
     setToken("");
     toast({
-      title: "Conexao resetada",
+      title: "Conex?o resetada",
       description: "O app voltou a usar o projeto Supabase embutido nas variaveis de ambiente.",
     });
   };
@@ -182,7 +182,7 @@ export function SupabaseConnectionCard({
             className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
           />
           <p className="text-xs text-slate-400">
-            O token e usado apenas para descobrir projetos e chaves. Ele nao fica salvo na configuracao runtime do app.
+            O token e usado apenas para descobrir projetos e chaves. Ele n?o fica salvo na configura??o runtime do app.
           </p>
         </div>
 

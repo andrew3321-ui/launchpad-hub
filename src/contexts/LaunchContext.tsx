@@ -63,7 +63,7 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       toast({
-        title: "Erro ao atualizar lancamentos",
+        title: "Erro ao atualizar lan?amentos",
         description: error.message,
         variant: "destructive",
       });

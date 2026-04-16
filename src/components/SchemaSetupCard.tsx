@@ -26,7 +26,7 @@ function formatIssueLabel(issue: SchemaIssue) {
 
 export function SchemaSetupCard({
   title = "Schema do backend",
-  description = "Valide se o projeto Supabase atual ja tem todas as tabelas e colunas esperadas pelo app.",
+  description = "Valide se o projeto Supabase atual j? tem todas as tabelas e colunas esperadas pelo app.",
 }: Props) {
   const { connection } = useAuth();
   const { toast } = useToast();
@@ -67,9 +67,9 @@ export function SchemaSetupCard({
   const copyToClipboard = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      toast({ title: `${label} copiado`, description: "Voce ja pode colar isso no Lovable ou guardar para o setup." });
+      toast({ title: `${label} copiado`, description: "Voc? j? pode colar isso no Lovable ou guardar para o setup." });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel copiar para a area de transferencia.";
+      const message = error instanceof Error ? error.message : "N?o foi poss?vel copiar para a ?rea de transfer?ncia.";
       toast({ title: "Falha ao copiar", description: message, variant: "destructive" });
     }
   };
@@ -101,7 +101,7 @@ export function SchemaSetupCard({
             <span className="font-medium text-white">Projeto validado:</span> {connection.projectName} ({connection.projectRef})
           </p>
           <p className="mt-1">
-            O app consegue trocar de projeto em runtime, mas criacao de tabela/coluna nao pode acontecer pelo front com chave publica.
+            O app consegue trocar de projeto em runtime, mas cria??o de tabela/coluna n?o pode acontecer pelo front com chave p?blica.
           </p>
         </div>
 
@@ -134,7 +134,7 @@ export function SchemaSetupCard({
             <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>Schema pronto</AlertTitle>
             <AlertDescription>
-              Esse projeto ja tem a estrutura minima esperada para autenticacao, fontes, regras, leads e logs.
+              Esse projeto j? tem a estrutura m?nima esperada para autentica??o, fontes, regras, leads e logs.
             </AlertDescription>
           </Alert>
         ) : (
@@ -148,7 +148,7 @@ export function SchemaSetupCard({
             </Alert>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium">Itens ausentes ou nao validados</p>
+              <p className="text-sm font-medium">Itens ausentes ou n?o validados</p>
               <div className="flex flex-wrap gap-2">
                 {(status?.issues ?? []).map((issue) => (
                   <Badge key={`${issue.table}-${issue.column ?? "table"}`} variant="outline">

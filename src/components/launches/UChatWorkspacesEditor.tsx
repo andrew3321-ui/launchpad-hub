@@ -91,7 +91,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
 
       <p className="text-sm text-muted-foreground">
         Para importar do UChat, usamos somente o <span className="font-medium text-foreground">Workspace ID</span> e o{" "}
-        <span className="font-medium text-foreground">API Token</span>. O restante dos campos internos e preenchido automaticamente.
+        <span className="font-medium text-foreground">API Token</span>. O restante dos campos internos e preenchido autom?ticamente.
       </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>

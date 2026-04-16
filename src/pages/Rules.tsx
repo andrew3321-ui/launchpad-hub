@@ -121,7 +121,7 @@ export default function Rules() {
     if (error) {
       toast({ title: "Erro ao salvar regras", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Regras de deduplicacao atualizadas" });
+      toast({ title: "Regras de deduplica??o atualizadas" });
     }
     setSaving(false);
   };
@@ -135,9 +135,9 @@ export default function Rules() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lan?amento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para definir as regras de deduplicacao e merge.
+              Escolha um lan?amento na barra lateral para definir as regras de deduplica??o e merge.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -152,7 +152,7 @@ export default function Rules() {
         <div>
           <h1 className="text-2xl font-bold">Regras</h1>
           <p className="text-sm text-muted-foreground">
-            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lancamento{" "}
+            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lan?amento{" "}
             <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
@@ -174,19 +174,19 @@ export default function Rules() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <RuleRow
-                  title="Comparar apenas os digitos"
+                  title="Comparar apenas os d?gitos"
                   description="Ignora espacos, parenteses, hifens e outros caracteres na hora de deduplicar."
                   checked={settings.compareDigitsOnly}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, compareDigitsOnly: checked }))}
                 />
                 <RuleRow
-                  title="Adicionar +55 automaticamente"
-                  description="Tenta casar numeros com e sem codigo do pais brasileiro."
+                  title="Adicionar +55 autom?ticamente"
+                  description="Tenta casar n?meros com e sem c?digo do pa?s brasileiro."
                   checked={settings.autoAddCountryCode}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddCountryCode: checked }))}
                 />
                 <div className="space-y-2">
-                  <Label htmlFor="country-code">Codigo do pais padrao</Label>
+                  <Label htmlFor="country-code">C?digo do pa?s padr?o</Label>
                   <Input
                     id="country-code"
                     value={settings.defaultCountryCode}
@@ -198,7 +198,7 @@ export default function Rules() {
                   />
                 </div>
                 <RuleRow
-                  title="Tentar adicionar ou remover o nono digito"
+                  title="Tentar adicionar ou remover o nono d?gito"
                   description="Ajuda a reconhecer contatos quando uma base salva 11999998888 e outra 1199998888."
                   checked={settings.autoAddNinthDigit}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddNinthDigit: checked }))}
@@ -208,26 +208,26 @@ export default function Rules() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Criterios de merge</CardTitle>
+                <CardTitle className="text-xl">Crit?rios de merge</CardTitle>
                 <CardDescription>
-                  Quando duas entradas representam a mesma pessoa, o sistema pode unificar automaticamente os dados.
+                  Quando duas entradas representam a mesma pessoa, o sistema pode unificar autom?ticamente os dados.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <RuleRow
                   title="Detectar duplicata por telefone normalizado"
-                  description="Marca como mesmo contato quando os numeros baterem apos os tratamentos acima."
+                  description="Marca como mesmo contato quando os n?meros baterem apos os tratamentos acima."
                   checked={settings.mergeOnExactPhone}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactPhone: checked }))}
                 />
                 <RuleRow
                   title="Detectar duplicata por email exato"
-                  description="Mescla automaticamente quando o email for identico, mesmo vindo de canais diferentes."
+                  description="Mescla autom?ticamente quando o email for id?ntico, mesmo vindo de canais diferentes."
                   checked={settings.mergeOnExactEmail}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactEmail: checked }))}
                 />
                 <RuleRow
-                  title="Mesclar duplicatas automaticamente"
+                  title="Mesclar duplicatas autom?ticamente"
                   description="Quando a duplicata for confirmada, consolida os dados sem mandar para triagem manual."
                   checked={settings.autoMergeDuplicates}
                   onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoMergeDuplicates: checked }))}
@@ -256,10 +256,10 @@ export default function Rules() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <Sparkles className="h-5 w-5 text-primary" />
-                  Preview de deduplicacao
+                  Preview de deduplica??o
                 </CardTitle>
                 <CardDescription>
-                  Teste um numero real e veja quais variacoes vao entrar no comparador antes do merge.
+                  Teste um n?mero real e vej? quais varia??es vao entrar no comparador antes do merge.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -275,7 +275,7 @@ export default function Rules() {
 
                 {samplePhone ? (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium">Variacoes geradas para busca de duplicatas</p>
+                    <p className="text-sm font-medium">Varia??es geradas para busca de duplicatas</p>
                     <div className="flex flex-wrap gap-2">
                       {phoneCandidates.map((candidate) => (
                         <Badge key={candidate} variant="outline" className="font-mono">
@@ -287,7 +287,7 @@ export default function Rules() {
                 ) : (
                   <div className="flex items-start gap-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                     <Unplug className="mt-0.5 h-4 w-4" />
-                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono digito.
+                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono d?gito.
                   </div>
                 )}
               </CardContent>
@@ -303,10 +303,10 @@ export default function Rules() {
                   Se dois contatos tiverem o mesmo email ou telefone normalizado, o sistema pode trata-los como a mesma pessoa.
                 </p>
                 <p>
-                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro unico.
+                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro ?nico.
                 </p>
                 <p>
-                  Com estas regras salvas, o proximo passo natural e aplicar esse criterio dentro dos webhooks e da fila de processamento.
+                  Com estas regras salvas, o pr?ximo passo natural e aplicar esse crit?rio dentro dos webhooks e da fila de processamento.
                 </p>
               </CardContent>
             </Card>

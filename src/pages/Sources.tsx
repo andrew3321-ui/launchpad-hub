@@ -124,14 +124,14 @@ function loadSourcesDraft(launchId: string) {
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
     <Badge variant={connected ? "default" : "secondary"}>
-      {connected ? "Configurado" : "Nao configurado"}
+      {connected ? "Configurado" : "N?o configurado"}
     </Badge>
   );
 }
 
 function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
   if (!run) {
-    return <Badge variant="outline">Nenhuma importacao ainda</Badge>;
+    return <Badge variant="outline">Nenhuma importa??o ainda</Badge>;
   }
 
   const normalizedRun = normalizeSyncRun(run);
@@ -144,7 +144,7 @@ function SyncRunBadge({ run }: { run: SyncRunRow | null }) {
     return <Badge variant="secondary">Em andamento</Badge>;
   }
 
-  return <Badge variant="default">Concluida</Badge>;
+  return <Badge variant="default">Conclu?da</Badge>;
 }
 
 export default function Sources() {
@@ -524,7 +524,7 @@ export default function Sources() {
 
         if (latestRun?.status === "running") {
           toast({
-            title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
+            title: source === "activecampaign" ? "Importa??o do ActiveCampaign em andamento" : "Importa??o do UChat em andamento",
             description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
           });
           return;
@@ -532,7 +532,7 @@ export default function Sources() {
 
         if (latestRun?.status === "completed") {
           toast({
-            title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+            title: source === "activecampaign" ? "Importa??o do ActiveCampaign conclu?da" : "Importa??o do UChat conclu?da",
             description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
           });
           return;
@@ -556,7 +556,7 @@ export default function Sources() {
       };
 
       toast({
-        title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+        title: source === "activecampaign" ? "Importa??o do ActiveCampaign conclu?da" : "Importa??o do UChat conclu?da",
         description: `Novos: ${summary.counters?.createdCount ?? 0} | Mesclados: ${summary.counters?.mergedCount ?? 0} | Ignorados: ${summary.counters?.skippedCount ?? 0} | Erros: ${summary.counters?.errorCount ?? 0}`,
       });
     } catch (error) {
@@ -568,7 +568,7 @@ export default function Sources() {
 
       if (latestRun?.status === "running") {
         toast({
-          title: source === "activecampaign" ? "Importacao do ActiveCampaign em andamento" : "Importacao do UChat em andamento",
+          title: source === "activecampaign" ? "Importa??o do ActiveCampaign em andamento" : "Importa??o do UChat em andamento",
           description: "A rodada foi aberta no backend. Acompanhe a fila e os logs enquanto o processamento continua.",
         });
         return;
@@ -576,13 +576,13 @@ export default function Sources() {
 
       if (latestRun?.status === "completed") {
         toast({
-          title: source === "activecampaign" ? "Importacao do ActiveCampaign concluida" : "Importacao do UChat concluida",
+          title: source === "activecampaign" ? "Importa??o do ActiveCampaign conclu?da" : "Importa??o do UChat conclu?da",
           description: `Novos: ${latestRun.created_count} | Mesclados: ${latestRun.merged_count} | Ignorados: ${latestRun.skipped_count} | Erros: ${latestRun.error_count}`,
         });
         return;
       }
 
-      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar a importacao.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar a importa??o.";
       toast({
         title: `Erro ao importar ${source === "activecampaign" ? "ActiveCampaign" : "UChat"}`,
         description: latestRun?.last_error || message,
@@ -602,9 +602,9 @@ export default function Sources() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lan?amento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para configurar as credenciais das bases conectadas.
+              Escolha um lan?amento na barra lateral para configurar as credenciais das bases conectadas.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -620,7 +620,7 @@ export default function Sources() {
           <div>
             <h1 className="text-2xl font-bold">Fontes</h1>
             <p className="text-sm text-muted-foreground">
-              Centralize as credenciais do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+              Centralize as credenciais do lan?amento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
             </p>
           </div>
         </div>
@@ -631,9 +631,9 @@ export default function Sources() {
         <CardContent className="flex items-start gap-3 p-6">
           <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
           <div className="space-y-1">
-            <p className="font-medium">Hub de integracoes do lancamento</p>
+            <p className="font-medium">Hub de integra??es do lan?amento</p>
             <p className="text-sm text-muted-foreground">
-              Aqui voce conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configuracao pela interface.
+              Aqui voc? conecta as bases de ActiveCampaign, ManyChat e UChat sem espalhar configura??o pela interface.
             </p>
           </div>
         </CardContent>
@@ -641,12 +641,12 @@ export default function Sources() {
 
       <SupabaseConnectionCard
         title="Projeto Supabase do app"
-        description="Veja qual backend Supabase esta ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
+        description="Vej? qual backend Supabase esta ativo, desconecte o override atual ou conecte outro projeto usando apenas o token da conta."
       />
 
       <SchemaSetupCard
         title="Bootstrap do schema"
-        description="Se esse projeto Supabase ainda nao recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
+        description="Se esse projeto Supabase ainda n?o recebeu as migrations, copie o SQL ou o prompt do Lovable para subir a estrutura do app."
       />
 
       {loading ? (
@@ -660,7 +660,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">ActiveCampaign</CardTitle>
                 <CardDescription>
-                  Base principal do lancamento. Importa contatos, listas e tags para o hub antes do tratamento automatico.
+                  Base principal do lan?amento. Importa contatos, listas e tags para o hub antes do tratamento autom?tico.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={activeCampaignConnected} />
@@ -686,7 +686,7 @@ export default function Sources() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="ac-list-id">Lista padrao</Label>
+                <Label htmlFor="ac-list-id">Lista padr?o</Label>
                 <Input
                   id="ac-list-id"
                   value={acListId}
@@ -700,7 +700,7 @@ export default function Sources() {
               </div>
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Ultima importacao</span>
+                  <span className="font-medium text-foreground">?ltima importa??o</span>
                   <SyncRunBadge run={latestActiveCampaignRun} />
                 </div>
                 {latestActiveCampaignRun ? (
@@ -712,13 +712,13 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestActiveCampaignRun).skipped_count} | Erros: {normalizeSyncRun(latestActiveCampaignRun).error_count}
                     </p>
-                    <p>Inicio: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
+                    <p>In?cio: {new Date(latestActiveCampaignRun.started_at).toLocaleString("pt-BR")}</p>
                     {normalizeSyncRun(latestActiveCampaignRun).last_error && (
-                      <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
+                      <p className="text-destructive">?ltimo erro: {normalizeSyncRun(latestActiveCampaignRun).last_error}</p>
                     )}
                   </div>
                 ) : (
-                  <p className="mt-3">Quando voce importar a base, o resumo da rodada vai aparecer aqui.</p>
+                  <p className="mt-3">Quando voc? importar a base, o resumo da rodada vai aparecer aqui.</p>
                 )}
               </div>
             </CardContent>
@@ -791,7 +791,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">UChat</CardTitle>
                 <CardDescription>
-                  Informe o Workspace ID e o API Token. O restante da configuracao tecnica e preenchido automaticamente.
+                  Informe o Workspace ID e o API Token. O restante da configura??o t?cnica e preenchido autom?ticamente.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={uchatConnected} />
@@ -803,7 +803,7 @@ export default function Sources() {
               />
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">Ultima importacao</span>
+                  <span className="font-medium text-foreground">?ltima importa??o</span>
                   <SyncRunBadge run={latestUchatRun} />
                 </div>
                 {latestUchatRun ? (
@@ -814,8 +814,8 @@ export default function Sources() {
                     <p>
                       Ignorados: {normalizeSyncRun(latestUchatRun).skipped_count} | Erros: {normalizeSyncRun(latestUchatRun).error_count}
                     </p>
-                    <p>Inicio: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
-                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">Ultimo erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
+                    <p>In?cio: {new Date(latestUchatRun.started_at).toLocaleString("pt-BR")}</p>
+                    {normalizeSyncRun(latestUchatRun).last_error && <p className="text-destructive">?ltimo erro: {normalizeSyncRun(latestUchatRun).last_error}</p>}
                   </div>
                 ) : (
                   <p className="mt-3">Use o importador para puxar os subscribers de cada workspace configurado.</p>

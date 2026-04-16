@@ -144,9 +144,9 @@ export default function Logs() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lan?amento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para acompanhar os eventos processados e os erros de integracao.
+              Escolha um lan?amento na barra lateral para acompanhar os eventos processados e os erros de integra??o.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -161,7 +161,7 @@ export default function Logs() {
         <div>
           <h1 className="text-2xl font-bold">Logs</h1>
           <p className="text-sm text-muted-foreground">
-            Veja o que aconteceu com cada contato do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Vej? o que aconteceu com cada contato do lan?amento <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
       </div>
@@ -170,7 +170,7 @@ export default function Logs() {
         <CardHeader>
           <CardTitle className="text-xl">Painel operacional</CardTitle>
           <CardDescription>
-            Filtre por fonte, severidade e texto para encontrar rapidamente erros como numero invalido ou merge de duplicatas.
+            Filtre por fonte, severidade e texto para encontrar rapidamente erros como n?mero inv?lido ou merge de duplicatas.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -180,7 +180,7 @@ export default function Logs() {
               id="search-log"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder='Ex: "Numero invalido" ou "duplicado"'
+              placeholder='Ex: "N?mero inv?lido" ou "duplicado"'
             />
           </div>
 
@@ -225,7 +225,7 @@ export default function Logs() {
       ) : filteredRows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-sm text-muted-foreground">
-            Nenhum log encontrado para os filtros atuais. Quando o backend comecar a ingerir contatos, eventos como numero invalido, merge de duplicata e importacao aparecerao aqui.
+            Nenhum log encontrado para os filtros atuais. Quando o backend comecar a ingerir contatos, eventos como n?mero inv?lido, merge de duplicata e importa??o aparecerao aqui.
           </CardContent>
         </Card>
       ) : (

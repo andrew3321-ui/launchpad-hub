@@ -70,9 +70,9 @@ export default function Leads() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um lan?amento</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para visualizar a base tratada e deduplicada.
+              Escolha um lan?amento na barra lateral para visualizar a base tratada e deduplicada.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -87,7 +87,7 @@ export default function Leads() {
         <div>
           <h1 className="text-2xl font-bold">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            Base canonica do lancamento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revisao, automacao e futuras sincronizacoes.
+            Base can?nica do lan?amento <span className="font-medium text-foreground">{activeLaunch.name}</span>, consolidada para revis?o, automacao e futuras sincronizacoes.
           </p>
         </div>
       </div>
@@ -116,7 +116,7 @@ export default function Leads() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Telefone</TableHead>
-                    <TableHead>Ultima fonte</TableHead>
+                    <TableHead>?ltima fonte</TableHead>
                     <TableHead>Mesclas</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Atualizado</TableHead>
