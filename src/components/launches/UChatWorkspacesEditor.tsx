@@ -9,8 +9,6 @@ interface UChatWorkspace {
   id?: string;
   workspace_name: string;
   api_token: string;
-  max_subscribers: number;
-  current_count: number;
 }
 
 interface Props {
@@ -20,13 +18,10 @@ interface Props {
 
 export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
   const addWorkspace = () => {
-    onChange([
-      ...workspaces,
-      { workspace_name: "", api_token: "", max_subscribers: 1000, current_count: 0 },
-    ]);
+    onChange([...workspaces, { workspace_name: "", api_token: "" }]);
   };
 
-  const update = (index: number, field: keyof UChatWorkspace, value: string | number) => {
+  const update = (index: number, field: keyof UChatWorkspace, value: string) => {
     const updated = [...workspaces];
     updated[index] = { ...updated[index], [field]: value };
     onChange(updated);
@@ -45,8 +40,6 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
               <TableRow>
                 <TableHead>Nome</TableHead>
                 <TableHead>API Token</TableHead>
-                <TableHead>Máx. subs</TableHead>
-                <TableHead>Atual</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -59,10 +52,6 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                   <TableCell>
                     <Input type="password" value={w.api_token} onChange={(e) => update(i, "api_token", e.target.value)} placeholder="Token" className="min-w-[120px]" />
                   </TableCell>
-                  <TableCell>
-                    <Input type="number" value={w.max_subscribers} onChange={(e) => update(i, "max_subscribers", parseInt(e.target.value) || 0)} className="w-20" />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-center">{w.current_count}</TableCell>
                   <TableCell>
                     <Button type="button" variant="ghost" size="icon" onClick={() => remove(i)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
