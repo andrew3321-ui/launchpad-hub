@@ -28,27 +28,36 @@ export default function Projects() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const fetchRows = async () => {
-    const { data } = await supabase
-      .from("projects")
-      .select("id, name, slug, status, created_at")
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, name, slug, status, created_at")
+        .order("created_at", { ascending: false });
 
-    if (data) {
-      // Get launch counts
-      const { data: launches } = await supabase
-        .from("launches")
-        .select("project_id");
+      if (error) {
+        console.error("Error fetching projects:", error);
+        return;
+      }
 
-      const counts: Record<string, number> = {};
-      launches?.forEach((l) => {
-        if (l.project_id) {
-          counts[l.project_id] = (counts[l.project_id] || 0) + 1;
-        }
-      });
+      if (data) {
+        const { data: launches } = await supabase
+          .from("launches")
+          .select("project_id");
 
-      setRows(data.map((p) => ({ ...p, launch_count: counts[p.id] || 0 })));
+        const counts: Record<string, number> = {};
+        launches?.forEach((l) => {
+          if (l.project_id) {
+            counts[l.project_id] = (counts[l.project_id] || 0) + 1;
+          }
+        });
+
+        setRows(data.map((p) => ({ ...p, launch_count: counts[p.id] || 0 })));
+      }
+    } catch (err) {
+      console.error("Error in fetchRows:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
