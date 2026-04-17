@@ -542,21 +542,42 @@ export type Database = {
       }
       profiles: {
         Row: {
+          approval_reviewed_at: string | null
+          approval_reviewed_by: string | null
+          approval_status: string
           created_at: string
+          email: string
           full_name: string | null
           id: string
+          is_admin: boolean
+          must_change_password: boolean
+          password_changed_at: string | null
           user_id: string
         }
         Insert: {
+          approval_reviewed_at?: string | null
+          approval_reviewed_by?: string | null
+          approval_status?: string
           created_at?: string
+          email: string
           full_name?: string | null
           id?: string
+          is_admin?: boolean
+          must_change_password?: boolean
+          password_changed_at?: string | null
           user_id: string
         }
         Update: {
+          approval_reviewed_at?: string | null
+          approval_reviewed_by?: string | null
+          approval_status?: string
           created_at?: string
+          email?: string
           full_name?: string | null
           id?: string
+          is_admin?: boolean
+          must_change_password?: boolean
+          password_changed_at?: string | null
           user_id?: string
         }
         Relationships: []
@@ -662,6 +683,41 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      is_approved_user: { Args: { _user_id: string }; Returns: boolean }
+      is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      list_pending_signup_requests: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
+          full_name: string
+          id: string
+          must_change_password: boolean
+          user_id: string
+        }[]
+      }
+      review_signup_request: {
+        Args: { next_status: string; target_profile_id: string }
+        Returns: {
+          approval_reviewed_at: string | null
+          approval_reviewed_by: string | null
+          approval_status: string
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_admin: boolean
+          must_change_password: boolean
+          password_changed_at: string | null
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       user_owns_launch: {
         Args: { _launch_id: string; _user_id: string }
         Returns: boolean
