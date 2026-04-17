@@ -657,7 +657,7 @@ async function insertProcessingLog(
     title,
     message,
     details,
-  });
+  } as Record<string, unknown>);
 }
 
 async function createRoutingAction(
@@ -683,7 +683,7 @@ async function createRoutingAction(
       action_key: actionKey,
       request_payload: requestPayload,
       status: "pending",
-    })
+    } as Record<string, unknown>)
     .select("id")
     .single();
 
@@ -707,7 +707,7 @@ async function updateRoutingAction(
       status,
       response_payload: responsePayload,
       error_message: errorMessage || null,
-    })
+    } as Record<string, unknown>)
     .eq("id", actionId);
 }
 
