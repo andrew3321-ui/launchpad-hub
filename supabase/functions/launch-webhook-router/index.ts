@@ -1458,6 +1458,7 @@ async function findOrCreateUchatUser(
       userNs: payloadUserNs,
       userId: payloadUserId || extractKnownUchatUserId(payload || null),
       snapshot: isRecord(payload) ? payload : null,
+      resolutionSource: "payload_user_ns",
     } satisfies ResolvedUchatRecipient;
   }
 
@@ -1470,24 +1471,26 @@ async function findOrCreateUchatUser(
   const legacyStoredUserId = existingExternalId && !isLikelyUchatUserNs(existingExternalId) ? existingExternalId : null;
   const existingUserId = extractKnownUchatUserId(existingSnapshot) || legacyStoredUserId;
 
-  if (existingUserNs) {
-    const existingSubscriber = await fetchUchatSubscriberByQuery(workspace, { user_ns: existingUserNs });
-    if (existingSubscriber && nonEmptyString(existingSubscriber.user_ns)) {
-      return {
-        userNs: existingUserNs,
-        userId: extractKnownUchatUserId(existingSubscriber) || existingUserId,
-        snapshot: existingSubscriber,
-      } satisfies ResolvedUchatRecipient;
-    }
+    if (existingUserNs) {
+      const existingSubscriber = await fetchUchatSubscriberByQuery(workspace, { user_ns: existingUserNs });
+      if (existingSubscriber && nonEmptyString(existingSubscriber.user_ns)) {
+        return {
+          userNs: existingUserNs,
+          userId: extractKnownUchatUserId(existingSubscriber) || existingUserId,
+          snapshot: existingSubscriber,
+          resolutionSource: "existing_identity",
+        } satisfies ResolvedUchatRecipient;
+      }
 
-    if (existingUserId) {
-      return {
-        userNs: existingUserNs,
-        userId: existingUserId,
-        snapshot: existingSnapshot,
-      } satisfies ResolvedUchatRecipient;
+      if (existingUserId) {
+        return {
+          userNs: existingUserNs,
+          userId: existingUserId,
+          snapshot: existingSnapshot,
+          resolutionSource: "existing_identity_fallback",
+        } satisfies ResolvedUchatRecipient;
+      }
     }
-  }
 
   if (existingUserId) {
     const subscriberByExistingUserId = await fetchUchatSubscriberByUserId(workspace, existingUserId);
@@ -1497,6 +1500,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(subscriberByExistingUserId) || existingUserId,
         snapshot: subscriberByExistingUserId,
+        resolutionSource: "existing_user_id",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1509,6 +1513,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(subscriberByUserId) || payloadUserId,
         snapshot: subscriberByUserId,
+        resolutionSource: "payload_user_id",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1530,6 +1535,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(phoneMatch),
         snapshot: phoneMatch,
+        resolutionSource: "phone_search",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1551,6 +1557,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(emailMatch),
         snapshot: emailMatch,
+        resolutionSource: "email_search",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1577,6 +1584,7 @@ async function findOrCreateUchatUser(
     userNs: createdUserNs,
     userId: extractKnownUchatUserId(isRecord(created) ? (created as JsonRecord) : null),
     snapshot: isRecord(created) ? (created as JsonRecord) : null,
+    resolutionSource: "subscriber_created",
   } satisfies ResolvedUchatRecipient;
 }
 
