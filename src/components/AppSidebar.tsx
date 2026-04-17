@@ -48,7 +48,7 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { profile, signOut } = useAuth();
+  const { displayName, signOut } = useAuth();
   const { launches, activeLaunch, setActiveLaunch } = useLaunch();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -80,7 +80,7 @@ export function AppSidebar() {
             <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-[0_18px_45px_rgba(2,8,20,0.26)]">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white">{profile?.full_name || "Operador Megafone"}</p>
+                  <p className="text-sm font-semibold text-white">{displayName || "Operador Megafone"}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.28em] text-[#91ecff]/75">Painel de controle</p>
                 </div>
                 <Badge variant="outline" className="border-white/10 bg-white/5 text-[#aef4ff]">

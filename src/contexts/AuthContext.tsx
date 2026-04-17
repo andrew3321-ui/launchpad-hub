@@ -11,6 +11,7 @@ interface AuthContextType {
   session: Session | null;
   user: User | null;
   profile: { full_name: string | null } | null;
+  displayName: string | null;
   loading: boolean;
   connection: SupabaseConnectionConfig;
   signOut: () => Promise<void>;
@@ -20,6 +21,7 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   user: null,
   profile: null,
+  displayName: null,
   loading: true,
   connection: getSupabaseConnectionConfig(),
   signOut: async () => {},
@@ -63,6 +65,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState(getSupabaseConnectionConfig());
   const [connectionVersion, setConnectionVersion] = useState(0);
+
+  const deriveDisplayName = (currentUser: User | null, currentProfile: { full_name: string | null } | null) => {
+    const profileName = currentProfile?.full_name?.trim();
+    if (profileName) return profileName;
+
+    const metadata = currentUser?.user_metadata as Record<string, unknown> | undefined;
+    const metadataName =
+      (typeof metadata?.full_name === "string" && metadata.full_name.trim()) ||
+      (typeof metadata?.name === "string" && metadata.name.trim()) ||
+      null;
+
+    if (metadataName) return metadataName;
+
+    const emailName = currentUser?.email?.split("@")[0]?.trim() || null;
+    return emailName || null;
+  };
 
   useEffect(() => {
     return subscribeToSupabaseConnection((nextConnection) => {
@@ -152,17 +170,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.warn("profile lookup skipped:", error.message);
-        setProfile(null);
+        setProfile({ full_name: deriveDisplayName(user, null) });
         return;
       }
 
-      setProfile(data);
+      setProfile({ full_name: deriveDisplayName(user, data) });
     };
 
     loadProfile().catch((error) => {
       if (cancelled) return;
       console.warn("profile lookup failed:", error);
-      setProfile(null);
+      setProfile({ full_name: deriveDisplayName(user, null) });
     });
 
     return () => {
@@ -191,7 +209,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, connection, signOut }}>
+    <AuthContext.Provider
+      value={{
+        session,
+        user,
+        profile,
+        displayName: deriveDisplayName(user, profile),
+        loading,
+        connection,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
