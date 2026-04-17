@@ -86,6 +86,7 @@ export default function Sources() {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<"active" | "uchat" | null>(null);
+  const [hydratedLaunchId, setHydratedLaunchId] = useState<string | null>(null);
 
   const [launchSettings, setLaunchSettings] = useState<LaunchSettingsRow | null>(null);
   const [acApiUrl, setAcApiUrl] = useState("");
@@ -103,11 +104,13 @@ export default function Sources() {
         setAcListId("");
         setAcNamedTags([]);
         setUchatWorkspaces([]);
+        setHydratedLaunchId(null);
         setLoading(false);
         return;
       }
 
       setLoading(true);
+      setHydratedLaunchId(null);
 
       const [
         { data: launchData, error: launchError },
@@ -167,6 +170,7 @@ export default function Sources() {
             : []),
       );
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
+      setHydratedLaunchId(activeLaunch.id);
       setLoading(false);
     };
 
@@ -174,7 +178,7 @@ export default function Sources() {
   }, [activeLaunch, toast]);
 
   useEffect(() => {
-    if (!activeLaunch || loading) return;
+    if (!activeLaunch || loading || hydratedLaunchId !== activeLaunch.id) return;
 
     localStorage.setItem(
       buildSourcesDraftKey(activeLaunch.id),
@@ -186,7 +190,16 @@ export default function Sources() {
         uchatWorkspaces,
       } satisfies SourcesDraft),
     );
-  }, [activeLaunch, loading, acApiUrl, acApiKey, acListId, acNamedTags, uchatWorkspaces]);
+  }, [
+    activeLaunch,
+    loading,
+    hydratedLaunchId,
+    acApiUrl,
+    acApiKey,
+    acListId,
+    acNamedTags,
+    uchatWorkspaces,
+  ]);
 
   const activeConnected = useMemo(
     () => Boolean(acApiUrl.trim() && acApiKey.trim()),
@@ -228,6 +241,7 @@ export default function Sources() {
     }
 
     setLaunchSettings(data as LaunchSettingsRow);
+    setHydratedLaunchId(activeLaunch.id);
     toast({
       title: "ActiveCampaign salvo",
       description: "As credenciais de saida para o ActiveCampaign foram atualizadas.",
@@ -281,6 +295,7 @@ export default function Sources() {
     }
 
     setSaving(null);
+    setHydratedLaunchId(activeLaunch.id);
     toast({
       title: "UChat salvo",
       description: "Os workspaces e as acoes de retorno do UChat foram atualizados.",
