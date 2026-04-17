@@ -582,6 +582,11 @@ CREATE INDEX IF NOT EXISTS idx_contact_routing_actions_launch_created_at
 CREATE INDEX IF NOT EXISTS idx_contact_routing_actions_contact
   ON public.contact_routing_actions (contact_id, created_at DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_contact_routing_actions_live_action_key
+  ON public.contact_routing_actions (launch_id, contact_id, source, target, action_type, action_key)
+  WHERE action_key IS NOT NULL
+    AND status IN ('pending', 'success');
+
 ALTER TABLE public.contact_routing_actions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view routing actions of their launches"

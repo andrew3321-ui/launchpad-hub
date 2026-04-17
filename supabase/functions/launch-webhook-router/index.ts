@@ -41,6 +41,8 @@ interface UChatWorkspaceRow {
 
 interface RoutingActionRow {
   id: string;
+  status?: "pending" | "success" | "failed" | "skipped";
+  created_at?: string;
 }
 
 interface NamedTag {
@@ -86,6 +88,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -740,6 +744,10 @@ async function createRoutingAction(
     .select("id")
     .single();
 
+  if (error?.code === "23505") {
+    return null;
+  }
+
   if (error || !data) {
     throw new ProcessContactError("Failed to create routing action", 500, error?.message);
   }
@@ -764,7 +772,20 @@ async function updateRoutingAction(
     .eq("id", actionId);
 }
 
-async function hasSuccessfulRoutingAction(
+function isFreshPendingRoutingAction(action: RoutingActionRow) {
+  if (action.status !== "pending" || !action.created_at) {
+    return false;
+  }
+
+  const createdAtMs = Date.parse(action.created_at);
+  if (!Number.isFinite(createdAtMs)) {
+    return false;
+  }
+
+  return Date.now() - createdAtMs < ROUTING_PENDING_TIMEOUT_MS;
+}
+
+async function findBlockingRoutingAction(
   supabase: AnySupabaseClient,
   launchId: string,
   contactId: string,
@@ -775,19 +796,77 @@ async function hasSuccessfulRoutingAction(
 ) {
   const query = supabase
     .from("contact_routing_actions")
-    .select("id")
+    .select("id, status, created_at")
     .eq("launch_id", launchId)
     .eq("contact_id", contactId)
     .eq("source", source)
     .eq("target", target)
     .eq("action_type", actionType)
-    .eq("status", "success");
+    .in("status", ["pending", "success"])
+    .order("created_at", { ascending: false });
 
   const { data } = actionKey
     ? await query.eq("action_key", actionKey).limit(1).maybeSingle()
     : await query.is("action_key", null).limit(1).maybeSingle();
 
-  return Boolean(data?.id);
+  return data ? (data as RoutingActionRow) : null;
+}
+
+async function claimRoutingAction(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  contactId: string,
+  eventId: string,
+  source: string,
+  target: string,
+  actionType: string,
+  actionKey: string | null,
+  requestPayload: JsonRecord,
+) {
+  if (actionKey) {
+    const existingAction = await findBlockingRoutingAction(
+      supabase,
+      launchId,
+      contactId,
+      source,
+      target,
+      actionType,
+      actionKey,
+    );
+
+    if (existingAction?.status === "success") {
+      return null;
+    }
+
+    if (existingAction?.status === "pending") {
+      if (isFreshPendingRoutingAction(existingAction)) {
+        return null;
+      }
+
+      await updateRoutingAction(
+        supabase,
+        existingAction.id,
+        "failed",
+        {
+          reason: "stale_pending_lock_released",
+          releasedAt: new Date().toISOString(),
+        },
+        "Released stale routing action lock before retry",
+      );
+    }
+  }
+
+  return await createRoutingAction(
+    supabase,
+    launchId,
+    contactId,
+    eventId,
+    source,
+    target,
+    actionType,
+    actionKey,
+    requestPayload,
+  );
 }
 
 async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
@@ -1069,7 +1148,7 @@ async function verifyContactAgainstActiveCampaign(
     phoneCandidates,
   });
 
-  const actionId = await createRoutingAction(
+  const actionId = await claimRoutingAction(
     supabase,
     launch.id,
     contact.id,
@@ -1084,6 +1163,14 @@ async function verifyContactAgainstActiveCampaign(
       phoneCandidates,
     },
   );
+
+  if (!actionId) {
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "verify_already_in_progress",
+    };
+  }
 
   try {
     const matched = await findExistingActiveCampaignContact(
@@ -1676,33 +1763,33 @@ async function routeToUchat(
 
   if (subflowNs) {
     const actionKey = `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
-    if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "send-sub-flow", actionKey))) {
-      const actionId = await createRoutingAction(
-        supabase,
-        launch.id,
-        contact.id,
-        eventId,
-        source,
-        "uchat",
-        "send-sub-flow",
-        actionKey,
-        { workspaceId: workspace.workspace_id, userNs, subflowNs },
-      );
+    const actionId = await claimRoutingAction(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "uchat",
+      "send-sub-flow",
+      actionKey,
+      { workspaceId: workspace.workspace_id, userNs, subflowNs },
+    );
 
-        try {
-          const response = (await uchatRequest(
-            workspace.api_token,
-            targetUserId ? "/subscriber/send-sub-flow-by-user-id" : "/subscriber/send-sub-flow",
-            "POST",
-            targetUserId
-              ? {
-                  user_id: targetUserId,
-                  sub_flow_ns: subflowNs,
-                }
-              : {
-                user_ns: userNs,
+    if (actionId) {
+      try {
+        const response = (await uchatRequest(
+          workspace.api_token,
+          targetUserId ? "/subscriber/send-sub-flow-by-user-id" : "/subscriber/send-sub-flow",
+          "POST",
+          targetUserId
+            ? {
+                user_id: targetUserId,
                 sub_flow_ns: subflowNs,
-              },
+              }
+            : {
+              user_ns: userNs,
+              sub_flow_ns: subflowNs,
+            },
         )) as JsonRecord;
 
         await updateRoutingAction(supabase, actionId, "success", response);
@@ -1721,19 +1808,19 @@ async function routeToUchat(
 
   if (tagName) {
     const actionKey = `${workspace.id}:tag:${tagName}`;
-    if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "add-tag", actionKey))) {
-      const actionId = await createRoutingAction(
-        supabase,
-        launch.id,
-        contact.id,
-        eventId,
-        source,
-        "uchat",
-        "add-tag",
-        actionKey,
-        { workspaceId: workspace.workspace_id, userNs, tagName },
-      );
+    const actionId = await claimRoutingAction(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "uchat",
+      "add-tag",
+      actionKey,
+      { workspaceId: workspace.workspace_id, userNs, tagName },
+    );
 
+    if (actionId) {
       try {
         const response = (await uchatRequest(workspace.api_token, "/subscriber/add-tag-by-name", "POST", {
           user_ns: userNs,
@@ -1824,14 +1911,7 @@ async function routeToActiveCampaign(
     tags: [...tagNames].sort(),
   });
 
-  if (await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "activecampaign", "sync-contact", actionKey)) {
-    return {
-      target: "activecampaign",
-      skipped: true,
-    };
-  }
-
-  const actionId = await createRoutingAction(
+  const actionId = await claimRoutingAction(
     supabase,
     launch.id,
     contact.id,
@@ -1847,6 +1927,13 @@ async function routeToActiveCampaign(
       listId: launch.ac_default_list_id,
     },
   );
+
+  if (!actionId) {
+    return {
+      target: "activecampaign",
+      skipped: true,
+    };
+  }
 
   try {
     const response = await syncContactToActiveCampaign(launch, contact, tagNames);
