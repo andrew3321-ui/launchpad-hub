@@ -79,6 +79,7 @@ interface NormalizedWebhookEvent {
 
 interface RouteToUchatOptions {
   allowSubflow?: boolean;
+  allowWorkspaceDefaultSubflow?: boolean;
   allowTag?: boolean;
   requireExplicitRecipient?: boolean;
 }
@@ -1744,11 +1745,13 @@ async function routeToUchat(
     },
   );
 
+  const explicitSubflowNs = findStringDeep(payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]);
+  const workspaceDefaultSubflowNs =
+    options.allowWorkspaceDefaultSubflow === false ? null : nonEmptyString(workspace.welcome_subflow_ns);
   const subflowNs =
     options.allowSubflow === false
       ? null
-      : findStringDeep(payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) ||
-        nonEmptyString(workspace.welcome_subflow_ns);
+      : explicitSubflowNs || workspaceDefaultSubflowNs;
   const tagName =
     options.allowTag === false
       ? null
@@ -2043,7 +2046,7 @@ async function dispatchRoutes(
           "info",
           "ACTIVECAMPAIGN_VERIFICATION_SKIPPED",
           "Verificacao do ActiveCampaign ignorada",
-          "O contato seguiu para o subflow do UChat sem consulta ao ActiveCampaign porque faltava configuracao ou dado minimo de busca.",
+          "O webhook do UChat foi aceito, mas a verificacao de duplicidade no ActiveCampaign foi ignorada por falta de configuracao ou dado minimo de busca.",
           activeVerification as unknown as JsonRecord,
         );
       } else if (activeVerification.matched) {
@@ -2056,7 +2059,7 @@ async function dispatchRoutes(
           "success",
           "ACTIVECAMPAIGN_DUPLICATE_LINKED",
           "Contato ja existia no ActiveCampaign",
-          "O Launch Hub encontrou um contato compativel no ActiveCampaign, vinculou a identidade existente e continuou o retorno para o subflow do UChat.",
+          "O Launch Hub encontrou um contato compativel no ActiveCampaign e vinculou a identidade existente sem reenviar o webhook do proprio UChat ao subflow de boas-vindas.",
           activeVerification as unknown as JsonRecord,
         );
       } else {
@@ -2069,7 +2072,7 @@ async function dispatchRoutes(
           "info",
           "ACTIVECAMPAIGN_DUPLICATE_NOT_FOUND",
           "Nenhum duplicado encontrado no ActiveCampaign",
-          "O Launch Hub consultou o ActiveCampaign, nao encontrou um contato correspondente e seguiu com o subflow do UChat.",
+          "O Launch Hub consultou o ActiveCampaign, nao encontrou um contato correspondente e finalizou o tratamento sem retorno ao subflow de boas-vindas.",
           activeVerification as unknown as JsonRecord,
         );
       }
@@ -2084,23 +2087,10 @@ async function dispatchRoutes(
         "warning",
         "ACTIVECAMPAIGN_VERIFICATION_FAILED",
         "Falha ao consultar o ActiveCampaign",
-        "A verificacao de duplicidade no ActiveCampaign falhou, mas o Launch Hub manteve o retorno para o subflow do UChat.",
+        "A verificacao de duplicidade no ActiveCampaign falhou, mas o webhook do proprio UChat nao sera reenviado ao subflow de boas-vindas.",
         { error: message },
       );
     }
-
-    const uchatReturn = await routeToUchat(
-      supabase,
-      launch,
-      contact,
-      eventId,
-      normalizedEvent.source,
-      routingPayload,
-      {
-        allowSubflow: true,
-        allowTag: false,
-      },
-    );
 
     await insertProcessingLog(
       supabase,
@@ -2108,20 +2098,17 @@ async function dispatchRoutes(
       contact.id,
       eventId,
       normalizedEvent.source,
-      "success",
-      "ROUTED_BACK_TO_UCHAT_SUBFLOW",
-      "Contato retornou ao UChat",
-      "Depois da verificacao no ActiveCampaign, o Launch Hub reenviou o contato ao UChat apenas para o subflow de boas-vindas.",
-      {
-        ...(activeVerification ? { activeVerification } : {}),
-        uchatReturn,
-      } as JsonRecord,
+      "info",
+      "UCHAT_WEBHOOK_PROCESSED_NO_RETURN",
+      "Webhook do UChat tratado sem retorno",
+      "Eventos recebidos pelo webhook do proprio UChat ficam apenas no tratamento e na verificacao de duplicidade. O subflow padrao de boas-vindas fica reservado ao webhook do Sendflow.",
+      activeVerification ? ({ activeVerification } as JsonRecord) : {},
     );
 
     return {
       checkedActiveCampaign: activeVerification,
-      returnedToUchat: true,
-      uchatReturn,
+      returnedToUchat: false,
+      reason: "uchat_webhook_does_not_return_to_welcome_subflow",
     };
   }
 
@@ -2166,6 +2153,7 @@ async function dispatchRoutes(
         normalizedEvent.payload,
         {
           allowSubflow: true,
+          allowWorkspaceDefaultSubflow: normalizedEvent.source === "sendflow",
           allowTag: Boolean(requestedTagName),
           requireExplicitRecipient: true,
         },

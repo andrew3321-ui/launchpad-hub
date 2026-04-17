@@ -9,7 +9,7 @@ export const inboundWebhookSources = [
   {
     key: "uchat",
     label: "UChat",
-    hint: "Use um External Request ou webhook do fluxo do UChat apontando para esta URL.",
+    hint: "Use um External Request ou webhook do fluxo do UChat para verificar e tratar contatos sem reenviar ao subflow de boas-vindas.",
   },
   {
     key: "manychat",
@@ -24,7 +24,7 @@ export const inboundWebhookSources = [
   {
     key: "sendflow",
     label: "Sendflow",
-    hint: "Crie um webhook/API no Sendflow apontando para esta URL.",
+    hint: "Crie um webhook/API no Sendflow apontando para esta URL para disparar o subflow padrao de boas-vindas no UChat.",
   },
 ] as const;
 

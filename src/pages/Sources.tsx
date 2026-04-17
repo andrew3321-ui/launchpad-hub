@@ -440,7 +440,8 @@ export default function Sources() {
                 <CardDescription>
                   Workspaces de destino para o retorno ActiveCampaign/Sendflow {"->"} Launch Hub {"->"} UChat,
                   com subflow de boas-vindas e/ou add tag. Eventos vindos do proprio UChat
-                  consultam o ActiveCampaign para duplicidade e retornam apenas para o subflow.
+                  consultam o ActiveCampaign para duplicidade, mas nao retornam ao subflow
+                  padrao de boas-vindas.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={uchatConnected} />
