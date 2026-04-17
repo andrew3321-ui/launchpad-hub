@@ -527,7 +527,7 @@ async function fetchLaunch(
     : supabase
         .from("launches")
         .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
-        .eq("slug", launchSlug);
+        .eq("slug", launchSlug as string);
 
   const { data, error } = await query.maybeSingle();
 
@@ -609,7 +609,7 @@ async function upsertLeadIdentity(
     .eq("external_contact_id", externalContactId)
     .maybeSingle();
 
-  if (existing?.id) {
+  if ((existing as { id?: string } | null)?.id) {
     await supabase
       .from("lead_contact_identities")
       .update({
@@ -618,8 +618,8 @@ async function upsertLeadIdentity(
         external_phone: phone,
         normalized_phone: phone,
         raw_snapshot: rawSnapshot,
-      })
-      .eq("id", existing.id);
+      } as Record<string, unknown>)
+      .eq("id", (existing as { id: string }).id);
     return;
   }
 
@@ -632,7 +632,7 @@ async function upsertLeadIdentity(
     external_phone: phone,
     normalized_phone: phone,
     raw_snapshot: rawSnapshot,
-  });
+  } as Record<string, unknown>);
 }
 
 async function insertProcessingLog(

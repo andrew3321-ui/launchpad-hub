@@ -329,7 +329,7 @@ export async function processIncomingContactEvent(
       .eq("launch_id", launch.id)
       .eq("primary_email", normalizedEmail);
 
-    emailMatches?.forEach((row) => candidateIds.add(row.id));
+    emailMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
   }
 
   if (validPhoneCandidates.length > 0 && settings.merge_on_exact_phone) {
@@ -339,7 +339,7 @@ export async function processIncomingContactEvent(
       .eq("launch_id", launch.id)
       .in("normalized_phone", validPhoneCandidates);
 
-    phoneIdentityMatches?.forEach((row) => candidateIds.add(row.contact_id));
+    phoneIdentityMatches?.forEach((row: { contact_id: string }) => candidateIds.add(row.contact_id));
 
     const { data: phoneMatches } = await supabase
       .from("lead_contacts")
@@ -347,7 +347,7 @@ export async function processIncomingContactEvent(
       .eq("launch_id", launch.id)
       .in("normalized_phone", validPhoneCandidates);
 
-    phoneMatches?.forEach((row) => candidateIds.add(row.id));
+    phoneMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
   }
 
   let existingContact: Record<string, unknown> | null = null;
