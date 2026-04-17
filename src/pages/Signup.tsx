@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { isBootstrapMegafoneAdmin, isMegafoneEmail, normalizeMegafoneEmail } from "@/lib/accessControl";
+import { isMegafoneEmail, normalizeMegafoneEmail } from "@/lib/accessControl";
 
 export default function Signup() {
   const { session, loading } = useAuth();
@@ -60,9 +60,8 @@ export default function Signup() {
     } else {
       toast({
         title: "Conta criada!",
-        description: isBootstrapMegafoneAdmin(normalizedEmail)
-          ? "Seu acesso admin inicial já foi liberado. No primeiro acesso você precisará trocar a senha."
-          : "Seu cadastro foi enviado para aprovação de um admin. No primeiro acesso você também precisará trocar a senha.",
+        description:
+          "Seu cadastro foi registrado. Se este email estiver na lista interna de admins iniciais, o acesso já nasce aprovado; caso contrário, ele ficará aguardando aprovação de um admin. Em ambos os casos, a senha precisará ser trocada no primeiro acesso.",
       });
     }
 
