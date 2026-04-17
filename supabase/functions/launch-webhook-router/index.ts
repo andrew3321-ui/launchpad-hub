@@ -414,6 +414,21 @@ function extractKnownUchatUserId(payload?: JsonRecord | null) {
   );
 }
 
+function resolveInboundDeliveryKey(
+  source: WebhookSource,
+  payload: JsonRecord,
+  fallbackEventId: string,
+) {
+  if (source === "sendflow") {
+    const providerEventId = findStringDeep(payload, ["id", "event_id", "webhook_id"]);
+    if (providerEventId) {
+      return `${source}:${providerEventId}`;
+    }
+  }
+
+  return fallbackEventId;
+}
+
 function assertUchatApiSuccess(response: unknown) {
   if (!isRecord(response)) return;
 
@@ -1657,9 +1672,10 @@ async function routeToUchat(
   const executedActions: string[] = [];
   const skippedActions: string[] = [];
   let subflowDeliveryMethod: "user_ns" | "user_id" | null = null;
+  const deliveryKey = resolveInboundDeliveryKey(source, payload, eventId);
 
   if (subflowNs) {
-    const actionKey = `${workspace.id}:subflow:${subflowNs}:event:${eventId}`;
+    const actionKey = `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
     if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "send-sub-flow", actionKey))) {
       const actionId = await createRoutingAction(
         supabase,
@@ -1764,6 +1780,7 @@ async function routeToUchat(
     subflowDeliveryMethod,
     payloadUserId: targetUserId,
     recipientResolution: recipient.resolutionSource,
+    deliveryKey,
   };
 }
 
