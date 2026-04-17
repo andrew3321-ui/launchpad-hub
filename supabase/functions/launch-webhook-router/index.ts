@@ -1535,6 +1535,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(phoneMatch),
         snapshot: phoneMatch,
+        resolutionSource: "phone_search",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1556,6 +1557,7 @@ async function findOrCreateUchatUser(
         userNs,
         userId: extractKnownUchatUserId(emailMatch),
         snapshot: emailMatch,
+        resolutionSource: "email_search",
       } satisfies ResolvedUchatRecipient;
     }
   }
@@ -1582,6 +1584,7 @@ async function findOrCreateUchatUser(
     userNs: createdUserNs,
     userId: extractKnownUchatUserId(isRecord(created) ? (created as JsonRecord) : null),
     snapshot: isRecord(created) ? (created as JsonRecord) : null,
+    resolutionSource: "subscriber_created",
   } satisfies ResolvedUchatRecipient;
 }
 
