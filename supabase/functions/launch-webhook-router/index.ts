@@ -60,6 +60,7 @@ interface ResolvedUchatRecipient {
   userNs: string;
   userId: string | null;
   snapshot: JsonRecord | null;
+  resolutionSource: string;
 }
 
 interface NormalizedWebhookEvent {
@@ -77,6 +78,7 @@ interface NormalizedWebhookEvent {
 interface RouteToUchatOptions {
   allowSubflow?: boolean;
   allowTag?: boolean;
+  requireExplicitRecipient?: boolean;
 }
 
 const corsHeaders = {
@@ -1168,6 +1170,121 @@ async function fetchUchatSubscriberByUserId(
   return pickFirstSubscriberRow(response);
 }
 
+async function createUchatSubscriberFromExplicitPayload(
+  workspace: UChatWorkspaceRow,
+  payload: JsonRecord,
+) {
+  const explicitContact = extractGenericContact(payload);
+
+  if (!explicitContact.phone && !explicitContact.email) {
+    throw new ProcessContactError(
+      "Relay webhook requires explicit phone or email to create the UChat subscriber precisely",
+      400,
+    );
+  }
+
+  const { firstName, lastName } = splitName(explicitContact.name);
+  const created = await uchatRequest(workspace.api_token, "/subscriber/create", "POST", {
+    first_name: firstName || undefined,
+    last_name: lastName || undefined,
+    name: explicitContact.name || undefined,
+    phone: explicitContact.phone || undefined,
+    email: explicitContact.email || undefined,
+  });
+
+  const createdRecord = isRecord(created) ? (created as JsonRecord) : null;
+  const createdUserNs =
+    findStringDeep(createdRecord, ["user_ns"]) ||
+    findStringDeep(createdRecord, ["subscriber.user_ns"]) ||
+    null;
+
+  if (!createdUserNs) {
+    throw new ProcessContactError("UChat did not return user_ns after explicit subscriber creation", 500);
+  }
+
+  return {
+    userNs: createdUserNs,
+    userId: extractKnownUchatUserId(createdRecord),
+    snapshot: createdRecord,
+    resolutionSource: "payload_create",
+  } satisfies ResolvedUchatRecipient;
+}
+
+async function resolveExplicitUchatRecipient(
+  workspace: UChatWorkspaceRow,
+  payload: JsonRecord,
+) {
+  const payloadUserNs = extractUchatUserNs(payload);
+  if (payloadUserNs) {
+    return {
+      userNs: payloadUserNs,
+      userId: extractUchatUserId(payload) || extractKnownUchatUserId(payload),
+      snapshot: isRecord(payload) ? payload : null,
+      resolutionSource: "payload_user_ns",
+    } satisfies ResolvedUchatRecipient;
+  }
+
+  const payloadUserId = extractUchatUserId(payload);
+  if (payloadUserId) {
+    const subscriberByUserId = await fetchUchatSubscriberByUserId(workspace, payloadUserId);
+    const userNs = nonEmptyString(subscriberByUserId?.user_ns);
+    if (!subscriberByUserId || !userNs) {
+      throw new ProcessContactError(
+        "Explicit UChat user_id from payload was not found in the configured workspace",
+        400,
+      );
+    }
+
+    return {
+      userNs,
+      userId: extractKnownUchatUserId(subscriberByUserId) || payloadUserId,
+      snapshot: subscriberByUserId,
+      resolutionSource: "payload_user_id",
+    } satisfies ResolvedUchatRecipient;
+  }
+
+  const explicitContact = extractGenericContact(payload);
+
+  if (explicitContact.phone) {
+    const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
+      phone: explicitContact.phone,
+    });
+    const userNs = nonEmptyString(phoneMatch?.user_ns);
+    if (phoneMatch && userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(phoneMatch),
+        snapshot: phoneMatch,
+        resolutionSource: "payload_phone",
+      } satisfies ResolvedUchatRecipient;
+    }
+  }
+
+  if (explicitContact.email) {
+    const emailMatch = await fetchUchatSubscriberByQuery(workspace, {
+      email: explicitContact.email,
+    });
+    const userNs = nonEmptyString(emailMatch?.user_ns);
+    if (emailMatch && userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(emailMatch),
+        snapshot: emailMatch,
+        resolutionSource: "payload_email",
+      } satisfies ResolvedUchatRecipient;
+    }
+  }
+
+  if (explicitContact.phone || explicitContact.email) {
+    return await createUchatSubscriberFromExplicitPayload(workspace, payload);
+  }
+
+  throw new ProcessContactError(
+    "Relay webhook requires explicit recipient data (user_id, user_ns, phone or email) to route precisely to UChat",
+    400,
+  );
+}
+
 async function findUchatSubscriberForContact(
   supabase: AnySupabaseClient,
   launchId: string,
@@ -1479,7 +1596,9 @@ async function routeToUchat(
     throw new ProcessContactError("No valid UChat workspace configured for this launch", 400);
   }
 
-  const recipient = await findOrCreateUchatUser(supabase, launch.id, contact, workspace, payload);
+  const recipient = options.requireExplicitRecipient
+    ? await resolveExplicitUchatRecipient(workspace, payload)
+    : await findOrCreateUchatUser(supabase, launch.id, contact, workspace, payload);
   const userNs = recipient.userNs;
   const targetUserId = recipient.userId || extractUchatUserId(payload);
 
@@ -1496,6 +1615,7 @@ async function routeToUchat(
       workspace_name: workspace.workspace_name,
       user_ns: userNs,
       ...(targetUserId ? { user_id: targetUserId } : {}),
+      resolution_source: recipient.resolutionSource,
     },
   );
 
@@ -1620,6 +1740,7 @@ async function routeToUchat(
     skippedActions,
     subflowDeliveryMethod,
     payloadUserId: targetUserId,
+    recipientResolution: recipient.resolutionSource,
   };
 }
 
@@ -1919,6 +2040,7 @@ async function dispatchRoutes(
         {
           allowSubflow: true,
           allowTag: Boolean(requestedTagName),
+          requireExplicitRecipient: true,
         },
       );
 
