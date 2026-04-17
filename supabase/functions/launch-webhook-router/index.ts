@@ -281,7 +281,7 @@ function extractGenericContact(payload: JsonRecord) {
     name,
     email: findStringDeep(payload, ["email"]),
     phone:
-      findStringDeep(payload, ["phone", "telephone", "whatsapp", "mobile", "cellphone"]) ||
+      findStringDeep(payload, ["phone", "telephone", "whatsapp", "mobile", "cellphone", "number"]) ||
       null,
   };
 }
@@ -333,6 +333,21 @@ function normalizeIncomingWebhook(
           ]).join(" ") || contact.name,
         email: findStringDeep(payload, ["email"]) || contact.email,
         phone: findStringDeep(payload, ["phone"]) || contact.phone,
+      },
+      payload,
+    };
+  }
+
+  if (source === "sendflow") {
+    const sendflowNumber = findStringDeep(payload, ["number"]);
+    return {
+      source,
+      eventType,
+      externalContactId: sendflowNumber || externalContactId,
+      contact: {
+        name: contact.name,
+        email: contact.email,
+        phone: sendflowNumber || contact.phone,
       },
       payload,
     };
