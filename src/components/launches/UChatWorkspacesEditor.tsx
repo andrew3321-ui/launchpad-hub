@@ -117,7 +117,11 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
 
       <p className="text-sm text-muted-foreground">
         O Launch Hub usa o primeiro workspace valido como destino padrao para mandar de volta
-        o contato tratado ao UChat. Configure o subflow e/ou a tag que devem ser acionados.
+        o contato tratado ao UChat. Esse subflow entra em acao nas rotas
+        ActiveCampaign/Sendflow -&gt; Launch Hub -&gt; UChat. Quando o webhook entra pelo proprio
+        UChat, o sistema consulta o ActiveCampaign apenas para verificacao de duplicidade e
+        depois retorna ao UChat somente pelo subflow de boas-vindas. A tag padrao pode
+        acompanhar apenas nas rotas de retorno externas.
       </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>

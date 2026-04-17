@@ -67,6 +67,11 @@ interface NormalizedWebhookEvent {
   payload: JsonRecord;
 }
 
+interface RouteToUchatOptions {
+  allowSubflow?: boolean;
+  allowTag?: boolean;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -823,6 +828,207 @@ async function syncContactToActiveCampaign(
   };
 }
 
+function extractActiveCampaignContact(payload: unknown) {
+  if (!isRecord(payload)) return null;
+
+  if (isRecord((payload as JsonRecord).contact)) {
+    return ((payload as JsonRecord).contact as JsonRecord) || null;
+  }
+
+  const contacts = Array.isArray((payload as JsonRecord).contacts)
+    ? ((payload as JsonRecord).contacts as JsonRecord[])
+    : [];
+
+  return contacts[0] || null;
+}
+
+async function findExistingActiveCampaignContact(
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  knownContactId?: string | null,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) {
+    return null;
+  }
+
+  if (knownContactId) {
+    try {
+      const payload = await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        `/api/3/contacts/${knownContactId}`,
+        "GET",
+      );
+
+      const matchedContact = extractActiveCampaignContact(payload);
+      const activeContactId = nonEmptyString(matchedContact?.id);
+      if (matchedContact && activeContactId) {
+        return {
+          matchedBy: "known-id",
+          activeContactId,
+          snapshot: matchedContact,
+        };
+      }
+    } catch {
+      // Fall back to fresh lookup if the stored identity is stale.
+    }
+  }
+
+  if (contact.primary_email) {
+    const payload = await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      "/api/3/contacts",
+      "GET",
+      undefined,
+      { email: contact.primary_email },
+    );
+
+    const matchedContact = extractActiveCampaignContact(payload);
+    const activeContactId = nonEmptyString(matchedContact?.id);
+    if (matchedContact && activeContactId) {
+      return {
+        matchedBy: "email",
+        activeContactId,
+        snapshot: matchedContact,
+      };
+    }
+  }
+
+  const phoneCandidates = uniqueStrings([
+    contact.primary_phone,
+    contact.normalized_phone,
+    contact.primary_phone?.replace(/\D/g, "") || null,
+  ]);
+
+  for (const phoneCandidate of phoneCandidates) {
+    const payload = await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      "/api/3/contacts",
+      "GET",
+      undefined,
+      { phone: phoneCandidate },
+    );
+
+    const matchedContact = extractActiveCampaignContact(payload);
+    const activeContactId = nonEmptyString(matchedContact?.id);
+    if (matchedContact && activeContactId) {
+      return {
+        matchedBy: "phone",
+        activeContactId,
+        snapshot: matchedContact,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function verifyContactAgainstActiveCampaign(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  eventId: string,
+  source: WebhookSource,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) {
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "not_configured",
+    };
+  }
+
+  if (!contact.primary_email && !contact.primary_phone && !contact.normalized_phone) {
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "missing_contact_data",
+    };
+  }
+
+  const existingIdentity = await fetchLeadIdentity(supabase, launch.id, contact.id, "activecampaign");
+  const knownContactId = nonEmptyString(existingIdentity?.external_contact_id);
+  const phoneCandidates = uniqueStrings([
+    contact.primary_phone,
+    contact.normalized_phone,
+    contact.primary_phone?.replace(/\D/g, "") || null,
+  ]);
+  const actionKey = JSON.stringify({
+    knownContactId,
+    email: contact.primary_email,
+    phoneCandidates,
+  });
+
+  const actionId = await createRoutingAction(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    source,
+    "activecampaign",
+    "verify-contact",
+    actionKey,
+    {
+      knownContactId,
+      email: contact.primary_email,
+      phoneCandidates,
+    },
+  );
+
+  try {
+    const matched = await findExistingActiveCampaignContact(
+      launch,
+      contact,
+      knownContactId,
+    );
+
+    if (!matched) {
+      const response = {
+        matched: false,
+        activeContactId: null,
+      } satisfies JsonRecord;
+      await updateRoutingAction(supabase, actionId, "success", response);
+
+      return {
+        target: "activecampaign",
+        matched: false,
+      };
+    }
+
+    await upsertLeadIdentity(
+      supabase,
+      launch.id,
+      contact.id,
+      "activecampaign",
+      matched.activeContactId,
+      nonEmptyString(matched.snapshot.email) || contact.primary_email,
+      nonEmptyString(matched.snapshot.phone) || contact.primary_phone,
+      matched.snapshot,
+    );
+
+    const response = {
+      matched: true,
+      activeContactId: matched.activeContactId,
+      matchedBy: matched.matchedBy,
+    } satisfies JsonRecord;
+
+    await updateRoutingAction(supabase, actionId, "success", response);
+
+    return {
+      target: "activecampaign",
+      matched: true,
+      activeContactId: matched.activeContactId,
+      matchedBy: matched.matchedBy,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await updateRoutingAction(supabase, actionId, "failed", {}, message);
+    throw error;
+  }
+}
+
 function pickPreferredWorkspace(
   workspaces: UChatWorkspaceRow[],
   payload: JsonRecord,
@@ -991,7 +1197,15 @@ async function findOrCreateUchatUser(
   launchId: string,
   contact: LeadContactRow,
   workspace: UChatWorkspaceRow,
+  payload?: JsonRecord,
 ) {
+  const payloadUserNs =
+    payload ? findStringDeep(payload, ["user_ns", "subscriber_id", "subscriber.user_ns"]) : null;
+
+  if (payloadUserNs) {
+    return payloadUserNs;
+  }
+
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
   const existingUserNs = nonEmptyString(existingIdentity?.external_contact_id);
 
@@ -1057,6 +1271,7 @@ async function routeToUchat(
   eventId: string,
   source: WebhookSource,
   payload: JsonRecord,
+  options: RouteToUchatOptions = {},
 ) {
   const workspaces = await fetchLaunchWorkspaces(supabase, launch.id);
   const workspace = pickPreferredWorkspace(workspaces, payload);
@@ -1065,7 +1280,7 @@ async function routeToUchat(
     throw new ProcessContactError("No valid UChat workspace configured for this launch", 400);
   }
 
-  const userNs = await findOrCreateUchatUser(supabase, launch.id, contact, workspace);
+  const userNs = await findOrCreateUchatUser(supabase, launch.id, contact, workspace, payload);
 
   await upsertLeadIdentity(
     supabase,
@@ -1083,13 +1298,19 @@ async function routeToUchat(
   );
 
   const subflowNs =
-    findStringDeep(payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) ||
-    nonEmptyString(workspace.welcome_subflow_ns);
+    options.allowSubflow === false
+      ? null
+      : findStringDeep(payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) ||
+        nonEmptyString(workspace.welcome_subflow_ns);
   const tagName =
-    findStringDeep(payload, ["tag_name", "uchat_tag"]) ||
-    nonEmptyString(workspace.default_tag_name);
+    options.allowTag === false
+      ? null
+      : findStringDeep(payload, ["tag_name", "uchat_tag"]) ||
+        nonEmptyString(workspace.default_tag_name);
 
   const responses: JsonRecord[] = [];
+  const executedActions: string[] = [];
+  const skippedActions: string[] = [];
 
   if (subflowNs) {
     const actionKey = `${workspace.id}:subflow:${subflowNs}`;
@@ -1114,11 +1335,14 @@ async function routeToUchat(
 
         await updateRoutingAction(supabase, actionId, "success", response);
         responses.push({ action: "send-sub-flow", response });
+        executedActions.push("send-sub-flow");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await updateRoutingAction(supabase, actionId, "failed", {}, message);
         throw error;
       }
+    } else {
+      skippedActions.push("send-sub-flow");
     }
   }
 
@@ -1145,11 +1369,14 @@ async function routeToUchat(
 
         await updateRoutingAction(supabase, actionId, "success", response);
         responses.push({ action: "add-tag", response });
+        executedActions.push("add-tag");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await updateRoutingAction(supabase, actionId, "failed", {}, message);
         throw error;
       }
+    } else {
+      skippedActions.push("add-tag");
     }
   }
 
@@ -1173,6 +1400,10 @@ async function routeToUchat(
     workspaceId: workspace.workspace_id,
     userNs,
     dispatched: responses.length,
+    configuredSubflowNs: subflowNs,
+    configuredTagName: tagName,
+    executedActions,
+    skippedActions,
   };
 }
 
@@ -1319,7 +1550,123 @@ async function dispatchRoutes(
     };
   }
 
-  if (["uchat", "manychat", "typebot"].includes(normalizedEvent.source)) {
+  if (normalizedEvent.source === "uchat") {
+    let activeVerification:
+      | {
+          target: string;
+          skipped: boolean;
+          reason: string;
+        }
+      | {
+          target: string;
+          matched: boolean;
+          activeContactId?: string;
+          matchedBy?: string;
+        }
+      | null = null;
+
+    try {
+      activeVerification = await verifyContactAgainstActiveCampaign(
+        supabase,
+        launch,
+        contact,
+        eventId,
+        normalizedEvent.source,
+      );
+
+      if ("skipped" in activeVerification && activeVerification.skipped) {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          normalizedEvent.source,
+          "info",
+          "ACTIVECAMPAIGN_VERIFICATION_SKIPPED",
+          "Verificacao do ActiveCampaign ignorada",
+          "O contato seguiu para o subflow do UChat sem consulta ao ActiveCampaign porque faltava configuracao ou dado minimo de busca.",
+          activeVerification as unknown as JsonRecord,
+        );
+      } else if (activeVerification.matched) {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          normalizedEvent.source,
+          "success",
+          "ACTIVECAMPAIGN_DUPLICATE_LINKED",
+          "Contato ja existia no ActiveCampaign",
+          "O Launch Hub encontrou um contato compativel no ActiveCampaign, vinculou a identidade existente e continuou o retorno para o subflow do UChat.",
+          activeVerification as unknown as JsonRecord,
+        );
+      } else {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          normalizedEvent.source,
+          "info",
+          "ACTIVECAMPAIGN_DUPLICATE_NOT_FOUND",
+          "Nenhum duplicado encontrado no ActiveCampaign",
+          "O Launch Hub consultou o ActiveCampaign, nao encontrou um contato correspondente e seguiu com o subflow do UChat.",
+          activeVerification as unknown as JsonRecord,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "warning",
+        "ACTIVECAMPAIGN_VERIFICATION_FAILED",
+        "Falha ao consultar o ActiveCampaign",
+        "A verificacao de duplicidade no ActiveCampaign falhou, mas o Launch Hub manteve o retorno para o subflow do UChat.",
+        { error: message },
+      );
+    }
+
+    const uchatReturn = await routeToUchat(
+      supabase,
+      launch,
+      contact,
+      eventId,
+      normalizedEvent.source,
+      routingPayload,
+      {
+        allowSubflow: true,
+        allowTag: false,
+      },
+    );
+
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "success",
+      "ROUTED_BACK_TO_UCHAT_SUBFLOW",
+      "Contato retornou ao UChat",
+      "Depois da verificacao no ActiveCampaign, o Launch Hub reenviou o contato ao UChat apenas para o subflow de boas-vindas.",
+      {
+        ...(activeVerification ? { activeVerification } : {}),
+        uchatReturn,
+      } as JsonRecord,
+    );
+
+    return {
+      checkedActiveCampaign: activeVerification,
+      returnedToUchat: true,
+      uchatReturn,
+    };
+  }
+
+  if (["manychat", "typebot"].includes(normalizedEvent.source)) {
     const routed = await routeToActiveCampaign(
       supabase,
       launch,
@@ -1342,6 +1689,7 @@ async function dispatchRoutes(
         "O Launch Hub enviou o contato tratado para o ActiveCampaign depois da verificacao de estado.",
         routed as unknown as JsonRecord,
       );
+
     }
 
     return routed;
