@@ -123,6 +123,10 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
         depois retorna ao UChat somente pelo subflow de boas-vindas. A tag padrao pode
         acompanhar apenas nas rotas de retorno externas.
       </p>
+      <p className="text-xs text-muted-foreground/80">
+        Para WhatsApp template sair pelo subflow, deixe o template como primeira mensagem do
+        subflow e confirme que a automacao nao esta pausada no UChat.
+      </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>
         <Plus className="mr-1 h-4 w-4" /> Adicionar workspace

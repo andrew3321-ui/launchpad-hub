@@ -1085,7 +1085,7 @@ async function findUchatSubscriberForContact(
   workspace: UChatWorkspaceRow,
 ) {
   const inboundUserNs =
-    findStringDeep(payload, ["user_ns", "subscriber_id", "subscriber.user_ns"]) || null;
+    findStringDeep(payload, ["user_ns", "subscriber.user_ns"]) || null;
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
   const knownUserNs = inboundUserNs || nonEmptyString(existingIdentity?.external_contact_id);
 
@@ -1200,7 +1200,7 @@ async function findOrCreateUchatUser(
   payload?: JsonRecord,
 ) {
   const payloadUserNs =
-    payload ? findStringDeep(payload, ["user_ns", "subscriber_id", "subscriber.user_ns"]) : null;
+    payload ? findStringDeep(payload, ["user_ns", "subscriber.user_ns"]) : null;
 
   if (payloadUserNs) {
     return payloadUserNs;
@@ -1313,7 +1313,7 @@ async function routeToUchat(
   const skippedActions: string[] = [];
 
   if (subflowNs) {
-    const actionKey = `${workspace.id}:subflow:${subflowNs}`;
+    const actionKey = `${workspace.id}:subflow:${subflowNs}:event:${eventId}`;
     if (!(await hasSuccessfulRoutingAction(supabase, launch.id, contact.id, source, "uchat", "send-sub-flow", actionKey))) {
       const actionId = await createRoutingAction(
         supabase,
