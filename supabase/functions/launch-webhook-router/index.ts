@@ -1908,6 +1908,7 @@ async function dispatchRoutes(
 
   if (["activecampaign", "sendflow"].includes(normalizedEvent.source)) {
     try {
+      const requestedTagName = findStringDeep(normalizedEvent.payload, ["tag_name", "uchat_tag"]);
       const routed = await routeToUchat(
         supabase,
         launch,
@@ -1915,6 +1916,10 @@ async function dispatchRoutes(
         eventId,
         normalizedEvent.source,
         normalizedEvent.payload,
+        {
+          allowSubflow: true,
+          allowTag: Boolean(requestedTagName),
+        },
       );
 
       await insertProcessingLog(
