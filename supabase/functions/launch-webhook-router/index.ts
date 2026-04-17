@@ -105,6 +105,11 @@ function nonEmptyString(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isLikelyUchatUserNs(value: unknown) {
+  const normalized = nonEmptyString(value);
+  return Boolean(normalized && normalized.length >= 6 && /^f/i.test(normalized) && !/^\d+$/.test(normalized));
+}
+
 function normalizeKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -335,7 +340,7 @@ function normalizeIncomingWebhook(
     return {
       source,
       eventType,
-      externalContactId: extractUchatUserNs(payload) || extractUchatUserId(payload) || externalContactId,
+      externalContactId: extractUchatUserNs(payload) || null,
       contact,
       payload,
     };
@@ -375,7 +380,8 @@ async function requestJson(
 
 function extractUchatUserNs(payload?: JsonRecord | null) {
   if (!payload) return null;
-  return findStringDeep(payload, ["uchat_user_ns", "user_ns", "subscriber.user_ns"]);
+  const candidate = findStringDeep(payload, ["uchat_user_ns", "user_ns", "subscriber.user_ns"]);
+  return isLikelyUchatUserNs(candidate) ? candidate : null;
 }
 
 function extractUchatUserId(payload?: JsonRecord | null) {
@@ -1172,11 +1178,13 @@ async function findUchatSubscriberForContact(
   const inboundUserNs = extractUchatUserNs(payload);
   const inboundUserId = extractUchatUserId(payload);
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
+  const existingExternalId = nonEmptyString(existingIdentity?.external_contact_id);
   const existingSnapshot = isRecord(existingIdentity?.raw_snapshot)
     ? (existingIdentity.raw_snapshot as JsonRecord)
     : null;
-  const existingUserId = extractKnownUchatUserId(existingSnapshot);
-  const knownUserNs = inboundUserNs || nonEmptyString(existingIdentity?.external_contact_id);
+  const legacyStoredUserId = existingExternalId && !isLikelyUchatUserNs(existingExternalId) ? existingExternalId : null;
+  const existingUserId = extractKnownUchatUserId(existingSnapshot) || legacyStoredUserId;
+  const knownUserNs = inboundUserNs || (isLikelyUchatUserNs(existingExternalId) ? existingExternalId : null);
 
   if (knownUserNs) {
     const match = await fetchUchatSubscriberByQuery(workspace, { user_ns: knownUserNs });
@@ -1193,6 +1201,18 @@ async function findUchatSubscriberForContact(
         userNs: knownUserNs,
         userId: existingUserId,
         snapshot: existingSnapshot,
+      };
+    }
+  }
+
+  if (existingUserId) {
+    const match = await fetchUchatSubscriberByUserId(workspace, existingUserId);
+    const userNs = nonEmptyString(match?.user_ns);
+    if (match && userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(match) || existingUserId,
+        snapshot: match,
       };
     }
   }
@@ -1325,11 +1345,13 @@ async function findOrCreateUchatUser(
   }
 
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
-  const existingUserNs = nonEmptyString(existingIdentity?.external_contact_id);
+  const existingExternalId = nonEmptyString(existingIdentity?.external_contact_id);
+  const existingUserNs = isLikelyUchatUserNs(existingExternalId) ? existingExternalId : null;
   const existingSnapshot = isRecord(existingIdentity?.raw_snapshot)
     ? (existingIdentity.raw_snapshot as JsonRecord)
     : null;
-  const existingUserId = extractKnownUchatUserId(existingSnapshot);
+  const legacyStoredUserId = existingExternalId && !isLikelyUchatUserNs(existingExternalId) ? existingExternalId : null;
+  const existingUserId = extractKnownUchatUserId(existingSnapshot) || legacyStoredUserId;
 
   if (existingUserNs) {
     const existingSubscriber = await fetchUchatSubscriberByQuery(workspace, { user_ns: existingUserNs });
@@ -1346,6 +1368,18 @@ async function findOrCreateUchatUser(
         userNs: existingUserNs,
         userId: existingUserId,
         snapshot: existingSnapshot,
+      } satisfies ResolvedUchatRecipient;
+    }
+  }
+
+  if (existingUserId) {
+    const subscriberByExistingUserId = await fetchUchatSubscriberByUserId(workspace, existingUserId);
+    const userNs = nonEmptyString(subscriberByExistingUserId?.user_ns);
+    if (userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(subscriberByExistingUserId) || existingUserId,
+        snapshot: subscriberByExistingUserId,
       } satisfies ResolvedUchatRecipient;
     }
   }
