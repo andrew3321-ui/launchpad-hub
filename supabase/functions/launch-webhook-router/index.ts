@@ -391,7 +391,18 @@ function assertUchatApiSuccess(response: unknown) {
     nonEmptyString(response.error) ||
     null;
 
-  if (hasExplicitFailure || (errorMessage && !nonEmptyString(response.user_ns) && !nonEmptyString(response.id))) {
+  const hasStructuredPayload =
+    Array.isArray(response.data) ||
+    isRecord(response.data) ||
+    isRecord(response.subscriber) ||
+    Boolean(nonEmptyString(response.user_ns)) ||
+    Boolean(nonEmptyString(response.id));
+
+  const messageLooksFatal = errorMessage
+    ? /\b(error|invalid|expired|forbidden|unauthorized|denied|failed)\b/i.test(errorMessage)
+    : false;
+
+  if (hasExplicitFailure || (messageLooksFatal && !hasStructuredPayload)) {
     throw new Error(errorMessage || "UChat returned an error response");
   }
 }
@@ -1632,16 +1643,11 @@ async function dispatchRoutes(
       eventId,
       normalizedEvent.source,
       "info",
-      "ACTIVE_ALREADY_TAGGED",
-      "Contato ja possui as tags",
-      "O evento vindo do ActiveCampaign ja chegou com tags do lancamento. Nenhum retorno para o UChat foi disparado.",
+      "ACTIVE_ALREADY_TAGGED_CONTINUING",
+      "Contato ja possui as tags do lancamento",
+      "O evento vindo do ActiveCampaign ja chegou com tags do lancamento. Mesmo assim, o Launch Hub continuou o retorno para o UChat porque esse webhook pode ser usado como gatilho explicito do subflow.",
       { inboundTags: activePayloadTags, configuredTags: configuredTagNames },
     );
-
-    return {
-      skipped: true,
-      reason: "activecampaign_already_tagged",
-    };
   }
 
   if (normalizedEvent.source === "uchat") {
