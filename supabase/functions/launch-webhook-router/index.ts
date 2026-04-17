@@ -51,8 +51,15 @@ interface NamedTag {
 interface UchatSubscriberLookup {
   workspace: UChatWorkspaceRow;
   userNs: string;
+  userId: string | null;
   snapshot: JsonRecord;
   currentTags: string[];
+}
+
+interface ResolvedUchatRecipient {
+  userNs: string;
+  userId: string | null;
+  snapshot: JsonRecord | null;
 }
 
 interface NormalizedWebhookEvent {
@@ -374,6 +381,14 @@ function extractUchatUserNs(payload?: JsonRecord | null) {
 function extractUchatUserId(payload?: JsonRecord | null) {
   if (!payload) return null;
   return findStringDeep(payload, ["user_id", "subscriber.user_id", "subscriber.userId"]);
+}
+
+function extractKnownUchatUserId(payload?: JsonRecord | null) {
+  if (!payload) return null;
+  return (
+    findStringDeep(payload, ["user_id", "userId", "subscriber.user_id", "subscriber.userId", "subscriber.id"]) ||
+    nonEmptyString(payload.id)
+  );
 }
 
 function assertUchatApiSuccess(response: unknown) {
@@ -1157,6 +1172,10 @@ async function findUchatSubscriberForContact(
   const inboundUserNs = extractUchatUserNs(payload);
   const inboundUserId = extractUchatUserId(payload);
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
+  const existingSnapshot = isRecord(existingIdentity?.raw_snapshot)
+    ? (existingIdentity.raw_snapshot as JsonRecord)
+    : null;
+  const existingUserId = extractKnownUchatUserId(existingSnapshot);
   const knownUserNs = inboundUserNs || nonEmptyString(existingIdentity?.external_contact_id);
 
   if (knownUserNs) {
@@ -1164,7 +1183,16 @@ async function findUchatSubscriberForContact(
     if (match) {
       return {
         userNs: knownUserNs,
+        userId: extractKnownUchatUserId(match) || existingUserId,
         snapshot: match,
+      };
+    }
+
+    if (existingUserId) {
+      return {
+        userNs: knownUserNs,
+        userId: existingUserId,
+        snapshot: existingSnapshot,
       };
     }
   }
@@ -1175,6 +1203,7 @@ async function findUchatSubscriberForContact(
     if (match && userNs) {
       return {
         userNs,
+        userId: extractKnownUchatUserId(match) || inboundUserId,
         snapshot: match,
       };
     }
@@ -1189,6 +1218,7 @@ async function findUchatSubscriberForContact(
     if (phoneMatch && userNs) {
       return {
         userNs,
+        userId: extractKnownUchatUserId(phoneMatch),
         snapshot: phoneMatch,
       };
     }
@@ -1203,6 +1233,7 @@ async function findUchatSubscriberForContact(
     if (emailMatch && userNs) {
       return {
         userNs,
+        userId: extractKnownUchatUserId(emailMatch),
         snapshot: emailMatch,
       };
     }
@@ -1239,6 +1270,7 @@ async function loadUchatSubscriberState(
   return {
     workspace,
     userNs: subscriber.userNs,
+    userId: subscriber.userId,
     snapshot: subscriber.snapshot,
     currentTags: extractUchatSubscriberTags(subscriber.snapshot),
   } satisfies UchatSubscriberLookup;
@@ -1269,6 +1301,7 @@ function enrichPayloadWithUchatState(
     uchat_current_tags: subscriberState.currentTags,
     uchat_workspace_id: subscriberState.workspace.workspace_id,
     uchat_user_ns: subscriberState.userNs,
+    ...(subscriberState.userId ? { uchat_user_id: subscriberState.userId } : {}),
     uchat_subscriber: subscriberState.snapshot,
   } satisfies JsonRecord;
 }
@@ -1284,23 +1317,49 @@ async function findOrCreateUchatUser(
   const payloadUserId = extractUchatUserId(payload);
 
   if (payloadUserNs) {
-    return payloadUserNs;
+    return {
+      userNs: payloadUserNs,
+      userId: payloadUserId || extractKnownUchatUserId(payload || null),
+      snapshot: isRecord(payload) ? payload : null,
+    } satisfies ResolvedUchatRecipient;
   }
 
   const existingIdentity = await fetchLeadIdentity(supabase, launchId, contact.id, "uchat");
   const existingUserNs = nonEmptyString(existingIdentity?.external_contact_id);
+  const existingSnapshot = isRecord(existingIdentity?.raw_snapshot)
+    ? (existingIdentity.raw_snapshot as JsonRecord)
+    : null;
+  const existingUserId = extractKnownUchatUserId(existingSnapshot);
 
   if (existingUserNs) {
     const existingSubscriber = await fetchUchatSubscriberByQuery(workspace, { user_ns: existingUserNs });
     if (existingSubscriber && nonEmptyString(existingSubscriber.user_ns)) {
-      return existingUserNs;
+      return {
+        userNs: existingUserNs,
+        userId: extractKnownUchatUserId(existingSubscriber) || existingUserId,
+        snapshot: existingSubscriber,
+      } satisfies ResolvedUchatRecipient;
+    }
+
+    if (existingUserId) {
+      return {
+        userNs: existingUserNs,
+        userId: existingUserId,
+        snapshot: existingSnapshot,
+      } satisfies ResolvedUchatRecipient;
     }
   }
 
   if (payloadUserId) {
     const subscriberByUserId = await fetchUchatSubscriberByUserId(workspace, payloadUserId);
     const userNs = nonEmptyString(subscriberByUserId?.user_ns);
-    if (userNs) return userNs;
+    if (userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(subscriberByUserId) || payloadUserId,
+        snapshot: subscriberByUserId,
+      } satisfies ResolvedUchatRecipient;
+    }
   }
 
   if (contact.primary_phone) {
@@ -1315,7 +1374,13 @@ async function findOrCreateUchatUser(
       : null;
 
     const userNs = nonEmptyString(phoneMatch?.user_ns);
-    if (userNs) return userNs;
+    if (userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(phoneMatch),
+        snapshot: phoneMatch,
+      } satisfies ResolvedUchatRecipient;
+    }
   }
 
   if (contact.primary_email) {
@@ -1330,7 +1395,13 @@ async function findOrCreateUchatUser(
       : null;
 
     const userNs = nonEmptyString(emailMatch?.user_ns);
-    if (userNs) return userNs;
+    if (userNs) {
+      return {
+        userNs,
+        userId: extractKnownUchatUserId(emailMatch),
+        snapshot: emailMatch,
+      } satisfies ResolvedUchatRecipient;
+    }
   }
 
   const { firstName, lastName } = splitName(contact.primary_name);
@@ -1351,7 +1422,11 @@ async function findOrCreateUchatUser(
     throw new ProcessContactError("UChat did not return user_ns after subscriber creation", 500);
   }
 
-  return createdUserNs;
+  return {
+    userNs: createdUserNs,
+    userId: extractKnownUchatUserId(isRecord(created) ? (created as JsonRecord) : null),
+    snapshot: isRecord(created) ? (created as JsonRecord) : null,
+  } satisfies ResolvedUchatRecipient;
 }
 
 async function routeToUchat(
@@ -1370,7 +1445,9 @@ async function routeToUchat(
     throw new ProcessContactError("No valid UChat workspace configured for this launch", 400);
   }
 
-  const userNs = await findOrCreateUchatUser(supabase, launch.id, contact, workspace, payload);
+  const recipient = await findOrCreateUchatUser(supabase, launch.id, contact, workspace, payload);
+  const userNs = recipient.userNs;
+  const targetUserId = recipient.userId || extractUchatUserId(payload);
 
   await upsertLeadIdentity(
     supabase,
@@ -1384,6 +1461,7 @@ async function routeToUchat(
       workspace_id: workspace.workspace_id,
       workspace_name: workspace.workspace_name,
       user_ns: userNs,
+      ...(targetUserId ? { user_id: targetUserId } : {}),
     },
   );
 
@@ -1401,7 +1479,6 @@ async function routeToUchat(
   const responses: JsonRecord[] = [];
   const executedActions: string[] = [];
   const skippedActions: string[] = [];
-  const payloadUserId = extractUchatUserId(payload);
   let subflowDeliveryMethod: "user_ns" | "user_id" | null = null;
 
   if (subflowNs) {
@@ -1419,17 +1496,17 @@ async function routeToUchat(
         { workspaceId: workspace.workspace_id, userNs, subflowNs },
       );
 
-      try {
-        const response = (await uchatRequest(
-          workspace.api_token,
-          payloadUserId ? "/subscriber/send-sub-flow-by-user-id" : "/subscriber/send-sub-flow",
-          "POST",
-          payloadUserId
-            ? {
-                user_id: payloadUserId,
-                sub_flow_ns: subflowNs,
-              }
-            : {
+        try {
+          const response = (await uchatRequest(
+            workspace.api_token,
+            targetUserId ? "/subscriber/send-sub-flow-by-user-id" : "/subscriber/send-sub-flow",
+            "POST",
+            targetUserId
+              ? {
+                  user_id: targetUserId,
+                  sub_flow_ns: subflowNs,
+                }
+              : {
                 user_ns: userNs,
                 sub_flow_ns: subflowNs,
               },
@@ -1438,7 +1515,7 @@ async function routeToUchat(
         await updateRoutingAction(supabase, actionId, "success", response);
         responses.push({ action: "send-sub-flow", response });
         executedActions.push("send-sub-flow");
-        subflowDeliveryMethod = payloadUserId ? "user_id" : "user_ns";
+        subflowDeliveryMethod = targetUserId ? "user_id" : "user_ns";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await updateRoutingAction(supabase, actionId, "failed", {}, message);
@@ -1508,7 +1585,7 @@ async function routeToUchat(
     executedActions,
     skippedActions,
     subflowDeliveryMethod,
-    payloadUserId,
+    payloadUserId: targetUserId,
   };
 }
 
@@ -1796,29 +1873,53 @@ async function dispatchRoutes(
   }
 
   if (["activecampaign", "sendflow"].includes(normalizedEvent.source)) {
-    const routed = await routeToUchat(
-      supabase,
-      launch,
-      contact,
-      eventId,
-      normalizedEvent.source,
-      normalizedEvent.payload,
-    );
+    try {
+      const routed = await routeToUchat(
+        supabase,
+        launch,
+        contact,
+        eventId,
+        normalizedEvent.source,
+        normalizedEvent.payload,
+      );
 
-    await insertProcessingLog(
-      supabase,
-      launch.id,
-      contact.id,
-      eventId,
-      normalizedEvent.source,
-      "success",
-      "ROUTED_TO_UCHAT",
-      "Contato enviado ao UChat",
-      "O Launch Hub encaminhou o contato tratado para o UChat com a acao configurada do lancamento.",
-      routed as unknown as JsonRecord,
-    );
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "success",
+        "ROUTED_TO_UCHAT",
+        "Contato enviado ao UChat",
+        "O Launch Hub encaminhou o contato tratado para o UChat com a acao configurada do lancamento.",
+        routed as unknown as JsonRecord,
+      );
 
-    return routed;
+      return routed;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "error",
+        "ROUTING_TO_UCHAT_FAILED",
+        "Falha ao reenviar contato ao UChat",
+        "O contato entrou no Launch Hub e foi tratado, mas a etapa de retorno ao UChat falhou durante o disparo da acao configurada.",
+        {
+          error: message,
+          configuredSubflowNs:
+            findStringDeep(normalizedEvent.payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) || null,
+          workspaceHint:
+            findStringDeep(normalizedEvent.payload, ["workspace_id", "workspaceId", "uchat_workspace_id", "bot_id"]) ||
+            null,
+        },
+      );
+      throw error;
+    }
   }
 
   return { skipped: true, reason: "no_route_defined" };
