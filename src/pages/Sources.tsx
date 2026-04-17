@@ -32,12 +32,44 @@ import {
 interface LaunchSettingsRow {
   id: string;
   name: string;
+  project_id: string | null;
   slug: string | null;
   webhook_secret: string;
   ac_api_url: string | null;
   ac_api_key: string | null;
   ac_default_list_id: string | null;
   ac_named_tags: unknown;
+}
+
+interface SourcesDraft {
+  acApiUrl: string;
+  acApiKey: string;
+  acListId: string;
+  acNamedTags: NamedTagDraft[];
+  uchatWorkspaces: UChatWorkspaceDraft[];
+}
+
+function buildSourcesDraftKey(launchId: string) {
+  return `launchhub:sources-draft:${launchId}`;
+}
+
+function parseSourcesDraft(raw: string | null): SourcesDraft | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<SourcesDraft>;
+    return {
+      acApiUrl: typeof parsed.acApiUrl === "string" ? parsed.acApiUrl : "",
+      acApiKey: typeof parsed.acApiKey === "string" ? parsed.acApiKey : "",
+      acListId: typeof parsed.acListId === "string" ? parsed.acListId : "",
+      acNamedTags: Array.isArray(parsed.acNamedTags) ? (parsed.acNamedTags as NamedTagDraft[]) : [],
+      uchatWorkspaces: Array.isArray(parsed.uchatWorkspaces)
+        ? (parsed.uchatWorkspaces as UChatWorkspaceDraft[])
+        : [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
@@ -83,7 +115,7 @@ export default function Sources() {
       ] = await Promise.all([
         supabase
           .from("launches")
-          .select("id, name, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+          .select("id, name, project_id, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
           .eq("id", activeLaunch.id)
           .single(),
         supabase
@@ -107,19 +139,11 @@ export default function Sources() {
       }
 
       const typedLaunch = launchData as LaunchSettingsRow;
-      setLaunchSettings(typedLaunch);
-      setAcApiUrl(typedLaunch.ac_api_url || "");
-      setAcApiKey(typedLaunch.ac_api_key || "");
-      setAcListId(typedLaunch.ac_default_list_id || "");
-      setAcNamedTags(
-        Array.isArray(typedLaunch.ac_named_tags)
-          ? (typedLaunch.ac_named_tags as NamedTagDraft[])
-          : [],
-      );
-      setUchatWorkspaces(
-        ((workspaceData || []) as Array<Record<string, unknown>>).map((workspace) => ({
+      const remoteUchatWorkspaces = ((workspaceData || []) as Array<Record<string, unknown>>).map(
+        (workspace) => ({
           id: typeof workspace.id === "string" ? workspace.id : undefined,
-          workspace_name: typeof workspace.workspace_name === "string" ? workspace.workspace_name : "",
+          workspace_name:
+            typeof workspace.workspace_name === "string" ? workspace.workspace_name : "",
           workspace_id: typeof workspace.workspace_id === "string" ? workspace.workspace_id : "",
           api_token: typeof workspace.api_token === "string" ? workspace.api_token : "",
           welcome_subflow_ns:
@@ -128,13 +152,41 @@ export default function Sources() {
               : "",
           default_tag_name:
             typeof workspace.default_tag_name === "string" ? workspace.default_tag_name : "",
-        })),
+        }),
       );
+      const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(activeLaunch.id)));
+
+      setLaunchSettings(typedLaunch);
+      setAcApiUrl(draft?.acApiUrl ?? typedLaunch.ac_api_url ?? "");
+      setAcApiKey(draft?.acApiKey ?? typedLaunch.ac_api_key ?? "");
+      setAcListId(draft?.acListId ?? typedLaunch.ac_default_list_id ?? "");
+      setAcNamedTags(
+        draft?.acNamedTags ??
+          (Array.isArray(typedLaunch.ac_named_tags)
+            ? (typedLaunch.ac_named_tags as NamedTagDraft[])
+            : []),
+      );
+      setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
       setLoading(false);
     };
 
     void load();
   }, [activeLaunch, toast]);
+
+  useEffect(() => {
+    if (!activeLaunch || loading) return;
+
+    localStorage.setItem(
+      buildSourcesDraftKey(activeLaunch.id),
+      JSON.stringify({
+        acApiUrl,
+        acApiKey,
+        acListId,
+        acNamedTags,
+        uchatWorkspaces,
+      } satisfies SourcesDraft),
+    );
+  }, [activeLaunch, loading, acApiUrl, acApiKey, acListId, acNamedTags, uchatWorkspaces]);
 
   const activeConnected = useMemo(
     () => Boolean(acApiUrl.trim() && acApiKey.trim()),
@@ -161,7 +213,7 @@ export default function Sources() {
         ac_named_tags: acNamedTags as unknown as Json,
       })
       .eq("id", activeLaunch.id)
-      .select("id, name, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+      .select("id, name, project_id, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
       .single();
 
     setSaving(null);
@@ -206,8 +258,10 @@ export default function Sources() {
       .filter((workspace) => workspace.workspace_id.trim() && workspace.api_token.trim())
       .map((workspace) => ({
         launch_id: activeLaunch.id,
+        project_id: launchSettings?.project_id || null,
         workspace_name: workspace.workspace_name || "Workspace UChat",
         workspace_id: workspace.workspace_id || null,
+        bot_id: workspace.workspace_id || null,
         api_token: workspace.api_token,
         welcome_subflow_ns: workspace.welcome_subflow_ns || null,
         default_tag_name: workspace.default_tag_name || null,
