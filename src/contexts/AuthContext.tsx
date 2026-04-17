@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import {
   getSupabaseConnectionConfig,
@@ -7,24 +7,40 @@ import {
   type SupabaseConnectionConfig,
 } from "@/integrations/supabase/client";
 
+export interface AppProfile {
+  approval_reviewed_at: string | null;
+  approval_status: "approved" | "pending" | "rejected";
+  email: string;
+  full_name: string | null;
+  is_admin: boolean;
+  must_change_password: boolean;
+  password_changed_at: string | null;
+}
+
 interface AuthContextType {
   session: Session | null;
   user: User | null;
-  profile: { full_name: string | null } | null;
+  profile: AppProfile | null;
+  profileReady: boolean;
   displayName: string | null;
   loading: boolean;
   connection: SupabaseConnectionConfig;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  completeInitialPasswordChange: (newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   session: null,
   user: null,
   profile: null,
+  profileReady: false,
   displayName: null,
   loading: true,
   connection: getSupabaseConnectionConfig(),
   signOut: async () => {},
+  refreshProfile: async () => {},
+  completeInitialPasswordChange: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -61,12 +77,13 @@ const clearStoredSupabaseSessions = () => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<{ full_name: string | null } | null>(null);
+  const [profile, setProfile] = useState<AppProfile | null>(null);
+  const [profileReady, setProfileReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState(getSupabaseConnectionConfig());
   const [connectionVersion, setConnectionVersion] = useState(0);
 
-  const deriveDisplayName = (currentUser: User | null, currentProfile: { full_name: string | null } | null) => {
+  const deriveDisplayName = useCallback((currentUser: User | null, currentProfile: AppProfile | null) => {
     const profileName = currentProfile?.full_name?.trim();
     if (profileName) return profileName;
 
@@ -80,7 +97,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const emailName = currentUser?.email?.split("@")[0]?.trim() || null;
     return emailName || null;
-  };
+  }, []);
+
+  const loadProfile = useCallback(
+    async (currentUser: User | null) => {
+      if (!currentUser) {
+        setProfile(null);
+        setProfileReady(true);
+        return;
+      }
+
+      setProfileReady(false);
+
+      const { data, error } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select(
+            "approval_reviewed_at, approval_status, email, full_name, is_admin, must_change_password, password_changed_at",
+          )
+          .eq("user_id", currentUser.id)
+          .maybeSingle(),
+        5000,
+        "A consulta do perfil demorou demais para responder.",
+      );
+
+      if (error || !data) {
+        console.warn("profile lookup skipped:", error?.message || "profile_not_found");
+        setProfile({
+          approval_reviewed_at: null,
+          approval_status: "pending",
+          email: currentUser.email || "",
+          full_name: deriveDisplayName(currentUser, null),
+          is_admin: false,
+          must_change_password: true,
+          password_changed_at: null,
+        });
+        setProfileReady(true);
+        return;
+      }
+
+      setProfile({
+        approval_reviewed_at: data.approval_reviewed_at,
+        approval_status: data.approval_status as AppProfile["approval_status"],
+        email: data.email,
+        full_name: deriveDisplayName(currentUser, data),
+        is_admin: data.is_admin,
+        must_change_password: data.must_change_password,
+        password_changed_at: data.password_changed_at,
+      });
+      setProfileReady(true);
+    },
+    [deriveDisplayName],
+  );
 
   useEffect(() => {
     return subscribeToSupabaseConnection((nextConnection) => {
@@ -92,11 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setProfileReady(false);
     setSession(null);
     setUser(null);
     setProfile(null);
 
-    // Safety timeout - never stay loading forever
     const timeout = setTimeout(() => {
       if (mounted) {
         console.warn("Auth loading timeout - forcing loaded state");
@@ -104,41 +172,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 5000);
 
-    // Get initial session
     withTimeout(
       supabase.auth.getSession(),
       5000,
       "A sessao demorou demais para carregar.",
     )
-      .then(({ data: { session }, error }) => {
+      .then(({ data: { session: nextSession }, error }) => {
         if (!mounted) return;
         if (error) {
           console.error("getSession error:", error);
           setLoading(false);
+          setProfileReady(true);
           return;
         }
 
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("getSession catch:", err);
-        if (mounted) setLoading(false);
-      });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!mounted) return;
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (!session?.user) {
-          setProfile(null);
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+        if (!nextSession?.user) {
+          setProfileReady(true);
         }
         setLoading(false);
-      },
-    );
+      })
+      .catch((error) => {
+        console.error("getSession catch:", error);
+        if (mounted) {
+          setLoading(false);
+          setProfileReady(true);
+        }
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      if (!nextSession?.user) {
+        setProfile(null);
+        setProfileReady(true);
+      }
+      setLoading(false);
+    });
 
     return () => {
       mounted = false;
@@ -150,46 +224,82 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       setProfile(null);
+      setProfileReady(true);
       return;
     }
 
     let cancelled = false;
 
-    const loadProfile = async () => {
-      const { data, error } = await withTimeout(
-        supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("user_id", user.id)
-          .single(),
-        5000,
-        "A consulta do perfil demorou demais para responder.",
-      );
-
-      if (cancelled) return;
-
-      if (error) {
-        console.warn("profile lookup skipped:", error.message);
-        setProfile({ full_name: deriveDisplayName(user, null) });
-        return;
+    const syncProfile = async () => {
+      try {
+        await loadProfile(user);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("profile lookup failed:", error);
+        setProfile({
+          approval_reviewed_at: null,
+          approval_status: "pending",
+          email: user.email || "",
+          full_name: deriveDisplayName(user, null),
+          is_admin: false,
+          must_change_password: true,
+          password_changed_at: null,
+        });
+        setProfileReady(true);
       }
-
-      setProfile({ full_name: deriveDisplayName(user, data) });
     };
 
-    loadProfile().catch((error) => {
-      if (cancelled) return;
-      console.warn("profile lookup failed:", error);
-      setProfile({ full_name: deriveDisplayName(user, null) });
-    });
+    void syncProfile();
+
+    const channel = supabase
+      .channel(`profile-${user.id}-${connectionVersion}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          if (!cancelled) {
+            void syncProfile();
+          }
+        },
+      )
+      .subscribe();
 
     return () => {
       cancelled = true;
+      void supabase.removeChannel(channel);
     };
-  }, [user, connectionVersion]);
+  }, [connectionVersion, deriveDisplayName, loadProfile, user]);
 
-  const signOut = async () => {
+  const refreshProfile = useCallback(async () => {
+    await loadProfile(user);
+  }, [loadProfile, user]);
+
+  const completeInitialPasswordChange = useCallback(
+    async (newPassword: string) => {
+      const { error: authError } = await withTimeout(
+        supabase.auth.updateUser({ password: newPassword }),
+        8000,
+        "A atualizacao da senha demorou demais para responder.",
+      );
+
+      if (authError) {
+        throw authError;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      await loadProfile(user);
+    },
+    [loadProfile, user],
+  );
+
+  const signOut = useCallback(async () => {
     setLoading(true);
+    setProfileReady(false);
     setSession(null);
     setUser(null);
     setProfile(null);
@@ -204,9 +314,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn("signOut fallback:", error);
     } finally {
       clearStoredSupabaseSessions();
+      setProfileReady(true);
       setLoading(false);
     }
-  };
+  }, []);
+
+  const displayName = useMemo(() => deriveDisplayName(user, profile), [deriveDisplayName, profile, user]);
 
   return (
     <AuthContext.Provider
@@ -214,10 +327,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         user,
         profile,
-        displayName: deriveDisplayName(user, profile),
+        profileReady,
+        displayName,
         loading,
         connection,
         signOut,
+        refreshProfile,
+        completeInitialPasswordChange,
       }}
     >
       {children}

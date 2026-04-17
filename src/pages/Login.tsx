@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { isMegafoneEmail, normalizeMegafoneEmail } from "@/lib/accessControl";
 
 export default function Login() {
   const { session, loading } = useAuth();
@@ -46,11 +47,23 @@ export default function Login() {
     event.preventDefault();
     setSubmitting(true);
 
+    const normalizedEmail = normalizeMegafoneEmail(email);
+
+    if (!isMegafoneEmail(normalizedEmail)) {
+      toast({
+        title: "Email não permitido",
+        description: "Use um endereço @megafone.digital para acessar este painel.",
+        variant: "destructive",
+      });
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const { error } = await withTimeout(
-        supabase.auth.signInWithPassword({ email, password }),
+        supabase.auth.signInWithPassword({ email: normalizedEmail, password }),
         8000,
-        "O login demorou demais para responder. Atualize a pagina e tente novamente.",
+        "O login demorou demais para responder. Atualize a página e tente novamente.",
       );
 
       if (error) {
@@ -81,7 +94,7 @@ export default function Login() {
                 </div>
                 <CardTitle className="text-3xl font-semibold text-white">Entre na operação Megafone</CardTitle>
                 <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
-                  Conecte suas bases, monitore o tratamento automático e acompanhe cada lead em um ambiente com identidade Megafone.
+                  O acesso é corporativo, passa por aprovação de admins e exige troca obrigatória de senha no primeiro login.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -90,7 +103,7 @@ export default function Login() {
               <CardContent className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-slate-200">
-                    Email
+                    Email corporativo
                   </Label>
                   <Input
                     id="email"

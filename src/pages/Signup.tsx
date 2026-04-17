@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { isBootstrapMegafoneAdmin, isMegafoneEmail, normalizeMegafoneEmail } from "@/lib/accessControl";
 
 export default function Signup() {
   const { session, loading } = useAuth();
@@ -33,8 +34,20 @@ export default function Signup() {
     event.preventDefault();
     setSubmitting(true);
 
+    const normalizedEmail = normalizeMegafoneEmail(email);
+
+    if (!isMegafoneEmail(normalizedEmail)) {
+      toast({
+        title: "Domínio não permitido",
+        description: "Apenas emails @megafone.digital podem criar conta neste painel.",
+        variant: "destructive",
+      });
+      setSubmitting(false);
+      return;
+    }
+
     const { error } = await supabase.auth.signUp({
-      email,
+      email: normalizedEmail,
       password,
       options: {
         data: { full_name: fullName },
@@ -45,7 +58,12 @@ export default function Signup() {
     if (error) {
       toast({ title: "Erro ao criar conta", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Conta criada!", description: "Você já está conectado ao painel." });
+      toast({
+        title: "Conta criada!",
+        description: isBootstrapMegafoneAdmin(normalizedEmail)
+          ? "Seu acesso admin inicial já foi liberado. No primeiro acesso você precisará trocar a senha."
+          : "Seu cadastro foi enviado para aprovação de um admin. No primeiro acesso você também precisará trocar a senha.",
+      });
     }
 
     setSubmitting(false);
@@ -57,7 +75,7 @@ export default function Signup() {
         <AuthShowcase
           eyebrow="Equipe Megafone"
           title="Crie sua conta e entre na cabine de comando."
-          description="Convide seu time, acompanhe a operação dos lançamentos e mantenha o mesmo clima premium da identidade Megafone desde o primeiro acesso."
+          description="O acesso é restrito ao domínio Megafone e novos usuários entram em fila de aprovação dos admins."
         />
 
         <Card className="brand-card brand-panel border-white/10 bg-[linear-gradient(180deg,rgba(8,24,47,0.92),rgba(6,17,34,0.9))]">
@@ -66,7 +84,8 @@ export default function Signup() {
             <div className="space-y-2">
               <CardTitle className="text-3xl font-semibold text-white">Criar conta</CardTitle>
               <CardDescription className="max-w-md text-sm leading-7 text-slate-300">
-                Prepare seu acesso ao cockpit de integrações, deduplicação e acompanhamento de resultados.
+                Apenas emails <span className="font-semibold text-white">@megafone.digital</span> podem se cadastrar.
+                Depois do primeiro acesso, a senha deve ser atualizada antes da liberação final do painel.
               </CardDescription>
             </div>
           </CardHeader>
@@ -89,7 +108,7 @@ export default function Signup() {
 
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-slate-200">
-                  Email
+                  Email corporativo
                 </Label>
                 <Input
                   id="email"
@@ -104,7 +123,7 @@ export default function Signup() {
 
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-slate-200">
-                  Senha
+                  Senha inicial
                 </Label>
                 <Input
                   id="password"
@@ -112,8 +131,8 @@ export default function Signup() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
-                  minLength={6}
-                  placeholder="Mínimo de 6 caracteres"
+                  minLength={8}
+                  placeholder="Pelo menos 8 caracteres"
                   className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
                 />
               </div>

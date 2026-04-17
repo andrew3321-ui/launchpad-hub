@@ -1,12 +1,12 @@
 import { Outlet, useLocation } from "react-router-dom";
-import { Bell, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLaunch } from "@/contexts/LaunchContext";
 import { MegafoneLogo } from "@/components/MegafoneLogo";
 import { AppSidebar } from "./AppSidebar";
+import { AdminApprovalsBell } from "./AdminApprovalsBell";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard de amplificação",
@@ -53,9 +53,7 @@ export function AppLayout() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Button variant="ghost" size="icon" className="border border-white/10 bg-white/5 text-slate-100">
-                  <Bell className="h-4 w-4" />
-                </Button>
+                <AdminApprovalsBell />
                 <div className="hidden xl:block">
                   <MegafoneLogo compact />
                 </div>
