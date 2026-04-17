@@ -140,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         approval_reviewed_at: data.approval_reviewed_at,
         approval_status: data.approval_status as AppProfile["approval_status"],
         email: data.email,
-        full_name: deriveDisplayName(currentUser, data),
+        full_name: deriveDisplayName(currentUser, data as unknown as AppProfile),
         is_admin: data.is_admin,
         must_change_password: data.must_change_password,
         password_changed_at: data.password_changed_at,

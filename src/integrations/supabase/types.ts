@@ -683,20 +683,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      is_approved_user: {
-        Args: { _user_id: string }
-        Returns: boolean
-      }
-      is_platform_admin: {
-        Args: { _user_id: string }
-        Returns: boolean
-      }
+      is_approved_user: { Args: { _user_id: string }; Returns: boolean }
+      is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
       list_pending_signup_requests: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           created_at: string
           email: string
-          full_name: string | null
+          full_name: string
           id: string
           must_change_password: boolean
           user_id: string
@@ -716,6 +710,12 @@ export type Database = {
           must_change_password: boolean
           password_changed_at: string | null
           user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
         }
       }
       user_owns_launch: {
