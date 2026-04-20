@@ -4,6 +4,8 @@ import {
   processIncomingContactEvent,
 } from "../_shared/contact-processing.ts";
 
+type AnySupabaseClient = any;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -52,7 +54,7 @@ async function requireAuthenticatedUser(request: Request, supabaseUrl: string, s
 }
 
 async function assertLaunchAccess(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   userId: string,
   launchId: string | null,
   launchSlug: string | null,
