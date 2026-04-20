@@ -10,7 +10,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.activecampaign-catalog]
-verify_jwt = true
+verify_jwt = false
 
 [functions.launch-webhook-router]
 verify_jwt = false
