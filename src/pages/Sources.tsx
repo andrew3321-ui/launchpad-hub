@@ -77,6 +77,10 @@ const MANAGED_SOURCE_ALIASES = [
 ] as const;
 const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 
+function buildCatalogScopeKey(launchId: string, apiUrl: string, apiKey: string) {
+  return [launchId, apiUrl.trim(), apiKey.trim()].join("::");
+}
+
 function buildSourcesDraftKey(launchId: string) {
   return `launchhub:sources-draft:${launchId}`;
 }
@@ -183,6 +187,7 @@ export default function Sources() {
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
+  const [activeCampaignTagsScopeKey, setActiveCampaignTagsScopeKey] = useState<string | null>(null);
   const activeLaunchId = activeLaunch?.id ?? null;
   const isHydratedActiveLaunch = hydratedLaunchId === activeLaunchId;
 
@@ -242,6 +247,7 @@ export default function Sources() {
         if (latestLaunchIdRef.current === requestLaunchId) {
           setActiveCampaignTags([]);
           setActiveCampaignTagsLoadedAt(null);
+          setActiveCampaignTagsScopeKey(null);
         }
 
         if (!options?.silent) {
@@ -287,6 +293,9 @@ export default function Sources() {
 
         setActiveCampaignTags(typedData.tags);
         setActiveCampaignTagsLoadedAt(typedData.loadedAt ?? new Date().toISOString());
+        setActiveCampaignTagsScopeKey(
+          buildCatalogScopeKey(requestLaunchId, trimmedApiUrl, trimmedApiKey),
+        );
 
         if (!options?.silent) {
           toast({
@@ -330,6 +339,7 @@ export default function Sources() {
         setUchatWorkspaces([]);
         setActiveCampaignTags([]);
         setActiveCampaignTagsLoadedAt(null);
+        setActiveCampaignTagsScopeKey(null);
         setHydratedLaunchId(null);
         setLoadingActiveCampaignTags(false);
         setLoading(false);
@@ -346,6 +356,7 @@ export default function Sources() {
       setUchatWorkspaces([]);
       setActiveCampaignTags([]);
       setActiveCampaignTagsLoadedAt(null);
+      setActiveCampaignTagsScopeKey(null);
       setLoadingActiveCampaignTags(false);
       setLoading(true);
       setHydratedLaunchId(null);
@@ -418,32 +429,44 @@ export default function Sources() {
   useEffect(() => {
     if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
 
-    const savedApiUrl = launchSettings?.ac_api_url?.trim() || "";
-    const savedApiKey = launchSettings?.ac_api_key?.trim() || "";
+    const currentApiUrl = visibleAcApiUrl.trim();
+    const currentApiKey = visibleAcApiKey.trim();
 
-    if (!savedApiUrl || !savedApiKey) {
+    if (!currentApiUrl || !currentApiKey) {
       setActiveCampaignTags([]);
       setActiveCampaignTagsLoadedAt(null);
+      setActiveCampaignTagsScopeKey(null);
       return;
     }
 
-    if (visibleActiveCampaignTags.length > 0 || loadingActiveCampaignTags) return;
+    const nextScopeKey = buildCatalogScopeKey(activeLaunchId, currentApiUrl, currentApiKey);
+
+    if (
+      activeCampaignTagsScopeKey === nextScopeKey &&
+      (visibleActiveCampaignTags.length > 0 || Boolean(visibleActiveCampaignTagsLoadedAt))
+    ) {
+      return;
+    }
+
+    if (loadingActiveCampaignTags) return;
 
     void loadActiveCampaignCatalog({
-      apiUrl: savedApiUrl,
-      apiKey: savedApiKey,
+      apiUrl: currentApiUrl,
+      apiKey: currentApiKey,
       launchId: activeLaunchId,
       silent: true,
     });
   }, [
     activeLaunchId,
+    activeCampaignTagsScopeKey,
     hydratedLaunchId,
-    launchSettings?.ac_api_key,
-    launchSettings?.ac_api_url,
     loadActiveCampaignCatalog,
     loadingActiveCampaignTags,
     loading,
+    visibleAcApiKey,
+    visibleAcApiUrl,
     visibleActiveCampaignTags.length,
+    visibleActiveCampaignTagsLoadedAt,
   ]);
 
   useEffect(() => {
