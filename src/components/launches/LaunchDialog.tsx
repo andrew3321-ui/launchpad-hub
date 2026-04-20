@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { slugify } from "@/lib/slugify";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +16,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   launchId: string | null;
   onSaved: () => void;
+}
+
+interface LaunchMutationResult {
+  id: string;
+  slug: string | null;
 }
 
 export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
@@ -39,7 +40,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
   ]);
   const [whatsappLink, setWhatsappLink] = useState("");
 
-  const isEditing = !!launchId;
+  const isEditing = Boolean(launchId);
 
   useEffect(() => {
     if (!open) return;
@@ -47,7 +48,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       resetForm();
       return;
     }
-    loadLaunch(launchId);
+    void loadLaunch(launchId);
   }, [open, launchId]);
 
   const resetForm = () => {
@@ -67,7 +68,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       .single();
 
     if (error) {
-      toast({ title: "Erro ao carregar lançamento", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao carregar lancamento", description: error.message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -112,14 +113,18 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast({ title: "Nome obrigatório", description: "Informe o nome do lançamento para continuar.", variant: "destructive" });
+      toast({
+        title: "Nome obrigatorio",
+        description: "Informe o nome do lancamento para continuar.",
+        variant: "destructive",
+      });
       return;
     }
 
     if (!user) {
       toast({
-        title: "Sessão indisponível",
-        description: "Sua sessão não foi reconhecida. Atualize a página e entre novamente antes de criar um lançamento.",
+        title: "Sessao indisponivel",
+        description: "Sua sessao nao foi reconhecida. Atualize a pagina e entre novamente.",
         variant: "destructive",
       });
       return;
@@ -132,8 +137,8 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
       if (!baseSlug) {
         toast({
-          title: "Slug inválido",
-          description: "Use um nome com letras ou números para gerar o identificador do lançamento.",
+          title: "Slug invalido",
+          description: "Use um nome com letras ou numeros para gerar o identificador do lancamento.",
           variant: "destructive",
         });
         setSaving(false);
@@ -141,29 +146,22 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       }
 
       if (isEditing) {
-        const updateSlug = baseSlug;
-        const launchData = {
-          name: name.trim(),
-          slug: updateSlug,
-          status: "active",
-          custom_states: customStates as unknown as import("@/integrations/supabase/types").Json,
-          whatsapp_group_link: whatsappLink || null,
-        };
-
         const { error, data } = await withTimeout(
-          supabase
-            .from("launches")
-            .update(launchData)
-            .eq("id", launchId)
-            .select("id")
-            .single(),
-          "O backend demorou demais para responder ao salvar o lançamento. Tente novamente.",
+          supabase.rpc("update_launch_metadata", {
+            target_launch_id: launchId,
+            next_name: name.trim(),
+            next_slug: baseSlug,
+            next_status: "active",
+            next_custom_states: customStates as unknown as Json,
+            next_whatsapp_group_link: whatsappLink || null,
+          }),
+          "O backend demorou demais para responder ao salvar o lancamento. Tente novamente.",
         );
 
         if (error || !data) {
           toast({
             title: "Erro ao salvar",
-            description: error?.message || "O lançamento não retornou confirmação do backend.",
+            description: error?.message || "O lancamento nao retornou confirmacao do backend.",
             variant: "destructive",
           });
           return;
@@ -175,22 +173,21 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
         for (let attempt = 0; attempt < 4; attempt += 1) {
           const candidateSlug = buildSlugCandidate(baseSlug, attempt);
-          const launchData = {
-            name: name.trim(),
-            slug: candidateSlug,
-            status: "active",
-            custom_states: customStates as unknown as import("@/integrations/supabase/types").Json,
-            whatsapp_group_link: whatsappLink || null,
-            created_by: user.id,
-          };
-
           const { error, data } = await withTimeout(
-            supabase.from("launches").insert(launchData).select("id, slug").single(),
-            "O backend demorou demais para responder ao criar o lançamento. Tente novamente.",
+            supabase.rpc("create_launch_metadata", {
+              next_name: name.trim(),
+              next_slug: candidateSlug,
+              next_status: "active",
+              next_custom_states: customStates as unknown as Json,
+              next_whatsapp_group_link: whatsappLink || null,
+            }),
+            "O backend demorou demais para responder ao criar o lancamento. Tente novamente.",
           );
 
-          if (!error && data?.id) {
-            createdSlug = data.slug || candidateSlug;
+          const createdLaunch = (data ?? null) as LaunchMutationResult | null;
+
+          if (!error && createdLaunch?.id) {
+            createdSlug = createdLaunch.slug || candidateSlug;
             slugAdjusted = createdSlug !== baseSlug;
             created = true;
             break;
@@ -199,7 +196,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           if (!isDuplicateSlugError(error)) {
             toast({
               title: "Erro ao criar",
-              description: error?.message || "O backend não confirmou a criação do lançamento.",
+              description: error?.message || "O backend nao confirmou a criacao do lancamento.",
               variant: "destructive",
             });
             return;
@@ -209,7 +206,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
         if (!created) {
           toast({
             title: "Slug em uso",
-            description: "Não conseguimos reservar um identificador único para esse lançamento. Tente outro nome ou slug.",
+            description: "Nao conseguimos reservar um identificador unico para esse lancamento. Tente outro nome ou slug.",
             variant: "destructive",
           });
           return;
@@ -220,17 +217,17 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           setSlugManual(true);
           toast({
             title: "Slug ajustado automaticamente",
-            description: `Já existia um lançamento com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
+            description: `Ja existia um lancamento com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
           });
         }
       }
 
-      toast({ title: isEditing ? "Lançamento atualizado!" : "Lançamento criado!" });
+      toast({ title: isEditing ? "Lancamento atualizado!" : "Lancamento criado!" });
       onSaved();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o lançamento.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o lancamento.";
       console.error("launch save failed", error);
-      toast({ title: "Erro no lançamento", description: message, variant: "destructive" });
+      toast({ title: "Erro no lancamento", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -240,7 +237,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Editar lançamento" : "Novo lançamento"}</DialogTitle>
+          <DialogTitle>{isEditing ? "Editar lancamento" : "Novo lancamento"}</DialogTitle>
         </DialogHeader>
 
         {loading ? (
@@ -254,7 +251,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
               <Input
                 value={name}
                 onChange={(event) => handleNameChange(event.target.value)}
-                placeholder="Ex: Lançamento Curso X - Abril 2026"
+                placeholder="Ex: Lancamento Curso X - Abril 2026"
               />
             </div>
 
@@ -269,7 +266,9 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
                 placeholder="auto-gerado-do-nome"
                 className="font-mono text-sm"
               />
-              <p className="text-xs text-muted-foreground">Identificador usado nas URLs e na organização interna.</p>
+              <p className="text-xs text-muted-foreground">
+                Identificador usado nas URLs e na organizacao interna.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -287,7 +286,8 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
             </div>
 
             <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-              As credenciais de ActiveCampaign, ManyChat e UChat agora ficam em <span className="font-medium text-foreground">Fontes</span>.
+              As credenciais de ActiveCampaign, ManyChat e UChat agora ficam em{" "}
+              <span className="font-medium text-foreground">Fontes</span>.
             </div>
           </div>
         )}

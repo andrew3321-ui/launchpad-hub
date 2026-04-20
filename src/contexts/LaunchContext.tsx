@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "./AuthContext";
@@ -8,6 +8,7 @@ interface Launch {
   name: string;
   slug: string | null;
   status: string;
+  created_at: string;
 }
 
 interface LaunchContextType {
@@ -31,7 +32,7 @@ export const useLaunch = () => useContext(LaunchContext);
 const ACTIVE_LAUNCH_STORAGE_KEY = "megafone-active-launch-id";
 
 export function LaunchProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, session, loading: authLoading, profileReady } = useAuth();
   const { toast } = useToast();
   const [launches, setLaunches] = useState<Launch[]>([]);
   const [activeLaunch, setActiveLaunchState] = useState<Launch | null>(null);
@@ -49,26 +50,30 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchLaunches = useCallback(async () => {
-    if (!user) {
+    if (authLoading || (session && !profileReady)) {
+      setLoading(true);
+      return;
+    }
+
+    if (!session || !user) {
       setLaunches([]);
-      setActiveLaunch(null);
+      setActiveLaunchState(null);
+      localStorage.removeItem(ACTIVE_LAUNCH_STORAGE_KEY);
       setLoading(false);
       return;
     }
 
     const { data, error } = await supabase
       .from("launches")
-      .select("id, name, slug, status")
+      .select("id, name, slug, status, created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
       toast({
-        title: "Erro ao atualizar lançamentos",
+        title: "Erro ao atualizar lancamentos",
         description: error.message,
         variant: "destructive",
       });
-      setLaunches([]);
-      setActiveLaunch(null);
       setLoading(false);
       return;
     }
@@ -88,12 +93,26 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
         return data.length > 0 ? data[0] : null;
       });
     }
+
     setLoading(false);
-  }, [setActiveLaunch, toast, user]);
+  }, [authLoading, profileReady, session, toast, user]);
 
   useEffect(() => {
-    fetchLaunches();
+    void fetchLaunches();
   }, [fetchLaunches]);
+
+  useEffect(() => {
+    if (authLoading || !session || !user || !profileReady) return;
+
+    const onFocus = () => {
+      void fetchLaunches();
+    };
+
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [authLoading, fetchLaunches, profileReady, session, user]);
 
   return (
     <LaunchContext.Provider

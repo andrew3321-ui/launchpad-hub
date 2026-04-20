@@ -683,6 +683,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_launch_metadata: {
+        Args: {
+          next_custom_states?: Json | null
+          next_name: string
+          next_slug: string
+          next_status?: string | null
+          next_whatsapp_group_link?: string | null
+        }
+        Returns: Json
+      }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
@@ -729,6 +739,17 @@ export type Database = {
           next_api_url?: string
           next_default_list_id?: string
           next_named_tags?: Json
+          target_launch_id: string
+        }
+        Returns: Json
+      }
+      update_launch_metadata: {
+        Args: {
+          next_custom_states?: Json | null
+          next_name?: string | null
+          next_slug?: string | null
+          next_status?: string | null
+          next_whatsapp_group_link?: string | null
           target_launch_id: string
         }
         Returns: Json
