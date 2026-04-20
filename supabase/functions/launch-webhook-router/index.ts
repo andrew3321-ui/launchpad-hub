@@ -50,6 +50,11 @@ interface NamedTag {
   tag: string;
 }
 
+interface ActiveCampaignFieldValueInput {
+  fieldId: string;
+  value: string;
+}
+
 interface UchatSubscriberLookup {
   workspace: UChatWorkspaceRow;
   userNs: string;
@@ -91,6 +96,15 @@ const corsHeaders = {
 };
 
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS = ["1050", "1055"] as const;
+const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
+  utm_source: "21",
+  utm_medium: "22",
+  utm_content: "25",
+  utm_campaign: "23",
+  utm_term: "24",
+  utm_site: "60",
+} as const;
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -273,12 +287,47 @@ function collectStringListDeep(node: unknown, keys: string[]) {
   return uniqueStrings(values);
 }
 
+function collectValuesDeep(node: unknown, keys: string[]) {
+  const normalizedKeys = new Set(keys.map(normalizeKey));
+  const values: unknown[] = [];
+
+  function pushValue(value: unknown) {
+    if (value === undefined || value === null) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => values.push(item));
+      return;
+    }
+
+    values.push(value);
+  }
+
+  function walk(value: unknown) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item));
+      return;
+    }
+
+    if (!isRecord(value)) return;
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (normalizedKeys.has(normalizeKey(key))) {
+        pushValue(nestedValue);
+      }
+      walk(nestedValue);
+    }
+  }
+
+  walk(node);
+  return values;
+}
+
 function extractGenericContact(payload: JsonRecord) {
   const name =
-    findStringDeep(payload, ["name", "full_name", "fullname"]) ||
+    findStringDeep(payload, ["name", "full_name", "fullname", "nome"]) ||
     uniqueStrings([
-      findStringDeep(payload, ["first_name", "firstname", "first"]),
-      findStringDeep(payload, ["last_name", "lastname", "last"]),
+      findStringDeep(payload, ["first_name", "firstname", "first", "primeiro_nome"]),
+      findStringDeep(payload, ["last_name", "lastname", "last", "sobrenome"]),
     ]).join(" ") ||
     null;
 
@@ -286,7 +335,20 @@ function extractGenericContact(payload: JsonRecord) {
     name,
     email: findStringDeep(payload, ["email"]),
     phone:
-      findStringDeep(payload, ["phone", "telephone", "whatsapp", "mobile", "cellphone", "number"]) ||
+      findStringDeep(payload, [
+        "phone",
+        "telephone",
+        "telefone",
+        "whatsapp",
+        "whatsapp_number",
+        "mobile",
+        "cellphone",
+        "cell",
+        "celular",
+        "fone",
+        "tel",
+        "number",
+      ]) ||
       null,
   };
 }
@@ -537,13 +599,24 @@ function parseNamedTags(value: unknown) {
 }
 
 function extractTagNames(payload: JsonRecord) {
-  return collectStringListDeep(payload, ["tags", "tag", "tag_name"]);
+  return collectStringListDeep(payload, [
+    "tags",
+    "tag",
+    "tag_name",
+    "tag_names",
+    "activecampaign_tags",
+    "activecampaign_tag_ids",
+    "active_campaign_tags",
+    "active_campaign_tag_ids",
+    "ac_tags",
+  ]);
 }
 
-function extractTagAliases(payload: JsonRecord) {
+function extractTagAliases(payload: JsonRecord, source?: WebhookSource | null) {
   return uniqueStrings([
     ...collectStringListDeep(payload, ["tag_aliases", "tag_alias", "state", "states", "status"]),
-    findStringDeep(payload, ["event_type", "event"]),
+    findStringDeep(payload, ["event_type", "event", "source", "platform", "trigger_name"]),
+    source,
   ]);
 }
 
@@ -562,14 +635,104 @@ function extractUchatSubscriberTags(payload: JsonRecord) {
   ]);
 }
 
-function resolveActiveCampaignTags(payload: JsonRecord, namedTags: NamedTag[]) {
+function resolveImplicitTypebotFieldId(fieldKey: string) {
+  const normalized = normalizeKey(fieldKey);
+
+  if (normalized === "utmsource") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_source;
+  if (normalized === "utmmedium") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_medium;
+  if (normalized === "utmcontent") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_content;
+  if (normalized === "utmcampaign") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_campaign;
+  if (normalized === "utmterm") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_term;
+  if (normalized === "utmsite") return DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_site;
+
+  return null;
+}
+
+function resolveActiveCampaignFieldId(source: WebhookSource, fieldKey: unknown) {
+  const normalizedFieldKey =
+    typeof fieldKey === "number" ? String(fieldKey) : nonEmptyString(fieldKey);
+
+  if (!normalizedFieldKey) return null;
+  if (/^\d+$/.test(normalizedFieldKey)) return normalizedFieldKey;
+
+  if (source === "typebot") {
+    return resolveImplicitTypebotFieldId(normalizedFieldKey);
+  }
+
+  return null;
+}
+
+function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRecord) {
+  const resolvedValues = new Map<string, string>();
+
+  const rememberFieldValue = (fieldKey: unknown, rawValue: unknown) => {
+    const fieldId = resolveActiveCampaignFieldId(source, fieldKey);
+    const value =
+      typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean"
+        ? String(rawValue).trim()
+        : null;
+
+    if (!fieldId || !value) return;
+    resolvedValues.set(fieldId, value);
+  };
+
+  if (source === "typebot") {
+    for (const [payloadKey, fieldId] of Object.entries(DEFAULT_TYPEBOT_UTM_FIELD_IDS)) {
+      const value = findStringDeep(payload, [payloadKey]);
+      if (value) {
+        resolvedValues.set(fieldId, value);
+      }
+    }
+  }
+
+  const explicitFieldEntries = collectValuesDeep(payload, [
+    "activecampaign_field_values",
+    "activecampaign_fields",
+    "active_campaign_field_values",
+    "active_campaign_fields",
+  ]);
+
+  explicitFieldEntries.forEach((entry) => {
+    if (!isRecord(entry)) return;
+
+    const explicitFieldId =
+      entry.field ??
+      entry.field_id ??
+      entry.fieldId ??
+      entry.id ??
+      entry.key;
+    const explicitValue =
+      entry.value ??
+      entry.field_value ??
+      entry.fieldValue;
+
+    if (explicitFieldId !== undefined && explicitValue !== undefined) {
+      rememberFieldValue(explicitFieldId, explicitValue);
+      return;
+    }
+
+    Object.entries(entry).forEach(([key, value]) => rememberFieldValue(key, value));
+  });
+
+  return [...resolvedValues.entries()].map(([fieldId, value]) => ({ fieldId, value }));
+}
+
+function resolveActiveCampaignTags(
+  source: WebhookSource,
+  payload: JsonRecord,
+  namedTags: NamedTag[],
+) {
   const directTags = extractTagNames(payload);
-  const aliases = extractTagAliases(payload).map(normalizeKey);
+  const aliases = extractTagAliases(payload, source).map(normalizeKey);
   const mappedTags = namedTags
     .filter((item) => aliases.includes(normalizeKey(item.alias)))
     .map((item) => item.tag);
+  const fallbackTags =
+    source === "typebot" && directTags.length === 0 && mappedTags.length === 0
+      ? [...DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS]
+      : [];
 
-  return uniqueStrings([...directTags, ...mappedTags]);
+  return uniqueStrings([...directTags, ...mappedTags, ...fallbackTags]);
 }
 
 async function fetchLaunch(
@@ -944,6 +1107,7 @@ async function syncContactToActiveCampaign(
   launch: LaunchRow,
   contact: LeadContactRow,
   tagNames: string[],
+  fieldValues: ActiveCampaignFieldValueInput[],
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError("ActiveCampaign is not configured for this launch", 400);
@@ -975,6 +1139,12 @@ async function syncContactToActiveCampaign(
   if (!activeContactId) {
     throw new ProcessContactError("ActiveCampaign did not return the synced contact id", 500);
   }
+
+  const appliedFieldValues = await upsertActiveCampaignFieldValues(
+    launch,
+    activeContactId,
+    fieldValues,
+  );
 
   if (launch.ac_default_list_id) {
     await activeCampaignRequest(
@@ -1013,7 +1183,95 @@ async function syncContactToActiveCampaign(
   return {
     activeContactId,
     appliedTags,
+    appliedFieldValues,
   };
+}
+
+async function listActiveCampaignContactFieldValues(
+  launch: LaunchRow,
+  activeContactId: string,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) return [];
+
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    `/api/3/contacts/${activeContactId}/fieldValues`,
+    "GET",
+  );
+
+  const fieldValues = Array.isArray((payload as JsonRecord).fieldValues)
+    ? ((payload as JsonRecord).fieldValues as unknown[])
+    : [];
+
+  return fieldValues
+    .map((item) => {
+      if (!isRecord(item)) return null;
+
+      const id = nonEmptyString(item.id);
+      const fieldId = nonEmptyString(item.field);
+      const value =
+        typeof item.value === "string" || typeof item.value === "number" || typeof item.value === "boolean"
+          ? String(item.value).trim()
+          : "";
+
+      if (!fieldId) return null;
+      return { id, fieldId, value };
+    })
+    .filter((item): item is { id: string | null; fieldId: string; value: string } => Boolean(item));
+}
+
+async function upsertActiveCampaignFieldValues(
+  launch: LaunchRow,
+  activeContactId: string,
+  fieldValues: ActiveCampaignFieldValueInput[],
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key || fieldValues.length === 0) {
+    return [] as Array<{ fieldId: string; value: string; operation: string }>;
+  }
+
+  const existingFieldValues = await listActiveCampaignContactFieldValues(launch, activeContactId);
+  const appliedFieldValues: Array<{ fieldId: string; value: string; operation: string }> = [];
+
+  for (const fieldValue of fieldValues) {
+    const existingFieldValue = existingFieldValues.find((item) => item.fieldId === fieldValue.fieldId);
+
+    if (existingFieldValue?.value === fieldValue.value) {
+      appliedFieldValues.push({
+        fieldId: fieldValue.fieldId,
+        value: fieldValue.value,
+        operation: "unchanged",
+      });
+      continue;
+    }
+
+    const path = existingFieldValue?.id
+      ? `/api/3/fieldValues/${existingFieldValue.id}`
+      : "/api/3/fieldValues";
+    const method = existingFieldValue?.id ? "PUT" : "POST";
+
+    await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      path,
+      method,
+      {
+        fieldValue: {
+          contact: activeContactId,
+          field: fieldValue.fieldId,
+          value: fieldValue.value,
+        },
+      },
+    );
+
+    appliedFieldValues.push({
+      fieldId: fieldValue.fieldId,
+      value: fieldValue.value,
+      operation: existingFieldValue?.id ? "updated" : "created",
+    });
+  }
+
+  return appliedFieldValues;
 }
 
 function extractActiveCampaignContact(payload: unknown) {
@@ -1882,7 +2140,8 @@ async function routeToActiveCampaign(
   source: WebhookSource,
   payload: JsonRecord,
 ) {
-  const tagNames = resolveActiveCampaignTags(payload, parseNamedTags(launch.ac_named_tags));
+  const tagNames = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
+  const fieldValues = extractActiveCampaignFieldValues(source, payload);
 
   if (source === "uchat" && tagNames.length === 0) {
     await insertProcessingLog(
@@ -1911,6 +2170,7 @@ async function routeToActiveCampaign(
 
   const actionKey = JSON.stringify({
     listId: launch.ac_default_list_id || null,
+    fieldValues: fieldValues.map((item) => `${item.fieldId}:${item.value}`).sort(),
     tags: [...tagNames].sort(),
   });
 
@@ -1926,6 +2186,7 @@ async function routeToActiveCampaign(
     {
       email: contact.primary_email,
       phone: contact.primary_phone,
+      fieldValues,
       tags: tagNames,
       listId: launch.ac_default_list_id,
     },
@@ -1939,7 +2200,7 @@ async function routeToActiveCampaign(
   }
 
   try {
-    const response = await syncContactToActiveCampaign(launch, contact, tagNames);
+    const response = await syncContactToActiveCampaign(launch, contact, tagNames, fieldValues);
 
     await upsertLeadIdentity(
       supabase,
@@ -1951,6 +2212,7 @@ async function routeToActiveCampaign(
       contact.primary_phone,
       {
         contact_id: response.activeContactId,
+        applied_field_values: response.appliedFieldValues,
         applied_tags: response.appliedTags,
       },
     );
@@ -1959,6 +2221,7 @@ async function routeToActiveCampaign(
     return {
       target: "activecampaign",
       contactId: response.activeContactId,
+      fieldValuesApplied: response.appliedFieldValues,
       tagsApplied: response.appliedTags,
     };
   } catch (error) {
