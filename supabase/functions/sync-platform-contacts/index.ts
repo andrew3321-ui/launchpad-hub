@@ -70,6 +70,67 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
+  const authorization = request.headers.get("authorization") || request.headers.get("Authorization");
+  if (!authorization) {
+    throw new ProcessContactError("Missing authorization header", 401);
+  }
+
+  const userAuthKey =
+    Deno.env.get("SUPABASE_ANON_KEY") ||
+    Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+    serviceRoleKey;
+
+  const authClient = createClient(supabaseUrl, userAuthKey, {
+    global: {
+      headers: {
+        Authorization: authorization,
+      },
+    },
+  });
+
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser();
+
+  if (error || !user) {
+    throw new ProcessContactError("Unauthorized", 401, error?.message);
+  }
+
+  return user;
+}
+
+async function assertLaunchAccess(
+  supabase: AnySupabaseClient,
+  userId: string,
+  launchId: string | null,
+  launchSlug: string | null,
+) {
+  const lookup = launchId
+    ? supabase.from("launches").select("id").eq("id", launchId).maybeSingle()
+    : supabase.from("launches").select("id").eq("slug", launchSlug as string).maybeSingle();
+
+  const { data: launch, error: lookupError } = await lookup;
+
+  if (lookupError || !launch?.id) {
+    throw new ProcessContactError("Launch not found", 404, lookupError?.message);
+  }
+
+  const { data: allowed, error: accessError } = await supabase.rpc("user_owns_launch", {
+    _launch_id: launch.id,
+    _user_id: userId,
+  });
+
+  if (accessError) {
+    throw new ProcessContactError("Failed to validate launch access", 500, accessError.message);
+  }
+
+  if (!allowed) {
+    throw new ProcessContactError("Launch access denied", 403);
+  }
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -670,6 +731,14 @@ Deno.serve(async (request) => {
   const sampleErrors: string[] = [];
 
   try {
+    const authenticatedUser = await requireAuthenticatedUser(request, supabaseUrl, serviceRoleKey);
+    await assertLaunchAccess(
+      supabase,
+      authenticatedUser.id,
+      body.launchId ?? null,
+      body.launchSlug ?? null,
+    );
+
     launch = await resolveLaunch(supabase, body);
     runId = await createSyncRun(supabase, launch.id, body.source, {
       requestedSource: body.source,

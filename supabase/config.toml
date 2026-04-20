@@ -1,1 +1,13 @@
 project_id = "dlsynbdvhdufujvslcat"
+
+[functions.process-contact-event]
+verify_jwt = true
+
+[functions.sync-platform-contacts]
+verify_jwt = true
+
+[functions.supabase-project-connector]
+verify_jwt = true
+
+[functions.launch-webhook-router]
+verify_jwt = false

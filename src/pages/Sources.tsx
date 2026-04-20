@@ -49,6 +49,11 @@ interface SourcesDraft {
   uchatWorkspaces: UChatWorkspaceDraft[];
 }
 
+interface LaunchSourcesPayload {
+  launch: LaunchSettingsRow;
+  uchat_workspaces: Array<Record<string, unknown>>;
+}
+
 function buildSourcesDraftKey(launchId: string) {
   return `launchhub:sources-draft:${launchId}`;
 }
@@ -113,27 +118,20 @@ export default function Sources() {
       setHydratedLaunchId(null);
 
       const [
-        { data: launchData, error: launchError },
-        { data: workspaceData, error: workspaceError },
+        { data: sourcesPayload, error: sourcesError },
       ] = await Promise.all([
-        supabase
-          .from("launches")
-          .select("id, name, project_id, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
-          .eq("id", activeLaunch.id)
-          .single(),
-        supabase
-          .from("uchat_workspaces")
-          .select("id, workspace_name, workspace_id, api_token, welcome_subflow_ns, default_tag_name")
-          .eq("launch_id", activeLaunch.id)
-          .order("created_at", { ascending: true }),
+        supabase.rpc("get_launch_sources", { target_launch_id: activeLaunch.id }),
       ]);
 
-      if (launchError || workspaceError || !launchData) {
+      const parsedPayload = (sourcesPayload ?? null) as LaunchSourcesPayload | null;
+      const launchData = parsedPayload?.launch ?? null;
+      const workspaceData = parsedPayload?.uchat_workspaces ?? [];
+
+      if (sourcesError || !launchData) {
         toast({
           title: "Erro ao carregar as fontes",
           description:
-            launchError?.message ||
-            workspaceError?.message ||
+            sourcesError?.message ||
             "Nao foi possivel carregar as configuracoes do lancamento.",
           variant: "destructive",
         });
@@ -218,16 +216,13 @@ export default function Sources() {
 
     setSaving("active");
     const { error, data } = await supabase
-      .from("launches")
-      .update({
-        ac_api_url: acApiUrl || null,
-        ac_api_key: acApiKey || null,
-        ac_default_list_id: acListId || null,
-        ac_named_tags: acNamedTags as unknown as Json,
-      })
-      .eq("id", activeLaunch.id)
-      .select("id, name, project_id, slug, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
-      .single();
+      .rpc("update_launch_activecampaign_settings", {
+        target_launch_id: activeLaunch.id,
+        next_api_url: acApiUrl || null,
+        next_api_key: acApiKey || null,
+        next_default_list_id: acListId || null,
+        next_named_tags: acNamedTags as unknown as Json,
+      });
 
     setSaving(null);
 
@@ -253,26 +248,9 @@ export default function Sources() {
 
     setSaving("uchat");
 
-    const { error: deleteError } = await supabase
-      .from("uchat_workspaces")
-      .delete()
-      .eq("launch_id", activeLaunch.id);
-
-    if (deleteError) {
-      setSaving(null);
-      toast({
-        title: "Erro ao limpar workspaces antigos",
-        description: deleteError.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
     const rows = uchatWorkspaces
       .filter((workspace) => workspace.workspace_id.trim() && workspace.api_token.trim())
       .map((workspace) => ({
-        launch_id: activeLaunch.id,
-        project_id: launchSettings?.project_id || null,
         workspace_name: workspace.workspace_name || "Workspace UChat",
         workspace_id: workspace.workspace_id || null,
         bot_id: workspace.workspace_id || null,
@@ -281,18 +259,34 @@ export default function Sources() {
         default_tag_name: workspace.default_tag_name || null,
       }));
 
-    if (rows.length > 0) {
-      const { error } = await supabase.from("uchat_workspaces").insert(rows);
-      if (error) {
-        setSaving(null);
-        toast({
-          title: "Erro ao salvar UChat",
-          description: error.message,
-          variant: "destructive",
-        });
-        return;
-      }
+    const { error, data } = await supabase.rpc("replace_launch_uchat_workspaces", {
+      target_launch_id: activeLaunch.id,
+      next_workspaces: rows as unknown as Json,
+    });
+
+    if (error) {
+      setSaving(null);
+      toast({
+        title: "Erro ao salvar UChat",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
     }
+
+    const savedWorkspaces = Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+    setUchatWorkspaces(
+      savedWorkspaces.map((workspace) => ({
+        id: typeof workspace.id === "string" ? workspace.id : undefined,
+        workspace_name: typeof workspace.workspace_name === "string" ? workspace.workspace_name : "",
+        workspace_id: typeof workspace.workspace_id === "string" ? workspace.workspace_id : "",
+        api_token: typeof workspace.api_token === "string" ? workspace.api_token : "",
+        welcome_subflow_ns:
+          typeof workspace.welcome_subflow_ns === "string" ? workspace.welcome_subflow_ns : "",
+        default_tag_name:
+          typeof workspace.default_tag_name === "string" ? workspace.default_tag_name : "",
+      })),
+    );
 
     setSaving(null);
     setHydratedLaunchId(activeLaunch.id);
