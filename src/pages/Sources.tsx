@@ -75,6 +75,7 @@ const MANAGED_SOURCE_ALIASES = [
     helper: "Tags aplicadas quando o contato entrar pelo webhook do ManyChat.",
   },
 ] as const;
+const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 
 function buildSourcesDraftKey(launchId: string) {
   return `launchhub:sources-draft:${launchId}`;
@@ -139,6 +140,20 @@ function replaceAliasTags(tags: NamedTagDraft[], alias: string, nextTagIds: stri
       tag: tagId,
     })),
   ];
+}
+
+async function withTimeout<T,>(promise: PromiseLike<T>, timeoutMs: number, message: string) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([Promise.resolve(promise), timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
@@ -210,38 +225,48 @@ export default function Sources() {
       }
 
       setLoadingActiveCampaignTags(true);
+      try {
+        const { data, error } = await withTimeout(
+          supabase.functions.invoke("activecampaign-catalog", {
+            body: {
+              apiUrl: trimmedApiUrl,
+              apiKey: trimmedApiKey,
+            },
+          }),
+          ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS,
+          "A consulta ao catalogo do ActiveCampaign demorou demais para responder.",
+        );
 
-      const { data, error } = await supabase.functions.invoke("activecampaign-catalog", {
-        body: {
-          apiUrl: trimmedApiUrl,
-          apiKey: trimmedApiKey,
-        },
-      });
+        const typedData = (data ?? null) as ActiveCampaignCatalogResponse | null;
+        if (error || !typedData?.tags) {
+          throw new Error(
+            error?.message ||
+              "Nao foi possivel consultar as tags da conta com essas credenciais.",
+          );
+        }
 
-      setLoadingActiveCampaignTags(false);
+        setActiveCampaignTags(typedData.tags);
+        setActiveCampaignTagsLoadedAt(typedData.loadedAt ?? new Date().toISOString());
 
-      const typedData = (data ?? null) as ActiveCampaignCatalogResponse | null;
-      if (error || !typedData?.tags) {
+        if (!options?.silent) {
+          toast({
+            title: "Tags carregadas",
+            description: `${typedData.tags.length} tag(s) do ActiveCampaign disponiveis para mapeamento.`,
+          });
+        }
+      } catch (error) {
         if (!options?.silent) {
           toast({
             title: "Erro ao carregar tags do ActiveCampaign",
             description:
-              error?.message ||
-              "Nao foi possivel consultar as tags da conta com essas credenciais.",
+              error instanceof Error
+                ? error.message
+                : "Nao foi possivel consultar as tags da conta agora.",
             variant: "destructive",
           });
         }
-        return;
-      }
-
-      setActiveCampaignTags(typedData.tags);
-      setActiveCampaignTagsLoadedAt(typedData.loadedAt ?? new Date().toISOString());
-
-      if (!options?.silent) {
-        toast({
-          title: "Tags carregadas",
-          description: `${typedData.tags.length} tag(s) do ActiveCampaign disponiveis para mapeamento.`,
-        });
+      } finally {
+        setLoadingActiveCampaignTags(false);
       }
     },
     [acApiKey, acApiUrl, toast],

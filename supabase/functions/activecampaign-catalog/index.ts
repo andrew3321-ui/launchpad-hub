@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 type JsonRecord = Record<string, unknown>;
+const ACTIVECAMPAIGN_REQUEST_TIMEOUT_MS = 12000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,23 +38,38 @@ async function requestJson(
   url: string,
   init: RequestInit,
 ) {
-  const response = await fetch(url, init);
-  const rawText = await response.text();
-  let parsed: unknown = {};
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ACTIVECAMPAIGN_REQUEST_TIMEOUT_MS);
 
-  if (rawText.trim()) {
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      parsed = { rawText };
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    const rawText = await response.text();
+    let parsed: unknown = {};
+
+    if (rawText.trim()) {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        parsed = { rawText };
+      }
     }
-  }
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${rawText}`);
-  }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${rawText}`);
+    }
 
-  return parsed;
+    return parsed;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("A consulta ao ActiveCampaign demorou demais para responder.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function activeCampaignRequest(
