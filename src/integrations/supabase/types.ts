@@ -685,11 +685,11 @@ export type Database = {
     Functions: {
       create_launch_metadata: {
         Args: {
-          next_custom_states?: Json | null
+          next_custom_states?: Json
           next_name: string
-          next_slug: string
-          next_status?: string | null
-          next_whatsapp_group_link?: string | null
+          next_slug?: string
+          next_status?: string
+          next_whatsapp_group_link?: string
         }
         Returns: Json
       }
@@ -745,11 +745,11 @@ export type Database = {
       }
       update_launch_metadata: {
         Args: {
-          next_custom_states?: Json | null
-          next_name?: string | null
-          next_slug?: string | null
-          next_status?: string | null
-          next_whatsapp_group_link?: string | null
+          next_custom_states?: Json
+          next_name?: string
+          next_slug?: string
+          next_status?: string
+          next_whatsapp_group_link?: string
           target_launch_id: string
         }
         Returns: Json

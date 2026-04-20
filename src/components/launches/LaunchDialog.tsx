@@ -184,7 +184,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
             "O backend demorou demais para responder ao criar o lancamento. Tente novamente.",
           );
 
-          const createdLaunch = (data ?? null) as LaunchMutationResult | null;
+          const createdLaunch = (data ?? null) as unknown as LaunchMutationResult | null;
 
           if (!error && createdLaunch?.id) {
             createdSlug = createdLaunch.slug || candidateSlug;
