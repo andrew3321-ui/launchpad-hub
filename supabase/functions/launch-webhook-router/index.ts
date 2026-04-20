@@ -105,6 +105,14 @@ const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
   utm_term: "24",
   utm_site: "60",
 } as const;
+const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_TAG_IDS = ["1050", "1053"] as const;
+const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
+  "21": "ORG-IG-AUT",
+  "22": "LANC-26-03",
+  "23": "SJL-CAPTACAO",
+  "24": "INT-GERAL",
+  "60": "AUT",
+} as const;
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -662,6 +670,17 @@ function resolveActiveCampaignFieldId(source: WebhookSource, fieldKey: unknown) 
   return null;
 }
 
+function applyDefaultManyChatFieldValues(resolvedValues: Map<string, string>, payload: JsonRecord) {
+  for (const [fieldId, value] of Object.entries(DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES)) {
+    resolvedValues.set(fieldId, value);
+  }
+
+  const qualAut = findStringDeep(payload, ["qual_aut", "qualaut"]);
+  if (qualAut) {
+    resolvedValues.set("25", qualAut);
+  }
+}
+
 function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRecord) {
   const resolvedValues = new Map<string, string>();
 
@@ -683,6 +702,10 @@ function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRe
         resolvedValues.set(fieldId, value);
       }
     }
+  }
+
+  if (source === "manychat") {
+    applyDefaultManyChatFieldValues(resolvedValues, payload);
   }
 
   const explicitFieldEntries = collectValuesDeep(payload, [
@@ -728,8 +751,12 @@ function resolveActiveCampaignTags(
     .filter((item) => aliases.includes(normalizeKey(item.alias)))
     .map((item) => item.tag);
   const fallbackTags =
-    source === "typebot" && directTags.length === 0 && mappedTags.length === 0
-      ? [...DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS]
+    directTags.length === 0 && mappedTags.length === 0
+      ? source === "typebot"
+        ? [...DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS]
+        : source === "manychat"
+          ? [...DEFAULT_MANYCHAT_ACTIVECAMPAIGN_TAG_IDS]
+          : []
       : [];
 
   return uniqueStrings([...directTags, ...mappedTags, ...fallbackTags]);

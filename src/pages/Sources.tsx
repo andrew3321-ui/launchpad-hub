@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Json } from "@/integrations/supabase/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,10 @@ import {
   inboundWebhookSources,
 } from "@/lib/webhookRouter";
 import { Copy, Loader2, Radio, Webhook } from "lucide-react";
+import {
+  ActiveCampaignSourceTagBindings,
+  type ActiveCampaignTagOption,
+} from "@/components/launches/ActiveCampaignSourceTagBindings";
 import {
   NamedTagsEditor,
   type NamedTagDraft,
@@ -54,6 +58,24 @@ interface LaunchSourcesPayload {
   uchat_workspaces: Array<Record<string, unknown>>;
 }
 
+interface ActiveCampaignCatalogResponse {
+  tags: ActiveCampaignTagOption[];
+  loadedAt?: string;
+}
+
+const MANAGED_SOURCE_ALIASES = [
+  {
+    alias: "typebot",
+    label: "Typebot",
+    helper: "Tags aplicadas quando o contato entrar pelo webhook do Typebot.",
+  },
+  {
+    alias: "manychat",
+    label: "ManyChat",
+    helper: "Tags aplicadas quando o contato entrar pelo webhook do ManyChat.",
+  },
+] as const;
+
 function buildSourcesDraftKey(launchId: string) {
   return `launchhub:sources-draft:${launchId}`;
 }
@@ -75,6 +97,48 @@ function parseSourcesDraft(raw: string | null): SourcesDraft | null {
   } catch {
     return null;
   }
+}
+
+function normalizeKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+function resolveAliasTagIds(
+  tags: NamedTagDraft[],
+  alias: string,
+  availableTags: ActiveCampaignTagOption[],
+) {
+  const normalizedAlias = normalizeKey(alias);
+
+  return uniqueStrings(
+    tags
+      .filter((tag) => normalizeKey(tag.alias) === normalizedAlias)
+      .map((tag) => {
+        const matchedTag = availableTags.find(
+          (option) =>
+            option.id === tag.tag ||
+            normalizeKey(option.name) === normalizeKey(tag.tag),
+        );
+        return matchedTag?.id ?? tag.tag;
+      }),
+  );
+}
+
+function replaceAliasTags(tags: NamedTagDraft[], alias: string, nextTagIds: string[]) {
+  const normalizedAlias = normalizeKey(alias);
+  const remainingTags = tags.filter((tag) => normalizeKey(tag.alias) !== normalizedAlias);
+
+  return [
+    ...remainingTags,
+    ...uniqueStrings(nextTagIds).map((tagId) => ({
+      alias,
+      tag: tagId,
+    })),
+  ];
 }
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
@@ -99,6 +163,89 @@ export default function Sources() {
   const [acListId, setAcListId] = useState("");
   const [acNamedTags, setAcNamedTags] = useState<NamedTagDraft[]>([]);
   const [uchatWorkspaces, setUchatWorkspaces] = useState<UChatWorkspaceDraft[]>([]);
+  const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
+  const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
+  const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
+
+  const managedAliasKeys = useMemo(
+    () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
+    [],
+  );
+
+  const managedSourceBindings = useMemo(
+    () =>
+      MANAGED_SOURCE_ALIASES.map((binding) => ({
+        ...binding,
+        selectedTagIds: resolveAliasTagIds(acNamedTags, binding.alias, activeCampaignTags),
+      })),
+    [acNamedTags, activeCampaignTags],
+  );
+
+  const advancedNamedTags = useMemo(
+    () => acNamedTags.filter((tag) => !managedAliasKeys.includes(normalizeKey(tag.alias))),
+    [acNamedTags, managedAliasKeys],
+  );
+
+  const loadActiveCampaignCatalog = useCallback(
+    async (options?: {
+      apiUrl?: string;
+      apiKey?: string;
+      silent?: boolean;
+    }) => {
+      const trimmedApiUrl = (options?.apiUrl ?? acApiUrl).trim();
+      const trimmedApiKey = (options?.apiKey ?? acApiKey).trim();
+
+      if (!trimmedApiUrl || !trimmedApiKey) {
+        setActiveCampaignTags([]);
+        setActiveCampaignTagsLoadedAt(null);
+
+        if (!options?.silent) {
+          toast({
+            title: "Preencha as credenciais do ActiveCampaign",
+            description: "Informe a API URL e a API Key para carregar as tags da conta.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      setLoadingActiveCampaignTags(true);
+
+      const { data, error } = await supabase.functions.invoke("activecampaign-catalog", {
+        body: {
+          apiUrl: trimmedApiUrl,
+          apiKey: trimmedApiKey,
+        },
+      });
+
+      setLoadingActiveCampaignTags(false);
+
+      const typedData = (data ?? null) as ActiveCampaignCatalogResponse | null;
+      if (error || !typedData?.tags) {
+        if (!options?.silent) {
+          toast({
+            title: "Erro ao carregar tags do ActiveCampaign",
+            description:
+              error?.message ||
+              "Nao foi possivel consultar as tags da conta com essas credenciais.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      setActiveCampaignTags(typedData.tags);
+      setActiveCampaignTagsLoadedAt(typedData.loadedAt ?? new Date().toISOString());
+
+      if (!options?.silent) {
+        toast({
+          title: "Tags carregadas",
+          description: `${typedData.tags.length} tag(s) do ActiveCampaign disponiveis para mapeamento.`,
+        });
+      }
+    },
+    [acApiKey, acApiUrl, toast],
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -109,6 +256,8 @@ export default function Sources() {
         setAcListId("");
         setAcNamedTags([]);
         setUchatWorkspaces([]);
+        setActiveCampaignTags([]);
+        setActiveCampaignTagsLoadedAt(null);
         setHydratedLaunchId(null);
         setLoading(false);
         return;
@@ -178,6 +327,36 @@ export default function Sources() {
   useEffect(() => {
     if (!activeLaunch || loading || hydratedLaunchId !== activeLaunch.id) return;
 
+    const savedApiUrl = launchSettings?.ac_api_url?.trim() || "";
+    const savedApiKey = launchSettings?.ac_api_key?.trim() || "";
+
+    if (!savedApiUrl || !savedApiKey) {
+      setActiveCampaignTags([]);
+      setActiveCampaignTagsLoadedAt(null);
+      return;
+    }
+
+    if (activeCampaignTags.length > 0 || loadingActiveCampaignTags) return;
+
+    void loadActiveCampaignCatalog({
+      apiUrl: savedApiUrl,
+      apiKey: savedApiKey,
+      silent: true,
+    });
+  }, [
+    activeCampaignTags.length,
+    activeLaunch,
+    hydratedLaunchId,
+    launchSettings?.ac_api_key,
+    launchSettings?.ac_api_url,
+    loadActiveCampaignCatalog,
+    loadingActiveCampaignTags,
+    loading,
+  ]);
+
+  useEffect(() => {
+    if (!activeLaunch || loading || hydratedLaunchId !== activeLaunch.id) return;
+
     localStorage.setItem(
       buildSourcesDraftKey(activeLaunch.id),
       JSON.stringify({
@@ -211,6 +390,26 @@ export default function Sources() {
     [uchatWorkspaces],
   );
 
+  const updateManagedSourceTags = (alias: string, tagId: string, checked: boolean) => {
+    setAcNamedTags((currentTags) => {
+      const selectedTagIds = resolveAliasTagIds(currentTags, alias, activeCampaignTags);
+      const nextTagIds = checked
+        ? [...selectedTagIds, tagId]
+        : selectedTagIds.filter((currentTagId) => currentTagId !== tagId);
+
+      return replaceAliasTags(currentTags, alias, nextTagIds);
+    });
+  };
+
+  const updateAdvancedNamedTags = (nextAdvancedTags: NamedTagDraft[]) => {
+    setAcNamedTags((currentTags) => {
+      const managedTags = currentTags.filter((tag) =>
+        managedAliasKeys.includes(normalizeKey(tag.alias)),
+      );
+      return [...managedTags, ...nextAdvancedTags];
+    });
+  };
+
   const saveActiveCampaign = async () => {
     if (!activeLaunch) return;
 
@@ -237,6 +436,11 @@ export default function Sources() {
 
     setLaunchSettings(data as unknown as LaunchSettingsRow);
     setHydratedLaunchId(activeLaunch.id);
+    void loadActiveCampaignCatalog({
+      apiUrl: acApiUrl,
+      apiKey: acApiKey,
+      silent: true,
+    });
     toast({
       title: "ActiveCampaign salvo",
       description: "As credenciais de saida para o ActiveCampaign foram atualizadas.",
@@ -416,7 +620,55 @@ export default function Sources() {
               </div>
               <div className="space-y-2">
                 <Label>Tags nomeadas</Label>
-                <NamedTagsEditor tags={acNamedTags} onChange={setAcNamedTags} />
+                <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="font-medium text-foreground">Tags sincronizadas do ActiveCampaign</p>
+                      <p className="text-sm text-muted-foreground">
+                        Carregue as tags reais da conta e escolha quais devem ser aplicadas quando o
+                        webhook vier do Typebot ou do ManyChat.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void loadActiveCampaignCatalog()}
+                      disabled={saving !== null || loadingActiveCampaignTags || !activeConnected}
+                    >
+                      {loadingActiveCampaignTags && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Carregar tags do ActiveCampaign
+                    </Button>
+                  </div>
+
+                  {activeCampaignTagsLoadedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      {activeCampaignTags.length} tag(s) carregada(s) em{" "}
+                      {new Date(activeCampaignTagsLoadedAt).toLocaleString("pt-BR")}.
+                    </p>
+                  )}
+
+                  <ActiveCampaignSourceTagBindings
+                    availableTags={activeCampaignTags}
+                    bindings={managedSourceBindings}
+                    disabled={saving !== null || loadingActiveCampaignTags}
+                    onToggleTag={updateManagedSourceTags}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Mapeamentos avancados</p>
+                  <p className="text-sm text-muted-foreground">
+                    Use esta area para aliases extras, estados personalizados ou qualquer regra que
+                    nao seja o roteamento padrao de Typebot e ManyChat.
+                  </p>
+                  <NamedTagsEditor
+                    tags={advancedNamedTags}
+                    onChange={updateAdvancedNamedTags}
+                  />
+                </div>
               </div>
             </CardContent>
             <CardFooter className="justify-end">
