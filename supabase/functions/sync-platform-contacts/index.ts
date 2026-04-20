@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-type AnySupabaseClient = ReturnType<typeof createClient>;
+type AnySupabaseClient = any;
 import {
   ProcessContactError,
   processIncomingContactEvent,

@@ -7,7 +7,7 @@ import {
 } from "../_shared/contact-processing.ts";
 
 type JsonRecord = Record<string, unknown>;
-type AnySupabaseClient = ReturnType<typeof createClient>;
+type AnySupabaseClient = any;
 type WebhookSource = "activecampaign" | "manychat" | "typebot" | "sendflow" | "uchat";
 
 interface LaunchRow {
@@ -856,8 +856,9 @@ async function upsertLeadIdentity(
     .eq("source", source)
     .eq("external_contact_id", externalContactId)
     .maybeSingle();
+  const existingIdentity = existing as { id?: string } | null;
 
-  if ((existing as { id?: string } | null)?.id) {
+  if (existingIdentity?.id) {
     await supabase
       .from("lead_contact_identities")
       .update({
@@ -867,7 +868,7 @@ async function upsertLeadIdentity(
         normalized_phone: phone,
         raw_snapshot: rawSnapshot,
       } as Record<string, unknown>)
-      .eq("id", (existing as { id: string }).id);
+      .eq("id", existingIdentity.id);
     return;
   }
 
@@ -1807,12 +1808,14 @@ async function loadUchatSubscriberState(
     return null;
   }
 
+  const snapshot = subscriber.snapshot ?? {};
+
   return {
     workspace,
     userNs: subscriber.userNs,
     userId: subscriber.userId,
-    snapshot: subscriber.snapshot,
-    currentTags: extractUchatSubscriberTags(subscriber.snapshot),
+    snapshot,
+    currentTags: extractUchatSubscriberTags(snapshot),
   } satisfies UchatSubscriberLookup;
 }
 
@@ -2339,7 +2342,7 @@ async function dispatchRoutes(
           "O webhook do UChat foi aceito, mas a verificacao de duplicidade no ActiveCampaign foi ignorada por falta de configuracao ou dado minimo de busca.",
           activeVerification as unknown as JsonRecord,
         );
-      } else if (activeVerification.matched) {
+      } else if ("matched" in activeVerification && activeVerification.matched) {
         await insertProcessingLog(
           supabase,
           launch.id,
