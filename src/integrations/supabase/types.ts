@@ -683,13 +683,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-        get_launch_sources: {
-          Args: { target_launch_id: string }
-          Returns: Json
-        }
-        is_approved_user: { Args: { _user_id: string }; Returns: boolean }
-        is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
-        list_pending_signup_requests: {
+      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
+      is_approved_user: { Args: { _user_id: string }; Returns: boolean }
+      is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      list_pending_signup_requests: {
         Args: never
         Returns: {
           created_at: string
@@ -700,8 +697,12 @@ export type Database = {
           user_id: string
         }[]
       }
-        review_signup_request: {
-          Args: { next_status: string; target_profile_id: string }
+      replace_launch_uchat_workspaces: {
+        Args: { next_workspaces?: Json; target_launch_id: string }
+        Returns: Json
+      }
+      review_signup_request: {
+        Args: { next_status: string; target_profile_id: string }
         Returns: {
           approval_reviewed_at: string | null
           approval_reviewed_by: string | null
@@ -721,24 +722,20 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      update_launch_activecampaign_settings: {
+        Args: {
+          next_api_key?: string
+          next_api_url?: string
+          next_default_list_id?: string
+          next_named_tags?: Json
+          target_launch_id: string
         }
-        replace_launch_uchat_workspaces: {
-          Args: { next_workspaces?: Json | null; target_launch_id: string }
-          Returns: Json
-        }
-        update_launch_activecampaign_settings: {
-          Args: {
-            next_api_key?: string | null
-            next_api_url?: string | null
-            next_default_list_id?: string | null
-            next_named_tags?: Json | null
-            target_launch_id: string
-          }
-          Returns: Json
-        }
-        user_owns_launch: {
-          Args: { _launch_id: string; _user_id: string }
-          Returns: boolean
+        Returns: Json
+      }
+      user_owns_launch: {
+        Args: { _launch_id: string; _user_id: string }
+        Returns: boolean
       }
     }
     Enums: {

@@ -123,7 +123,7 @@ export default function Sources() {
         supabase.rpc("get_launch_sources", { target_launch_id: activeLaunch.id }),
       ]);
 
-      const parsedPayload = (sourcesPayload ?? null) as LaunchSourcesPayload | null;
+      const parsedPayload = (sourcesPayload ?? null) as unknown as LaunchSourcesPayload | null;
       const launchData = parsedPayload?.launch ?? null;
       const workspaceData = parsedPayload?.uchat_workspaces ?? [];
 
@@ -235,7 +235,7 @@ export default function Sources() {
       return;
     }
 
-    setLaunchSettings(data as LaunchSettingsRow);
+    setLaunchSettings(data as unknown as LaunchSettingsRow);
     setHydratedLaunchId(activeLaunch.id);
     toast({
       title: "ActiveCampaign salvo",
