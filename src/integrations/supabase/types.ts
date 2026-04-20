@@ -683,6 +683,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
       list_pending_signup_requests: {
@@ -695,6 +696,10 @@ export type Database = {
           must_change_password: boolean
           user_id: string
         }[]
+      }
+      replace_launch_uchat_workspaces: {
+        Args: { next_workspaces?: Json; target_launch_id: string }
+        Returns: Json
       }
       review_signup_request: {
         Args: { next_status: string; target_profile_id: string }
@@ -717,6 +722,16 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      update_launch_activecampaign_settings: {
+        Args: {
+          next_api_key?: string
+          next_api_url?: string
+          next_default_list_id?: string
+          next_named_tags?: Json
+          target_launch_id: string
+        }
+        Returns: Json
       }
       user_owns_launch: {
         Args: { _launch_id: string; _user_id: string }
