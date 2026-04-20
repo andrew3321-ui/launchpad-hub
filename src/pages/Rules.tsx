@@ -48,35 +48,52 @@ function RuleRow({
 export default function Rules() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
+  const activeLaunchId = activeLaunch?.id ?? null;
 
   const [settings, setSettings] = useState<DedupeSettings>(defaultDedupeSettings);
+  const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [samplePhone, setSamplePhone] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
-      if (!activeLaunch) {
-        setLoading(false);
+      if (!activeLaunchId) {
         setSettings(defaultDedupeSettings);
+        setLoadedLaunchId(null);
+        setLoading(false);
         return;
       }
 
+      const launchId = activeLaunchId;
+
+      setSettings(defaultDedupeSettings);
+      setLoadedLaunchId(null);
       setLoading(true);
+
       const { data, error } = await supabase
         .from("launch_dedupe_settings")
         .select("*")
-        .eq("launch_id", activeLaunch.id)
+        .eq("launch_id", launchId)
         .maybeSingle();
 
+      if (cancelled) return;
+
       if (error) {
-        toast({ title: "Erro ao carregar regras", description: error.message, variant: "destructive" });
+        toast({
+          title: "Erro ao carregar regras",
+          description: error.message,
+          variant: "destructive",
+        });
         setLoading(false);
         return;
       }
 
       if (!data) {
         setSettings(defaultDedupeSettings);
+        setLoadedLaunchId(launchId);
         setLoading(false);
         return;
       }
@@ -91,15 +108,22 @@ export default function Rules() {
         autoMergeDuplicates: data.auto_merge_duplicates,
         preferMostCompleteRecord: data.prefer_most_complete_record,
       });
+      setLoadedLaunchId(launchId);
       setLoading(false);
     };
 
-    load();
-  }, [activeLaunch, toast]);
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLaunchId, toast]);
+
+  const visibleSettings = loadedLaunchId === activeLaunchId ? settings : defaultDedupeSettings;
 
   const phoneCandidates = useMemo(
-    () => generatePhoneCandidates(samplePhone, settings),
-    [samplePhone, settings],
+    () => generatePhoneCandidates(samplePhone, visibleSettings),
+    [samplePhone, visibleSettings],
   );
 
   const saveRules = async () => {
@@ -121,7 +145,7 @@ export default function Rules() {
     if (error) {
       toast({ title: "Erro ao salvar regras", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Regras de deduplicação atualizadas" });
+      toast({ title: "Regras de deduplicacao atualizadas" });
     }
     setSaving(false);
   };
@@ -135,9 +159,9 @@ export default function Rules() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lançamento</CardTitle>
+            <CardTitle>Selecione um lancamento</CardTitle>
             <CardDescription>
-              Escolha um lançamento na barra lateral para definir as regras de deduplicação e merge.
+              Escolha um lancamento na barra lateral para definir as regras de deduplicacao e merge.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -152,7 +176,7 @@ export default function Rules() {
         <div>
           <h1 className="text-2xl font-bold">Regras</h1>
           <p className="text-sm text-muted-foreground">
-            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lançamento{" "}
+            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lancamento{" "}
             <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>
@@ -167,48 +191,57 @@ export default function Rules() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Normalização de telefone</CardTitle>
+                <CardTitle className="text-xl">Normalizacao de telefone</CardTitle>
                 <CardDescription>
                   Ajusta formatos diferentes antes de comparar contatos vindos de bases distintas.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <RuleRow
-                  title="Comparar apenas os dígitos"
-                  description="Ignora espaços, parênteses, hífens e outros caracteres na hora de deduplicar."
-                  checked={settings.compareDigitsOnly}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, compareDigitsOnly: checked }))}
+                  title="Comparar apenas os digitos"
+                  description="Ignora espacos, parenteses, hifens e outros caracteres na hora de deduplicar."
+                  checked={visibleSettings.compareDigitsOnly}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, compareDigitsOnly: checked }))
+                  }
                 />
                 <RuleRow
                   title="Adicionar +55 automaticamente"
-                  description="Tenta casar números com e sem código do país brasileiro."
-                  checked={settings.autoAddCountryCode}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddCountryCode: checked }))}
+                  description="Tenta casar numeros com e sem codigo do pais brasileiro."
+                  checked={visibleSettings.autoAddCountryCode}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, autoAddCountryCode: checked }))
+                  }
                 />
                 <div className="space-y-2">
-                  <Label htmlFor="country-code">Código do país padrão</Label>
+                  <Label htmlFor="country-code">Codigo do pais padrao</Label>
                   <Input
                     id="country-code"
-                    value={settings.defaultCountryCode}
+                    value={visibleSettings.defaultCountryCode}
                     onChange={(event) =>
-                      setSettings((current) => ({ ...current, defaultCountryCode: event.target.value.replace(/\D/g, "") }))
+                      setSettings((current) => ({
+                        ...current,
+                        defaultCountryCode: event.target.value.replace(/\D/g, ""),
+                      }))
                     }
                     placeholder="55"
                     className="max-w-[180px]"
                   />
                 </div>
                 <RuleRow
-                  title="Tentar adicionar ou remover o nono dígito"
+                  title="Tentar adicionar ou remover o nono digito"
                   description="Ajuda a reconhecer contatos quando uma base salva 11999998888 e outra 1199998888."
-                  checked={settings.autoAddNinthDigit}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoAddNinthDigit: checked }))}
+                  checked={visibleSettings.autoAddNinthDigit}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, autoAddNinthDigit: checked }))
+                  }
                 />
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Critérios de merge</CardTitle>
+                <CardTitle className="text-xl">Criterios de merge</CardTitle>
                 <CardDescription>
                   Quando duas entradas representam a mesma pessoa, o sistema pode unificar automaticamente os dados.
                 </CardDescription>
@@ -216,33 +249,41 @@ export default function Rules() {
               <CardContent className="space-y-4">
                 <RuleRow
                   title="Detectar duplicata por telefone normalizado"
-                  description="Marca como mesmo contato quando os números baterem após os tratamentos acima."
-                  checked={settings.mergeOnExactPhone}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactPhone: checked }))}
+                  description="Marca como mesmo contato quando os numeros baterem apos os tratamentos acima."
+                  checked={visibleSettings.mergeOnExactPhone}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, mergeOnExactPhone: checked }))
+                  }
                 />
                 <RuleRow
                   title="Detectar duplicata por email exato"
-                  description="Mescla automaticamente quando o email for idêntico, mesmo vindo de canais diferentes."
-                  checked={settings.mergeOnExactEmail}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, mergeOnExactEmail: checked }))}
+                  description="Mescla automaticamente quando o email for identico, mesmo vindo de canais diferentes."
+                  checked={visibleSettings.mergeOnExactEmail}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, mergeOnExactEmail: checked }))
+                  }
                 />
                 <RuleRow
                   title="Mesclar duplicatas automaticamente"
                   description="Quando a duplicata for confirmada, consolida os dados sem mandar para triagem manual."
-                  checked={settings.autoMergeDuplicates}
-                  onCheckedChange={(checked) => setSettings((current) => ({ ...current, autoMergeDuplicates: checked }))}
+                  checked={visibleSettings.autoMergeDuplicates}
+                  onCheckedChange={(checked) =>
+                    setSettings((current) => ({ ...current, autoMergeDuplicates: checked }))
+                  }
                 />
                 <RuleRow
                   title="Priorizar o cadastro mais completo"
-                  description="Prefere o registro com mais campos preenchidos ao escolher qual versão vira a principal."
-                  checked={settings.preferMostCompleteRecord}
+                  description="Prefere o registro com mais campos preenchidos ao escolher qual versao vira a principal."
+                  checked={visibleSettings.preferMostCompleteRecord}
                   onCheckedChange={(checked) =>
                     setSettings((current) => ({ ...current, preferMostCompleteRecord: checked }))
                   }
                 />
               </CardContent>
               <CardFooter className="justify-between gap-4">
-                <p className="text-sm text-muted-foreground">{mergePreferenceLabel(settings.preferMostCompleteRecord)}</p>
+                <p className="text-sm text-muted-foreground">
+                  {mergePreferenceLabel(visibleSettings.preferMostCompleteRecord)}
+                </p>
                 <Button onClick={saveRules} disabled={saving}>
                   {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Salvar regras
@@ -256,10 +297,10 @@ export default function Rules() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <Sparkles className="h-5 w-5 text-primary" />
-                  Preview de deduplicação
+                  Preview de deduplicacao
                 </CardTitle>
                 <CardDescription>
-                  Teste um número real e veja quais variações vão entrar no comparador antes do merge.
+                  Teste um numero real e veja quais variacoes vao entrar no comparador antes do merge.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -275,7 +316,7 @@ export default function Rules() {
 
                 {samplePhone ? (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium">Variações geradas para busca de duplicatas</p>
+                    <p className="text-sm font-medium">Variacoes geradas para busca de duplicatas</p>
                     <div className="flex flex-wrap gap-2">
                       {phoneCandidates.map((candidate) => (
                         <Badge key={candidate} variant="outline" className="font-mono">
@@ -287,7 +328,7 @@ export default function Rules() {
                 ) : (
                   <div className="flex items-start gap-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                     <Unplug className="mt-0.5 h-4 w-4" />
-                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono dígito.
+                    Digite um telefone para visualizar como o sistema vai tentar casar cadastros com ou sem +55 e nono digito.
                   </div>
                 )}
               </CardContent>
@@ -296,17 +337,17 @@ export default function Rules() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-xl">Comportamento esperado</CardTitle>
-                <CardDescription>Resumo da automação que o backend vai seguir ao processar eventos.</CardDescription>
+                <CardDescription>Resumo da automacao que o backend vai seguir ao processar eventos.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm text-muted-foreground">
                 <p>
-                  Se dois contatos tiverem o mesmo email ou telefone normalizado, o sistema pode tratá-los como a mesma pessoa.
+                  Se dois contatos tiverem o mesmo email ou telefone normalizado, o sistema pode trata-los como a mesma pessoa.
                 </p>
                 <p>
-                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro único.
+                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro unico.
                 </p>
                 <p>
-                  Com estas regras salvas, o próximo passo natural é aplicar esse critério dentro dos webhooks e da fila de processamento.
+                  Com estas regras salvas, o proximo passo natural e aplicar esse criterio dentro dos webhooks e da fila de processamento.
                 </p>
               </CardContent>
             </Card>

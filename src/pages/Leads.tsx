@@ -28,38 +28,57 @@ interface LeadRow {
 export default function Leads() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
+  const activeLaunchId = activeLaunch?.id ?? null;
 
   const [rows, setRows] = useState<LeadRow[]>([]);
+  const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
-      if (!activeLaunch) {
+      if (!activeLaunchId) {
         setRows([]);
+        setLoadedLaunchId(null);
         setLoading(false);
         return;
       }
 
+      const launchId = activeLaunchId;
+      setRows([]);
+      setLoadedLaunchId(null);
       setLoading(true);
       const { data, error } = await supabase
         .from("lead_contacts")
         .select("id, primary_name, primary_email, primary_phone, merged_from_count, last_source, status, updated_at")
-        .eq("launch_id", activeLaunch.id)
+        .eq("launch_id", launchId)
         .order("updated_at", { ascending: false })
         .limit(100);
 
       if (error) {
-        toast({ title: "Erro ao carregar leads", description: error.message, variant: "destructive" });
-        setLoading(false);
+        if (!cancelled) {
+          toast({ title: "Erro ao carregar leads", description: error.message, variant: "destructive" });
+          setLoading(false);
+        }
         return;
       }
 
-      setRows((data || []) as LeadRow[]);
-      setLoading(false);
+      if (!cancelled) {
+        setRows((data || []) as LeadRow[]);
+        setLoadedLaunchId(launchId);
+        setLoading(false);
+      }
     };
 
     void load();
-  }, [activeLaunch, toast]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLaunchId, toast]);
+
+  const visibleRows = loadedLaunchId === activeLaunchId ? rows : [];
 
   if (!activeLaunch) {
     return (
@@ -108,7 +127,7 @@ export default function Leads() {
             <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : visibleRows.length === 0 ? (
             <div className="py-10 text-sm text-muted-foreground">
               Nenhum lead processado ainda. Assim que os webhooks comecarem a entrar, a base
               tratada aparecera aqui.
@@ -128,7 +147,7 @@ export default function Leads() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
+                  {visibleRows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="font-medium">{row.primary_name || "-"}</TableCell>
                       <TableCell>{row.primary_email || "-"}</TableCell>

@@ -40,24 +40,32 @@ function statusVariant(status: ActionStatus | EventStatus): "default" | "seconda
 export default function Queue() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
+  const activeLaunchId = activeLaunch?.id ?? null;
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
+  const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     const load = async (silent = false) => {
-      if (!activeLaunch) {
+      if (!activeLaunchId) {
         if (mounted) {
           setEvents([]);
           setActions([]);
+          setLoadedLaunchId(null);
           setLoading(false);
         }
         return;
       }
 
+      const launchId = activeLaunchId;
+
       if (!silent && mounted) {
+        setEvents([]);
+        setActions([]);
+        setLoadedLaunchId(null);
         setLoading(true);
       }
 
@@ -68,13 +76,13 @@ export default function Queue() {
         supabase
           .from("inbound_contact_events")
           .select("id, source, event_type, processing_status, received_at, processing_summary")
-          .eq("launch_id", activeLaunch.id)
+          .eq("launch_id", launchId)
           .order("received_at", { ascending: false })
           .limit(20),
         supabase
           .from("contact_routing_actions")
           .select("id, source, target, action_type, status, action_key, created_at, error_message")
-          .eq("launch_id", activeLaunch.id)
+          .eq("launch_id", launchId)
           .order("created_at", { ascending: false })
           .limit(30),
       ]);
@@ -93,6 +101,7 @@ export default function Queue() {
       if (mounted) {
         setEvents((eventData || []) as EventRow[]);
         setActions((actionData || []) as ActionRow[]);
+        setLoadedLaunchId(launchId);
         setLoading(false);
       }
     };
@@ -106,11 +115,14 @@ export default function Queue() {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, [activeLaunch, toast]);
+  }, [activeLaunchId, toast]);
+
+  const visibleEvents = loadedLaunchId === activeLaunchId ? events : [];
+  const visibleActions = loadedLaunchId === activeLaunchId ? actions : [];
 
   const pendingActions = useMemo(
-    () => actions.filter((action) => action.status === "pending").length,
-    [actions],
+    () => visibleActions.filter((action) => action.status === "pending").length,
+    [visibleActions],
   );
 
   if (!activeLaunch) {
@@ -151,13 +163,13 @@ export default function Queue() {
           <CardHeader>
             <CardTitle className="text-base">Eventos recebidos</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{events.length}</CardContent>
+          <CardContent className="text-3xl font-semibold">{visibleEvents.length}</CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Acoes registradas</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{actions.length}</CardContent>
+          <CardContent className="text-3xl font-semibold">{visibleActions.length}</CardContent>
         </Card>
         <Card>
           <CardHeader>
@@ -181,12 +193,12 @@ export default function Queue() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {events.length === 0 ? (
+              {visibleEvents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Nenhum webhook recebido ainda para esse lancamento.
                 </p>
               ) : (
-                events.map((event) => (
+                visibleEvents.map((event) => (
                   <div key={event.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
@@ -219,12 +231,12 @@ export default function Queue() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {actions.length === 0 ? (
+              {visibleActions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Nenhuma acao de roteamento ainda para esse lancamento.
                 </p>
               ) : (
-                actions.map((action) => (
+                visibleActions.map((action) => (
                   <div key={action.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">

@@ -61,8 +61,10 @@ function levelVariant(level: LogLevel): "default" | "secondary" | "destructive" 
 export default function Logs() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
+  const activeLaunchId = activeLaunch?.id ?? null;
 
   const [rows, setRows] = useState<ProcessingLogRow[]>([]);
+  const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
@@ -72,22 +74,27 @@ export default function Logs() {
     let mounted = true;
 
     const load = async (silent = false) => {
-      if (!activeLaunch) {
+      if (!activeLaunchId) {
         if (mounted) {
           setRows([]);
+          setLoadedLaunchId(null);
           setLoading(false);
         }
         return;
       }
 
+      const launchId = activeLaunchId;
+
       if (!silent && mounted) {
+        setRows([]);
+        setLoadedLaunchId(null);
         setLoading(true);
       }
 
       const { data, error } = await supabase
         .from("contact_processing_logs")
         .select("id, code, created_at, details, level, message, source, title")
-        .eq("launch_id", activeLaunch.id)
+        .eq("launch_id", launchId)
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -104,6 +111,7 @@ export default function Logs() {
 
       if (mounted) {
         setRows((data || []) as ProcessingLogRow[]);
+        setLoadedLaunchId(launchId);
         setLoading(false);
       }
     };
@@ -118,12 +126,14 @@ export default function Logs() {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, [activeLaunch, toast]);
+  }, [activeLaunchId, toast]);
+
+  const visibleRows = loadedLaunchId === activeLaunchId ? rows : [];
 
   const filteredRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    return rows.filter((row) => {
+    return visibleRows.filter((row) => {
       if (levelFilter !== "all" && row.level !== levelFilter) return false;
       if (sourceFilter !== "all" && row.source !== sourceFilter) return false;
 
@@ -141,7 +151,7 @@ export default function Logs() {
 
       return haystack.includes(normalizedSearch);
     });
-  }, [rows, levelFilter, search, sourceFilter]);
+  }, [visibleRows, levelFilter, search, sourceFilter]);
 
   if (!activeLaunch) {
     return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Json } from "@/integrations/supabase/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -167,6 +167,8 @@ function ConnectionBadge({ connected }: { connected: boolean }) {
 export default function Sources() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
+  const latestLaunchIdRef = useRef<string | null>(null);
+  const catalogRequestRef = useRef(0);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<"active" | "uchat" | null>(null);
@@ -181,6 +183,23 @@ export default function Sources() {
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
+  const activeLaunchId = activeLaunch?.id ?? null;
+  const isHydratedActiveLaunch = hydratedLaunchId === activeLaunchId;
+
+  useEffect(() => {
+    latestLaunchIdRef.current = activeLaunchId;
+  }, [activeLaunchId]);
+
+  const visibleLaunchSettings = isHydratedActiveLaunch ? launchSettings : null;
+  const visibleAcApiUrl = isHydratedActiveLaunch ? acApiUrl : "";
+  const visibleAcApiKey = isHydratedActiveLaunch ? acApiKey : "";
+  const visibleAcListId = isHydratedActiveLaunch ? acListId : "";
+  const visibleAcNamedTags = isHydratedActiveLaunch ? acNamedTags : [];
+  const visibleUchatWorkspaces = isHydratedActiveLaunch ? uchatWorkspaces : [];
+  const visibleActiveCampaignTags = isHydratedActiveLaunch ? activeCampaignTags : [];
+  const visibleActiveCampaignTagsLoadedAt = isHydratedActiveLaunch
+    ? activeCampaignTagsLoadedAt
+    : null;
 
   const managedAliasKeys = useMemo(
     () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
@@ -191,28 +210,39 @@ export default function Sources() {
     () =>
       MANAGED_SOURCE_ALIASES.map((binding) => ({
         ...binding,
-        selectedTagIds: resolveAliasTagIds(acNamedTags, binding.alias, activeCampaignTags),
+        selectedTagIds: resolveAliasTagIds(
+          visibleAcNamedTags,
+          binding.alias,
+          visibleActiveCampaignTags,
+        ),
       })),
-    [acNamedTags, activeCampaignTags],
+    [visibleAcNamedTags, visibleActiveCampaignTags],
   );
 
   const advancedNamedTags = useMemo(
-    () => acNamedTags.filter((tag) => !managedAliasKeys.includes(normalizeKey(tag.alias))),
-    [acNamedTags, managedAliasKeys],
+    () =>
+      visibleAcNamedTags.filter((tag) => !managedAliasKeys.includes(normalizeKey(tag.alias))),
+    [managedAliasKeys, visibleAcNamedTags],
   );
 
   const loadActiveCampaignCatalog = useCallback(
     async (options?: {
       apiUrl?: string;
       apiKey?: string;
+      launchId?: string | null;
       silent?: boolean;
     }) => {
       const trimmedApiUrl = (options?.apiUrl ?? acApiUrl).trim();
       const trimmedApiKey = (options?.apiKey ?? acApiKey).trim();
+      const requestLaunchId = options?.launchId ?? latestLaunchIdRef.current;
+
+      if (!requestLaunchId) return;
 
       if (!trimmedApiUrl || !trimmedApiKey) {
-        setActiveCampaignTags([]);
-        setActiveCampaignTagsLoadedAt(null);
+        if (latestLaunchIdRef.current === requestLaunchId) {
+          setActiveCampaignTags([]);
+          setActiveCampaignTagsLoadedAt(null);
+        }
 
         if (!options?.silent) {
           toast({
@@ -224,7 +254,10 @@ export default function Sources() {
         return;
       }
 
+      const requestId = catalogRequestRef.current + 1;
+      catalogRequestRef.current = requestId;
       setLoadingActiveCampaignTags(true);
+
       try {
         const { data, error } = await withTimeout(
           supabase.functions.invoke("activecampaign-catalog", {
@@ -243,6 +276,13 @@ export default function Sources() {
             error?.message ||
               "Nao foi possivel consultar as tags da conta com essas credenciais.",
           );
+        }
+
+        if (
+          catalogRequestRef.current !== requestId ||
+          latestLaunchIdRef.current !== requestLaunchId
+        ) {
+          return;
         }
 
         setActiveCampaignTags(typedData.tags);
@@ -266,15 +306,22 @@ export default function Sources() {
           });
         }
       } finally {
-        setLoadingActiveCampaignTags(false);
+        if (
+          catalogRequestRef.current === requestId &&
+          latestLaunchIdRef.current === requestLaunchId
+        ) {
+          setLoadingActiveCampaignTags(false);
+        }
       }
     },
     [acApiKey, acApiUrl, toast],
   );
 
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
-      if (!activeLaunch) {
+      if (!activeLaunchId) {
         setLaunchSettings(null);
         setAcApiUrl("");
         setAcApiKey("");
@@ -284,18 +331,33 @@ export default function Sources() {
         setActiveCampaignTags([]);
         setActiveCampaignTagsLoadedAt(null);
         setHydratedLaunchId(null);
+        setLoadingActiveCampaignTags(false);
         setLoading(false);
         return;
       }
 
+      const launchId = activeLaunchId;
+      catalogRequestRef.current += 1;
+      setLaunchSettings(null);
+      setAcApiUrl("");
+      setAcApiKey("");
+      setAcListId("");
+      setAcNamedTags([]);
+      setUchatWorkspaces([]);
+      setActiveCampaignTags([]);
+      setActiveCampaignTagsLoadedAt(null);
+      setLoadingActiveCampaignTags(false);
       setLoading(true);
       setHydratedLaunchId(null);
 
-      const [
-        { data: sourcesPayload, error: sourcesError },
-      ] = await Promise.all([
-        supabase.rpc("get_launch_sources", { target_launch_id: activeLaunch.id }),
-      ]);
+      const { data: sourcesPayload, error: sourcesError } = await supabase.rpc(
+        "get_launch_sources",
+        { target_launch_id: launchId },
+      );
+
+      if (cancelled || latestLaunchIdRef.current !== launchId) {
+        return;
+      }
 
       const parsedPayload = (sourcesPayload ?? null) as unknown as LaunchSourcesPayload | null;
       const launchData = parsedPayload?.launch ?? null;
@@ -329,7 +391,7 @@ export default function Sources() {
             typeof workspace.default_tag_name === "string" ? workspace.default_tag_name : "",
         }),
       );
-      const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(activeLaunch.id)));
+      const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(launchId)));
 
       setLaunchSettings(typedLaunch);
       setAcApiUrl(draft?.acApiUrl ?? typedLaunch.ac_api_url ?? "");
@@ -342,15 +404,19 @@ export default function Sources() {
             : []),
       );
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
-      setHydratedLaunchId(activeLaunch.id);
+      setHydratedLaunchId(launchId);
       setLoading(false);
     };
 
     void load();
-  }, [activeLaunch, toast]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLaunchId, toast]);
 
   useEffect(() => {
-    if (!activeLaunch || loading || hydratedLaunchId !== activeLaunch.id) return;
+    if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
 
     const savedApiUrl = launchSettings?.ac_api_url?.trim() || "";
     const savedApiKey = launchSettings?.ac_api_key?.trim() || "";
@@ -361,29 +427,30 @@ export default function Sources() {
       return;
     }
 
-    if (activeCampaignTags.length > 0 || loadingActiveCampaignTags) return;
+    if (visibleActiveCampaignTags.length > 0 || loadingActiveCampaignTags) return;
 
     void loadActiveCampaignCatalog({
       apiUrl: savedApiUrl,
       apiKey: savedApiKey,
+      launchId: activeLaunchId,
       silent: true,
     });
   }, [
-    activeCampaignTags.length,
-    activeLaunch,
+    activeLaunchId,
     hydratedLaunchId,
     launchSettings?.ac_api_key,
     launchSettings?.ac_api_url,
     loadActiveCampaignCatalog,
     loadingActiveCampaignTags,
     loading,
+    visibleActiveCampaignTags.length,
   ]);
 
   useEffect(() => {
-    if (!activeLaunch || loading || hydratedLaunchId !== activeLaunch.id) return;
+    if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
 
     localStorage.setItem(
-      buildSourcesDraftKey(activeLaunch.id),
+      buildSourcesDraftKey(activeLaunchId),
       JSON.stringify({
         acApiUrl,
         acApiKey,
@@ -393,7 +460,7 @@ export default function Sources() {
       } satisfies SourcesDraft),
     );
   }, [
-    activeLaunch,
+    activeLaunchId,
     loading,
     hydratedLaunchId,
     acApiUrl,
@@ -404,20 +471,24 @@ export default function Sources() {
   ]);
 
   const activeConnected = useMemo(
-    () => Boolean(acApiUrl.trim() && acApiKey.trim()),
-    [acApiKey, acApiUrl],
+    () => Boolean(visibleAcApiUrl.trim() && visibleAcApiKey.trim()),
+    [visibleAcApiKey, visibleAcApiUrl],
   );
   const uchatConnected = useMemo(
     () =>
-      uchatWorkspaces.some(
+      visibleUchatWorkspaces.some(
         (workspace) => workspace.workspace_id.trim() && workspace.api_token.trim(),
       ),
-    [uchatWorkspaces],
+    [visibleUchatWorkspaces],
   );
 
   const updateManagedSourceTags = (alias: string, tagId: string, checked: boolean) => {
     setAcNamedTags((currentTags) => {
-      const selectedTagIds = resolveAliasTagIds(currentTags, alias, activeCampaignTags);
+      const selectedTagIds = resolveAliasTagIds(
+        currentTags,
+        alias,
+        visibleActiveCampaignTags,
+      );
       const nextTagIds = checked
         ? [...selectedTagIds, tagId]
         : selectedTagIds.filter((currentTagId) => currentTagId !== tagId);
@@ -464,6 +535,7 @@ export default function Sources() {
     void loadActiveCampaignCatalog({
       apiUrl: acApiUrl,
       apiKey: acApiKey,
+      launchId: activeLaunch.id,
       silent: true,
     });
     toast({
@@ -582,7 +654,9 @@ export default function Sources() {
             </p>
           </div>
         </div>
-        <Badge variant="outline">{launchSettings?.slug || activeLaunch.slug || "sem-slug"}</Badge>
+        <Badge variant="outline">
+          {visibleLaunchSettings?.slug || activeLaunch.slug || "sem-slug"}
+        </Badge>
       </div>
 
       <Card className="border-primary/20 bg-primary/5">
@@ -619,7 +693,7 @@ export default function Sources() {
                 <Label htmlFor="ac-url">API URL</Label>
                 <Input
                   id="ac-url"
-                  value={acApiUrl}
+                  value={visibleAcApiUrl}
                   onChange={(event) => setAcApiUrl(event.target.value)}
                   placeholder="https://sua-conta.api-us1.com"
                 />
@@ -629,7 +703,7 @@ export default function Sources() {
                 <Input
                   id="ac-key"
                   type="password"
-                  value={acApiKey}
+                  value={visibleAcApiKey}
                   onChange={(event) => setAcApiKey(event.target.value)}
                   placeholder="Cole a chave da API"
                 />
@@ -638,7 +712,7 @@ export default function Sources() {
                 <Label htmlFor="ac-list-id">Lista padrao</Label>
                 <Input
                   id="ac-list-id"
-                  value={acListId}
+                  value={visibleAcListId}
                   onChange={(event) => setAcListId(event.target.value)}
                   placeholder="Ex: 1"
                 />
@@ -668,15 +742,15 @@ export default function Sources() {
                     </Button>
                   </div>
 
-                  {activeCampaignTagsLoadedAt && (
+                  {visibleActiveCampaignTagsLoadedAt && (
                     <p className="text-xs text-muted-foreground">
-                      {activeCampaignTags.length} tag(s) carregada(s) em{" "}
-                      {new Date(activeCampaignTagsLoadedAt).toLocaleString("pt-BR")}.
+                      {visibleActiveCampaignTags.length} tag(s) carregada(s) em{" "}
+                      {new Date(visibleActiveCampaignTagsLoadedAt).toLocaleString("pt-BR")}.
                     </p>
                   )}
 
                   <ActiveCampaignSourceTagBindings
-                    availableTags={activeCampaignTags}
+                    availableTags={visibleActiveCampaignTags}
                     bindings={managedSourceBindings}
                     disabled={saving !== null || loadingActiveCampaignTags}
                     onToggleTag={updateManagedSourceTags}
@@ -719,7 +793,7 @@ export default function Sources() {
             </CardHeader>
             <CardContent className="space-y-4">
               <UChatWorkspacesEditor
-                workspaces={uchatWorkspaces}
+                workspaces={visibleUchatWorkspaces}
                 onChange={setUchatWorkspaces}
               />
             </CardContent>
@@ -741,8 +815,8 @@ export default function Sources() {
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {inboundWebhookSources.map((source) => {
-                const webhookUrl = launchSettings
-                  ? buildLaunchWebhookUrl(launchSettings, source.key)
+                const webhookUrl = visibleLaunchSettings
+                  ? buildLaunchWebhookUrl(visibleLaunchSettings, source.key)
                   : "";
 
                 return (
