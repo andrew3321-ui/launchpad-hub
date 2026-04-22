@@ -63,6 +63,42 @@ interface ActiveCampaignCatalogResponse {
   loadedAt?: string;
 }
 
+interface SyncCountersSummary {
+  fetchedCount: number;
+  processedCount: number;
+  createdCount: number;
+  mergedCount: number;
+  skippedCount: number;
+  errorCount: number;
+}
+
+interface ActiveCampaignSyncCursor {
+  hasMore: boolean;
+  syncedUntil: string | null;
+}
+
+interface ActiveCampaignSyncRunSummary {
+  id: string;
+  status: string;
+  processed_count: number;
+  created_count: number;
+  merged_count: number;
+  skipped_count: number;
+  error_count: number;
+  started_at: string;
+  finished_at: string | null;
+  last_error: string | null;
+  metadata: Json | null;
+}
+
+interface SyncPlatformContactsResponse {
+  runId: string;
+  source: "activecampaign" | "uchat";
+  launchId: string;
+  counters: SyncCountersSummary;
+  metadata: Json | null;
+}
+
 const MANAGED_SOURCE_ALIASES = [
   {
     alias: "typebot",
@@ -118,8 +154,56 @@ function normalizeKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function asRecord(value: unknown) {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+function ensureSyncNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseActiveCampaignSyncCursor(metadata: Json | null | undefined): ActiveCampaignSyncCursor {
+  const root = asRecord(metadata);
+  const cursor = asRecord(root?.cursor);
+
+  const hasMore = Boolean(cursor?.hasMore ?? root?.hasMore);
+  const syncedUntil =
+    typeof root?.syncedUntil === "string"
+      ? root.syncedUntil
+      : typeof cursor?.syncedUntil === "string"
+        ? cursor.syncedUntil
+        : typeof cursor?.updatedBefore === "string"
+          ? cursor.updatedBefore
+          : null;
+
+  return {
+    hasMore,
+    syncedUntil,
+  };
+}
+
+function parseAggregateSyncCounters(
+  run: ActiveCampaignSyncRunSummary | null,
+): SyncCountersSummary {
+  const metadata = asRecord(run?.metadata);
+  const aggregate = asRecord(metadata?.aggregateCounters);
+
+  return {
+    fetchedCount: ensureSyncNumber(aggregate?.fetchedCount ?? metadata?.fetchedCount),
+    processedCount: ensureSyncNumber(aggregate?.processedCount ?? run?.processed_count),
+    createdCount: ensureSyncNumber(aggregate?.createdCount ?? run?.created_count),
+    mergedCount: ensureSyncNumber(aggregate?.mergedCount ?? run?.merged_count),
+    skippedCount: ensureSyncNumber(aggregate?.skippedCount ?? run?.skipped_count),
+    errorCount: ensureSyncNumber(aggregate?.errorCount ?? run?.error_count),
+  };
 }
 
 function resolveAliasTagIds(
@@ -198,6 +282,9 @@ export default function Sources() {
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
   const [activeCampaignTagsScopeKey, setActiveCampaignTagsScopeKey] = useState<string | null>(null);
+  const [activeCampaignSyncRun, setActiveCampaignSyncRun] = useState<ActiveCampaignSyncRunSummary | null>(null);
+  const [syncingActiveCampaign, setSyncingActiveCampaign] = useState(false);
+  const [activeCampaignSyncMessage, setActiveCampaignSyncMessage] = useState<string | null>(null);
   const activeLaunchId = activeLaunch?.id ?? null;
   const isHydratedActiveLaunch = hydratedLaunchId === activeLaunchId;
 
@@ -215,6 +302,7 @@ export default function Sources() {
   const visibleActiveCampaignTagsLoadedAt = isHydratedActiveLaunch
     ? activeCampaignTagsLoadedAt
     : null;
+  const visibleActiveCampaignSyncRun = isHydratedActiveLaunch ? activeCampaignSyncRun : null;
 
   const managedAliasKeys = useMemo(
     () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
@@ -336,6 +424,40 @@ export default function Sources() {
     [acApiKey, acApiUrl, toast],
   );
 
+  const loadLatestActiveCampaignSyncRun = useCallback(
+    async (launchId: string, options?: { silent?: boolean }) => {
+      const { data, error } = await supabase
+        .from("platform_sync_runs")
+        .select(
+          "id, status, processed_count, created_count, merged_count, skipped_count, error_count, started_at, finished_at, last_error, metadata",
+        )
+        .eq("launch_id", launchId)
+        .eq("source", "activecampaign")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        if (!options?.silent) {
+          toast({
+            title: "Erro ao carregar o status da sincronizacao",
+            description: error.message,
+            variant: "destructive",
+          });
+        }
+        return null;
+      }
+
+      const typedRun = (data as ActiveCampaignSyncRunSummary | null) ?? null;
+      if (latestLaunchIdRef.current === launchId) {
+        setActiveCampaignSyncRun(typedRun);
+      }
+
+      return typedRun;
+    },
+    [toast],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -350,6 +472,9 @@ export default function Sources() {
         setActiveCampaignTags([]);
         setActiveCampaignTagsLoadedAt(null);
         setActiveCampaignTagsScopeKey(null);
+        setActiveCampaignSyncRun(null);
+        setSyncingActiveCampaign(false);
+        setActiveCampaignSyncMessage(null);
         setHydratedLaunchId(null);
         setLoadingActiveCampaignTags(false);
         setLoading(false);
@@ -367,6 +492,9 @@ export default function Sources() {
       setActiveCampaignTags([]);
       setActiveCampaignTagsLoadedAt(null);
       setActiveCampaignTagsScopeKey(null);
+      setActiveCampaignSyncRun(null);
+      setSyncingActiveCampaign(false);
+      setActiveCampaignSyncMessage(null);
       setLoadingActiveCampaignTags(false);
       setLoading(true);
       setHydratedLaunchId(null);
@@ -427,6 +555,7 @@ export default function Sources() {
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
       setHydratedLaunchId(launchId);
       setLoading(false);
+      void loadLatestActiveCampaignSyncRun(launchId, { silent: true });
     };
 
     void load();
@@ -434,7 +563,7 @@ export default function Sources() {
     return () => {
       cancelled = true;
     };
-  }, [activeLaunchId, toast]);
+  }, [activeLaunchId, loadLatestActiveCampaignSyncRun, toast]);
 
   useEffect(() => {
     if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
@@ -503,9 +632,36 @@ export default function Sources() {
     uchatWorkspaces,
   ]);
 
+  useEffect(() => {
+    if (!activeLaunchId || !isHydratedActiveLaunch) return;
+
+    const isRunning = visibleActiveCampaignSyncRun?.status === "running" || syncingActiveCampaign;
+    if (!isRunning) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadLatestActiveCampaignSyncRun(activeLaunchId, { silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [
+    activeLaunchId,
+    isHydratedActiveLaunch,
+    loadLatestActiveCampaignSyncRun,
+    syncingActiveCampaign,
+    visibleActiveCampaignSyncRun?.status,
+  ]);
+
   const activeConnected = useMemo(
     () => Boolean(visibleAcApiUrl.trim() && visibleAcApiKey.trim()),
     [visibleAcApiKey, visibleAcApiUrl],
+  );
+  const activeCampaignSyncCounters = useMemo(
+    () => parseAggregateSyncCounters(visibleActiveCampaignSyncRun),
+    [visibleActiveCampaignSyncRun],
+  );
+  const activeCampaignSyncCursor = useMemo(
+    () => parseActiveCampaignSyncCursor(visibleActiveCampaignSyncRun?.metadata ?? null),
+    [visibleActiveCampaignSyncRun],
   );
   const uchatConnected = useMemo(
     () =>
@@ -538,6 +694,77 @@ export default function Sources() {
       return [...managedTags, ...nextAdvancedTags];
     });
   };
+
+  const syncActiveCampaignAfterSave = useCallback(
+    async (launchId: string) => {
+      if (!acApiUrl.trim() || !acApiKey.trim()) {
+        setActiveCampaignSyncRun(null);
+        setActiveCampaignSyncMessage(null);
+        return;
+      }
+
+      setSyncingActiveCampaign(true);
+      setActiveCampaignSyncMessage("Sincronizando contatos no backend. Nenhum contato sera exibido na tela.");
+
+      try {
+        let nextMode: "full" | "resume" = "full";
+        let latestRun: ActiveCampaignSyncRunSummary | null = null;
+
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const { data, error } = await supabase.functions.invoke("sync-platform-contacts", {
+            body: {
+              launchId,
+              source: "activecampaign",
+              syncMode: nextMode,
+              trigger: "save_activecampaign",
+            },
+          });
+
+          const typedData = (data as SyncPlatformContactsResponse | null) ?? null;
+
+          if (error || !typedData) {
+            throw new Error(error?.message || "O backend nao conseguiu iniciar a sincronizacao.");
+          }
+
+          latestRun =
+            (await loadLatestActiveCampaignSyncRun(launchId, { silent: true })) ?? latestRun;
+
+          const latestCounters = parseAggregateSyncCounters(latestRun);
+          const latestCursor = parseActiveCampaignSyncCursor(latestRun?.metadata ?? typedData.metadata);
+
+          setActiveCampaignSyncMessage(
+            latestCursor.hasMore
+              ? `Sincronizando contatos no backend... ${latestCounters.processedCount} contato(s) tratados ate agora.`
+              : `Base sincronizada: ${latestCounters.processedCount} contato(s) tratados no backend.`,
+          );
+
+          if (!latestCursor.hasMore) {
+            toast({
+              title: "Base do ActiveCampaign sincronizada",
+              description: `${latestCounters.processedCount} contato(s) tratados no backend para este lancamento.`,
+            });
+            return;
+          }
+
+          nextMode = "resume";
+        }
+
+        throw new Error("A sincronizacao excedeu o limite interno de lotes e precisa ser retomada.");
+      } catch (error) {
+        setActiveCampaignSyncMessage(null);
+        toast({
+          title: "Erro ao sincronizar a base do ActiveCampaign",
+          description:
+            error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao.",
+          variant: "destructive",
+        });
+      } finally {
+        setSyncingActiveCampaign(false);
+        await loadLatestActiveCampaignSyncRun(launchId, { silent: true });
+      }
+    },
+    [acApiKey, acApiUrl, loadLatestActiveCampaignSyncRun, toast],
+  );
 
   const saveActiveCampaign = async () => {
     if (!activeLaunch) return;
@@ -573,8 +800,17 @@ export default function Sources() {
     });
     toast({
       title: "ActiveCampaign salvo",
-      description: "As credenciais de saida para o ActiveCampaign foram atualizadas.",
+      description: activeConnected
+        ? "As credenciais foram atualizadas e a sincronizacao da base sera feita no backend."
+        : "As credenciais de saida para o ActiveCampaign foram atualizadas.",
     });
+
+    if (acApiUrl.trim() && acApiKey.trim()) {
+      await syncActiveCampaignAfterSave(activeLaunch.id);
+    } else {
+      setActiveCampaignSyncRun(null);
+      setActiveCampaignSyncMessage(null);
+    }
   };
 
   const saveUchat = async () => {
@@ -716,7 +952,8 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">ActiveCampaign</CardTitle>
                 <CardDescription>
-                  Credenciais de saida para receber os contatos tratados e aplicar tags/lista.
+                  Credenciais de saida para receber os contatos tratados, aplicar tags/lista e
+                  sincronizar a base diretamente no backend apos cada salvamento.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={activeConnected} />
@@ -750,6 +987,69 @@ export default function Sources() {
                   placeholder="Ex: 1"
                 />
               </div>
+              <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">Sincronizacao da base</p>
+                    <p className="text-sm text-muted-foreground">
+                      Ao salvar o ActiveCampaign, o Launch Hub sincroniza toda a base no backend
+                      em lotes automaticos. Os contatos nao aparecem no front.
+                    </p>
+                  </div>
+                  <Badge variant={syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running" ? "default" : "secondary"}>
+                    {syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running"
+                      ? "Sincronizando"
+                      : visibleActiveCampaignSyncRun
+                        ? "Sincronizado"
+                        : "Aguardando"}
+                  </Badge>
+                </div>
+
+                <div className="rounded-xl border border-border/60 bg-background/50 p-4">
+                  <div className="flex items-start gap-3">
+                    {(syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running") && (
+                      <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-primary" />
+                    )}
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      <p>
+                        {activeCampaignSyncMessage ||
+                          (visibleActiveCampaignSyncRun
+                            ? "A ultima sincronizacao da conta ja foi registrada no backend."
+                            : "A base sera sincronizada automaticamente depois que as credenciais forem salvas.")}
+                      </p>
+
+                      {visibleActiveCampaignSyncRun && (
+                        <p>
+                          {activeCampaignSyncCounters.processedCount} tratado(s),{" "}
+                          {activeCampaignSyncCounters.createdCount} novo(s),{" "}
+                          {activeCampaignSyncCounters.mergedCount} mesclado(s),{" "}
+                          {activeCampaignSyncCounters.errorCount} erro(s).
+                        </p>
+                      )}
+
+                      {visibleActiveCampaignSyncRun?.finished_at && (
+                        <p>
+                          Ultima finalizacao em{" "}
+                          {new Date(visibleActiveCampaignSyncRun.finished_at).toLocaleString("pt-BR")}.
+                        </p>
+                      )}
+
+                      {visibleActiveCampaignSyncRun && activeCampaignSyncCursor.syncedUntil && !activeCampaignSyncCursor.hasMore && (
+                        <p>
+                          Base atualizada ate{" "}
+                          {new Date(activeCampaignSyncCursor.syncedUntil).toLocaleString("pt-BR")}.
+                        </p>
+                      )}
+
+                      {visibleActiveCampaignSyncRun?.last_error && (
+                        <p className="text-destructive">
+                          Ultimo erro: {visibleActiveCampaignSyncRun.last_error}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label>Tags nomeadas</Label>
                 <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-4">
@@ -766,7 +1066,7 @@ export default function Sources() {
                       variant="outline"
                       size="sm"
                       onClick={() => void loadActiveCampaignCatalog()}
-                      disabled={saving !== null || loadingActiveCampaignTags || !activeConnected}
+                      disabled={saving !== null || syncingActiveCampaign || loadingActiveCampaignTags || !activeConnected}
                     >
                       {loadingActiveCampaignTags && (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -804,9 +1104,11 @@ export default function Sources() {
               </div>
             </CardContent>
             <CardFooter className="justify-end">
-              <Button onClick={() => void saveActiveCampaign()} disabled={saving !== null}>
-                {saving === "active" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Salvar ActiveCampaign
+              <Button onClick={() => void saveActiveCampaign()} disabled={saving !== null || syncingActiveCampaign}>
+                {(saving === "active" || syncingActiveCampaign) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {syncingActiveCampaign ? "Sincronizando base..." : "Salvar ActiveCampaign"}
               </Button>
             </CardFooter>
           </Card>

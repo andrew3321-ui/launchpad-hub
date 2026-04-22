@@ -1443,3 +1443,55 @@ REVOKE ALL ON FUNCTION public.update_launch_metadata(UUID, TEXT, TEXT, TEXT, JSO
 
 GRANT EXECUTE ON FUNCTION public.create_launch_metadata(TEXT, TEXT, TEXT, JSONB, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_launch_metadata(UUID, TEXT, TEXT, TEXT, JSONB, TEXT) TO authenticated;
+
+-- 20260422090000_add_visible_leads_rpc.sql
+CREATE OR REPLACE FUNCTION public.get_launch_visible_leads(
+  target_launch_id UUID,
+  limit_count INTEGER DEFAULT 100
+)
+RETURNS TABLE (
+  id UUID,
+  primary_name TEXT,
+  primary_email TEXT,
+  primary_phone TEXT,
+  merged_from_count INTEGER,
+  last_source TEXT,
+  status TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.user_owns_launch(auth.uid(), target_launch_id) THEN
+    RAISE EXCEPTION 'Not authorized to access visible leads';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    lead.id,
+    lead.primary_name,
+    lead.primary_email,
+    lead.primary_phone,
+    lead.merged_from_count,
+    lead.last_source,
+    lead.status,
+    lead.updated_at
+  FROM public.lead_contacts AS lead
+  WHERE lead.launch_id = target_launch_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.inbound_contact_events AS event
+      WHERE event.launch_id = target_launch_id
+        AND event.processed_contact_id = lead.id
+        AND event.processing_status = 'processed'
+        AND event.event_type NOT IN ('contact_import', 'subscriber_import')
+    )
+  ORDER BY lead.updated_at DESC
+  LIMIT GREATEST(COALESCE(limit_count, 100), 1);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_launch_visible_leads(UUID, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_launch_visible_leads(UUID, INTEGER) TO authenticated;

@@ -49,12 +49,10 @@ export default function Leads() {
       setRows([]);
       setLoadedLaunchId(null);
       setLoading(true);
-      const { data, error } = await supabase
-        .from("lead_contacts")
-        .select("id, primary_name, primary_email, primary_phone, merged_from_count, last_source, status, updated_at")
-        .eq("launch_id", launchId)
-        .order("updated_at", { ascending: false })
-        .limit(100);
+      const { data, error } = await supabase.rpc("get_launch_visible_leads", {
+        target_launch_id: launchId,
+        limit_count: 100,
+      });
 
       if (error) {
         if (!cancelled) {
@@ -109,7 +107,7 @@ export default function Leads() {
           <p className="text-sm text-muted-foreground">
             Base canonica do lancamento{" "}
             <span className="font-medium text-foreground">{activeLaunch.name}</span>,
-            consolidada pelos webhooks antes de seguir para ActiveCampaign ou UChat.
+            mostrando apenas contatos que realmente entraram pelos webhooks operacionais do Launch Hub.
           </p>
         </div>
       </div>
@@ -119,7 +117,7 @@ export default function Leads() {
           <CardTitle className="text-xl">Contatos tratados</CardTitle>
           <CardDescription>
             Cada linha representa um contato final depois da normalizacao, deduplicacao e
-            verificacao de estado.
+            verificacao de estado. Contatos puxados por sincronizacao de base nao aparecem aqui.
           </CardDescription>
         </CardHeader>
         <CardContent>

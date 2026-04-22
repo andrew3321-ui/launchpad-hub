@@ -15,11 +15,15 @@ const corsHeaders = {
 
 const activeCampaignPageSize = 100;
 const uchatPageSize = 100;
-const defaultActiveCampaignConcurrency = 5;
+const defaultActiveCampaignProcessConcurrency = 10;
 const defaultUchatConcurrency = 10;
+const defaultActiveCampaignChunkSize = 10000;
+const maxActiveCampaignChunkSize = 25000;
+const defaultActiveCampaignRuntimeMs = 45000;
 const maxSampleErrors = 10;
 
 type SyncSource = "activecampaign" | "uchat";
+type ActiveCampaignSyncMode = "full" | "resume" | "incremental";
 type JsonRecord = Record<string, unknown>;
 
 interface SyncRequestBody {
@@ -27,6 +31,8 @@ interface SyncRequestBody {
   launchSlug?: string;
   source: SyncSource;
   maxContacts?: number;
+  syncMode?: ActiveCampaignSyncMode;
+  trigger?: string;
 }
 
 interface SyncCounters {
@@ -40,6 +46,14 @@ interface SyncCounters {
 
 interface SyncRunRow {
   id: string;
+}
+
+interface PlatformSyncRunRow extends SyncRunRow {
+  status: "running" | "completed" | "failed";
+  metadata: unknown;
+  started_at: string;
+  finished_at: string | null;
+  last_error: string | null;
 }
 
 interface LaunchRow {
@@ -60,6 +74,25 @@ interface UchatWorkspaceRow {
   api_token: string;
 }
 
+interface ActiveCampaignSyncPlan {
+  mode: ActiveCampaignSyncMode;
+  chunkSize: number;
+  lastContactId: number;
+  updatedAfter: string | null;
+  updatedBefore: string | null;
+  resumedFromRunId: string | null;
+  previousSyncedUntil: string | null;
+  aggregateBase: SyncCounters;
+}
+
+interface ActiveCampaignSyncCursor {
+  mode: ActiveCampaignSyncMode;
+  lastContactId: number;
+  hasMore: boolean;
+  updatedAfter: string | null;
+  updatedBefore: string | null;
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -68,6 +101,10 @@ function jsonResponse(body: unknown, status = 200) {
       ...corsHeaders,
     },
   });
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
@@ -99,6 +136,13 @@ async function requireAuthenticatedUser(request: Request, supabaseUrl: string, s
   }
 
   return user;
+}
+
+function hasInternalSyncAuthorization(request: Request) {
+  const configuredSecret = nonEmptyString(Deno.env.get("LAUNCHHUB_SYNC_CRON_SECRET"));
+  const providedSecret = nonEmptyString(request.headers.get("x-launchhub-cron-secret"));
+
+  return Boolean(configuredSecret && providedSecret && configuredSecret === providedSecret);
 }
 
 async function assertLaunchAccess(
@@ -135,6 +179,25 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseRetryAfterMs(response: Response, attempt: number) {
+  const retryAfter = response.headers.get("Retry-After");
+  if (!retryAfter) {
+    return 500 * (attempt + 1);
+  }
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const dateValue = Date.parse(retryAfter);
+  if (Number.isFinite(dateValue)) {
+    return Math.max(0, dateValue - Date.now());
+  }
+
+  return 500 * (attempt + 1);
+}
+
 function toErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return String(error);
@@ -144,6 +207,10 @@ function ensureNumber(value: unknown, fallback: number) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampNumber(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function nonEmptyString(value: unknown) {
@@ -159,6 +226,80 @@ function buildContactName(parts: Array<unknown>) {
     .join(" ")
     .trim();
   return fullName || null;
+}
+
+function extractActiveCampaignTimestamp(contact: JsonRecord) {
+  return (
+    nonEmptyString(contact.updated_utc_timestamp) ||
+    nonEmptyString(contact.updatedAt) ||
+    nonEmptyString(contact.udate) ||
+    nonEmptyString(contact.cdate) ||
+    null
+  );
+}
+
+function parseActiveCampaignSyncMode(value: unknown): ActiveCampaignSyncMode | null {
+  if (value === "full" || value === "resume" || value === "incremental") {
+    return value;
+  }
+
+  return null;
+}
+
+function parseActiveCampaignCursor(metadata: unknown) {
+  const root = isRecord(metadata) ? metadata : {};
+  const cursor = isRecord(root.cursor) ? root.cursor : {};
+
+  return {
+    mode:
+      parseActiveCampaignSyncMode(cursor.mode) ||
+      parseActiveCampaignSyncMode(root.mode) ||
+      null,
+    lastContactId: ensureNumber(
+      cursor.lastContactId ?? root.lastContactId ?? root.nextIdGreater,
+      0,
+    ),
+    hasMore: Boolean(cursor.hasMore ?? root.hasMore),
+    updatedAfter:
+      nonEmptyString(cursor.updatedAfter) ||
+      nonEmptyString(root.updatedAfter) ||
+      null,
+    updatedBefore:
+      nonEmptyString(cursor.updatedBefore) ||
+      nonEmptyString(root.updatedBefore) ||
+      null,
+    syncedUntil:
+      nonEmptyString(root.syncedUntil) ||
+      nonEmptyString(cursor.syncedUntil) ||
+      nonEmptyString(cursor.updatedBefore) ||
+      nonEmptyString(root.updatedBefore) ||
+      null,
+  };
+}
+
+function parseAggregateCounters(metadata: unknown): SyncCounters {
+  const root = isRecord(metadata) ? metadata : {};
+  const aggregate = isRecord(root.aggregateCounters) ? root.aggregateCounters : {};
+
+  return {
+    fetchedCount: ensureNumber(aggregate.fetchedCount, 0),
+    processedCount: ensureNumber(aggregate.processedCount, 0),
+    createdCount: ensureNumber(aggregate.createdCount, 0),
+    mergedCount: ensureNumber(aggregate.mergedCount, 0),
+    skippedCount: ensureNumber(aggregate.skippedCount, 0),
+    errorCount: ensureNumber(aggregate.errorCount, 0),
+  };
+}
+
+function sumCounters(left: SyncCounters, right: SyncCounters): SyncCounters {
+  return {
+    fetchedCount: left.fetchedCount + right.fetchedCount,
+    processedCount: left.processedCount + right.processedCount,
+    createdCount: left.createdCount + right.createdCount,
+    mergedCount: left.mergedCount + right.mergedCount,
+    skippedCount: left.skippedCount + right.skippedCount,
+    errorCount: left.errorCount + right.errorCount,
+  };
 }
 
 function normalizeActiveCampaignBaseUrl(apiUrl: string) {
@@ -178,7 +319,7 @@ async function fetchJsonWithRetry(url: string, init: RequestInit, retries = 2) {
 
       const errorText = await response.text();
       if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-        await delay(500 * (attempt + 1));
+        await delay(parseRetryAfterMs(response, attempt));
         continue;
       }
 
@@ -365,87 +506,143 @@ async function fetchUchatWorkspaces(
   return (data || []) as UchatWorkspaceRow[];
 }
 
-async function fetchAllActiveCampaignCatalog(
-  apiUrl: string,
-  apiKey: string,
-  path: string,
-  rootKey: string,
+async function fetchLatestSyncRun(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  source: SyncSource,
 ) {
-  const items: JsonRecord[] = [];
-  let offset = 0;
+  const { data, error } = await supabase
+    .from("platform_sync_runs")
+    .select("id, status, metadata, started_at, finished_at, last_error")
+    .eq("launch_id", launchId)
+    .eq("source", source)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  while (true) {
-    const payload = await activeCampaignRequest(apiUrl, apiKey, path, {
-      limit: activeCampaignPageSize,
-      offset,
-    });
-    const batch = Array.isArray(payload[rootKey]) ? (payload[rootKey] as JsonRecord[]) : [];
-    if (batch.length === 0) break;
-
-    items.push(...batch);
-    offset += batch.length;
-
-    if (batch.length < activeCampaignPageSize) break;
+  if (error) {
+    throw new Error(error.message);
   }
 
-  return items;
+  return (data as PlatformSyncRunRow | null) || null;
 }
 
-async function fetchActiveCampaignContactSnapshot(
-  apiUrl: string,
-  apiKey: string,
-  contactId: string,
-  listsById: Map<string, JsonRecord>,
-  tagsById: Map<string, JsonRecord>,
-) {
-  const [detailPayload, listPayload, tagPayload] = await Promise.all([
-    activeCampaignRequest(apiUrl, apiKey, `/api/3/contacts/${contactId}`).catch(() => ({})),
-    activeCampaignRequest(apiUrl, apiKey, `/api/3/contacts/${contactId}/contactLists`).catch(() => ({})),
-    activeCampaignRequest(apiUrl, apiKey, `/api/3/contacts/${contactId}/contactTags`).catch(() => ({})),
-  ]);
+function buildActiveCampaignSyncPlan(
+  body: SyncRequestBody,
+  latestRun: PlatformSyncRunRow | null,
+): ActiveCampaignSyncPlan {
+  const latestCursor = parseActiveCampaignCursor(latestRun?.metadata);
+  const requestedMode = parseActiveCampaignSyncMode(body.syncMode);
+  const latestSyncedUntil = latestCursor.syncedUntil;
+  const nowIso = new Date().toISOString();
+  const chunkSize = clampNumber(
+    ensureNumber(body.maxContacts, defaultActiveCampaignChunkSize) || defaultActiveCampaignChunkSize,
+    activeCampaignPageSize,
+    maxActiveCampaignChunkSize,
+  );
+  const emptyCounters: SyncCounters = {
+    fetchedCount: 0,
+    processedCount: 0,
+    createdCount: 0,
+    mergedCount: 0,
+    skippedCount: 0,
+    errorCount: 0,
+  };
 
-  const detailContact = (detailPayload.contact as JsonRecord | undefined) || {};
-  const rawListMemberships = Array.isArray(listPayload.contactLists)
-    ? (listPayload.contactLists as JsonRecord[])
-    : Array.isArray(detailPayload.contactLists)
-      ? (detailPayload.contactLists as JsonRecord[])
-      : [];
-  const rawTagMemberships = Array.isArray(tagPayload.contactTags)
-    ? (tagPayload.contactTags as JsonRecord[])
-    : Array.isArray(detailPayload.contactTags)
-      ? (detailPayload.contactTags as JsonRecord[])
-      : [];
+  let mode =
+    requestedMode ||
+    (latestCursor.hasMore ? "resume" : latestSyncedUntil ? "incremental" : "full");
 
-  const lists = rawListMemberships.map((item) => {
-    const listId = String(item.list ?? item.listid ?? "");
-    const listCatalog = listId ? listsById.get(listId) : null;
+  if (mode === "resume" && latestCursor.hasMore && latestRun) {
     return {
-      id: item.id ?? null,
-      listId,
-      name: nonEmptyString(listCatalog?.name) || nonEmptyString(listCatalog?.stringid) || null,
-      status: item.status ?? null,
-      subscribedAt: item.sdate ?? null,
-      unsubscribedAt: item.udate ?? null,
-      responder: item.responder ?? null,
+      mode: latestCursor.mode || (latestSyncedUntil ? "incremental" : "full"),
+      chunkSize,
+      lastContactId: Math.max(0, latestCursor.lastContactId),
+      updatedAfter: latestCursor.updatedAfter,
+      updatedBefore: latestCursor.updatedBefore || nowIso,
+      resumedFromRunId: latestRun.id,
+      previousSyncedUntil: latestSyncedUntil,
+      aggregateBase: parseAggregateCounters(latestRun.metadata),
     };
-  });
+  }
 
-  const tags = rawTagMemberships.map((item) => {
-    const tagId = String(item.tag ?? item.tagid ?? "");
-    const tagCatalog = tagId ? tagsById.get(tagId) : null;
+  if (mode === "resume") {
+    mode = latestSyncedUntil ? "incremental" : "full";
+  }
+
+  if (mode === "incremental" && latestSyncedUntil) {
     return {
-      id: item.id ?? null,
-      tagId,
-      name: nonEmptyString(tagCatalog?.tag) || nonEmptyString(tagCatalog?.name) || null,
-      createdAt: item.cdate ?? null,
+      mode,
+      chunkSize,
+      lastContactId: 0,
+      updatedAfter: latestSyncedUntil,
+      updatedBefore: nowIso,
+      resumedFromRunId: null,
+      previousSyncedUntil: latestSyncedUntil,
+      aggregateBase: emptyCounters,
     };
-  });
+  }
 
   return {
-    detailContact,
-    fieldValues: Array.isArray(detailPayload.fieldValues) ? detailPayload.fieldValues : [],
-    lists,
-    tags,
+    mode: "full",
+    chunkSize,
+    lastContactId: 0,
+    updatedAfter: null,
+    updatedBefore: nowIso,
+    resumedFromRunId: null,
+    previousSyncedUntil: latestSyncedUntil,
+    aggregateBase: emptyCounters,
+  };
+}
+
+async function fetchActiveCampaignContactsPage(
+  apiUrl: string,
+  apiKey: string,
+  plan: ActiveCampaignSyncPlan,
+  lastContactId: number,
+) {
+  const payload = await activeCampaignRequest(apiUrl, apiKey, "/api/3/contacts", {
+    limit: activeCampaignPageSize,
+    id_greater: lastContactId > 0 ? lastContactId : undefined,
+    "orders[id]": "ASC",
+    "filters[updated_after]": plan.updatedAfter ?? undefined,
+    "filters[updated_before]": plan.updatedBefore ?? undefined,
+  });
+
+  const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+  return { contacts };
+}
+
+function buildActiveCampaignIncomingBody(
+  launch: LaunchRow,
+  contact: JsonRecord,
+): IncomingEventBody {
+  const contactId = nonEmptyString(contact.id);
+  const firstName = nonEmptyString(contact.firstName) || nonEmptyString(contact.first_name);
+  const lastName = nonEmptyString(contact.lastName) || nonEmptyString(contact.last_name);
+
+  return {
+    launchId: launch.id,
+    source: "activecampaign",
+    eventType: "contact_import",
+    externalContactId: contactId,
+    contact: {
+      name:
+        buildContactName([
+          contact.name,
+          firstName,
+          lastName,
+        ]) || (contactId ? `Contato ActiveCampaign ${contactId}` : "Contato ActiveCampaign"),
+      email: nonEmptyString(contact.email) || nonEmptyString(contact.emailAddress),
+      phone: nonEmptyString(contact.phone) || nonEmptyString(contact.mobile),
+    },
+    payload: {
+      contact,
+      defaultListId: launch.ac_default_list_id,
+      importedBy: {
+        source: "sync-platform-contacts",
+      },
+    },
   };
 }
 
@@ -477,9 +674,9 @@ async function processPlatformContact(
 async function syncActiveCampaignContacts(
   supabase: AnySupabaseClient,
   launch: LaunchRow,
+  body: SyncRequestBody,
   counters: SyncCounters,
   sampleErrors: string[],
-  maxContacts?: number,
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError(
@@ -488,110 +685,118 @@ async function syncActiveCampaignContacts(
     );
   }
 
-  const [listCatalog, tagCatalog] = await Promise.all([
-    fetchAllActiveCampaignCatalog(launch.ac_api_url, launch.ac_api_key, "/api/3/lists", "lists"),
-    fetchAllActiveCampaignCatalog(launch.ac_api_url, launch.ac_api_key, "/api/3/tags", "tags"),
-  ]);
-
-  const listsById = new Map(listCatalog.map((item) => [String(item.id), item]));
-  const tagsById = new Map(tagCatalog.map((item) => [String(item.id), item]));
-
-  let offset = 0;
+  const latestRun = await fetchLatestSyncRun(supabase, launch.id, "activecampaign");
+  const plan = buildActiveCampaignSyncPlan(body, latestRun);
+  const startedAt = Date.now();
+  let lastContactId = plan.lastContactId;
   let pagesProcessed = 0;
+  let hasMore = false;
+  let lastSeenUpdatedAt: string | null = null;
+  let completionReason: "finished" | "chunk_limit" | "runtime_limit" = "finished";
 
   while (true) {
-    if (maxContacts && counters.fetchedCount >= maxContacts) break;
+    if (counters.fetchedCount >= plan.chunkSize) {
+      hasMore = true;
+      completionReason = "chunk_limit";
+      break;
+    }
 
-    const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/contacts", {
-      limit: activeCampaignPageSize,
-      offset,
-      "orders[id]": "ASC",
-    });
+    if (Date.now() - startedAt >= defaultActiveCampaignRuntimeMs) {
+      hasMore = true;
+      completionReason = "runtime_limit";
+      break;
+    }
 
-    const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+    const { contacts } = await fetchActiveCampaignContactsPage(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      plan,
+      lastContactId,
+    );
     if (contacts.length === 0) break;
 
-    const allowedContacts =
-      maxContacts && maxContacts > 0
-        ? contacts.slice(0, Math.max(0, maxContacts - counters.fetchedCount))
-        : contacts;
+    const remainingCapacity = Math.max(0, plan.chunkSize - counters.fetchedCount);
+    const allowedContacts = contacts.slice(0, remainingCapacity);
 
     counters.fetchedCount += allowedContacts.length;
     pagesProcessed += 1;
 
-    await mapWithConcurrency(allowedContacts, defaultActiveCampaignConcurrency, async (contact) => {
-      try {
-        const contactId = nonEmptyString(contact.id);
-        if (!contactId) {
+    await mapWithConcurrency(
+      allowedContacts,
+      defaultActiveCampaignProcessConcurrency,
+      async (contact) => {
+        try {
+          const contactId = nonEmptyString(contact.id);
+          if (!contactId) {
+            counters.errorCount += 1;
+            if (sampleErrors.length < maxSampleErrors) {
+              sampleErrors.push("Contato do ActiveCampaign sem id retornado pela API.");
+            }
+            return;
+          }
+
+          await processPlatformContact(
+            supabase,
+            counters,
+            sampleErrors,
+            buildActiveCampaignIncomingBody(launch, contact),
+          );
+        } catch (error) {
           counters.errorCount += 1;
           if (sampleErrors.length < maxSampleErrors) {
-            sampleErrors.push("Contato do ActiveCampaign sem id retornado pela API.");
+            sampleErrors.push(toErrorMessage(error));
           }
-          return;
         }
+      },
+    );
 
-        const snapshot = await fetchActiveCampaignContactSnapshot(
-          launch.ac_api_url as string,
-          launch.ac_api_key as string,
-          contactId,
-          listsById,
-          tagsById,
-        );
-
-        const detailContact = snapshot.detailContact;
-        const firstName = nonEmptyString(detailContact.firstName) || nonEmptyString(detailContact.first_name);
-        const lastName = nonEmptyString(detailContact.lastName) || nonEmptyString(detailContact.last_name);
-        const bodyForContact: IncomingEventBody = {
-          launchId: launch.id,
-          source: "activecampaign",
-          eventType: "contact_import",
-          externalContactId: contactId,
-          contact: {
-            name:
-              buildContactName([
-                detailContact.name,
-                firstName,
-                lastName,
-                contact.name,
-              ]) || `Contato ActiveCampaign ${contactId}`,
-            email:
-              nonEmptyString(detailContact.email) ||
-              nonEmptyString(contact.email) ||
-              nonEmptyString(detailContact.emailAddress),
-            phone:
-              nonEmptyString(detailContact.phone) ||
-              nonEmptyString(contact.phone) ||
-              nonEmptyString(detailContact.mobile),
-          },
-          payload: {
-            contact: {
-              ...contact,
-              ...detailContact,
-            },
-            tags: snapshot.tags,
-            lists: snapshot.lists,
-            fieldValues: snapshot.fieldValues,
-            defaultListId: launch.ac_default_list_id,
-          },
-        };
-
-        await processPlatformContact(supabase, counters, sampleErrors, bodyForContact);
-      } catch (error) {
-        counters.errorCount += 1;
-        if (sampleErrors.length < maxSampleErrors) {
-          sampleErrors.push(toErrorMessage(error));
-        }
+    for (const contact of allowedContacts) {
+      const numericContactId = ensureNumber(contact.id, 0);
+      if (numericContactId > lastContactId) {
+        lastContactId = numericContactId;
       }
-    });
 
-    offset += contacts.length;
-    if (contacts.length < activeCampaignPageSize) break;
+      const updatedAt = extractActiveCampaignTimestamp(contact);
+      if (updatedAt && (!lastSeenUpdatedAt || updatedAt > lastSeenUpdatedAt)) {
+        lastSeenUpdatedAt = updatedAt;
+      }
+    }
+
+    if (allowedContacts.length < contacts.length) {
+      hasMore = true;
+      completionReason = "chunk_limit";
+      break;
+    }
+
+    if (contacts.length < activeCampaignPageSize) {
+      hasMore = false;
+      break;
+    }
   }
 
+  const aggregateCounters = sumCounters(plan.aggregateBase, counters);
+  const syncedUntil = hasMore
+    ? plan.previousSyncedUntil
+    : plan.updatedBefore || new Date().toISOString();
+
   return {
+    mode: plan.mode,
+    requestedSyncMode: parseActiveCampaignSyncMode(body.syncMode),
     pagesProcessed,
-    listCount: listCatalog.length,
-    tagCount: tagCatalog.length,
+    chunkSize: plan.chunkSize,
+    resumedFromRunId: plan.resumedFromRunId,
+    previousSyncedUntil: plan.previousSyncedUntil,
+    syncedUntil,
+    lastSeenUpdatedAt,
+    completionReason,
+    cursor: {
+      mode: plan.mode,
+      lastContactId,
+      hasMore,
+      updatedAfter: plan.updatedAfter,
+      updatedBefore: plan.updatedBefore,
+    },
+    aggregateCounters,
   };
 }
 
@@ -718,6 +923,7 @@ Deno.serve(async (request) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const isInternalSync = hasInternalSyncAuthorization(request);
   let runId: string | null = null;
   let launch: LaunchRow | null = null;
   const counters: SyncCounters = {
@@ -731,18 +937,33 @@ Deno.serve(async (request) => {
   const sampleErrors: string[] = [];
 
   try {
-    const authenticatedUser = await requireAuthenticatedUser(request, supabaseUrl, serviceRoleKey);
-    await assertLaunchAccess(
-      supabase,
-      authenticatedUser.id,
-      body.launchId ?? null,
-      body.launchSlug ?? null,
-    );
+    if (!body.launchId && !body.launchSlug) {
+      throw new ProcessContactError("launchId or launchSlug is required", 400);
+    }
+
+    if (!isInternalSync) {
+      const authenticatedUser = await requireAuthenticatedUser(request, supabaseUrl, serviceRoleKey);
+      await assertLaunchAccess(
+        supabase,
+        authenticatedUser.id,
+        body.launchId ?? null,
+        body.launchSlug ?? null,
+      );
+    }
 
     launch = await resolveLaunch(supabase, body);
     runId = await createSyncRun(supabase, launch.id, body.source, {
       requestedSource: body.source,
-      maxContacts: body.maxContacts || null,
+      requestedSyncMode: parseActiveCampaignSyncMode(body.syncMode),
+      maxContacts:
+        body.source === "activecampaign"
+          ? clampNumber(
+              ensureNumber(body.maxContacts, defaultActiveCampaignChunkSize) || defaultActiveCampaignChunkSize,
+              activeCampaignPageSize,
+              maxActiveCampaignChunkSize,
+            )
+          : body.maxContacts || null,
+      trigger: nonEmptyString(body.trigger) || (isInternalSync ? "scheduled" : "manual"),
     });
 
     await insertProcessingLog(
@@ -756,13 +977,15 @@ Deno.serve(async (request) => {
       {
         runId,
         source: body.source,
+        syncMode: parseActiveCampaignSyncMode(body.syncMode),
         maxContacts: body.maxContacts || null,
+        trigger: nonEmptyString(body.trigger) || (isInternalSync ? "scheduled" : "manual"),
       },
     );
 
     const syncMetadata =
       body.source === "activecampaign"
-        ? await syncActiveCampaignContacts(supabase, launch, counters, sampleErrors, ensureNumber(body.maxContacts, 0) || undefined)
+        ? await syncActiveCampaignContacts(supabase, launch, body, counters, sampleErrors)
         : await syncUchatContacts(supabase, launch, counters, sampleErrors, ensureNumber(body.maxContacts, 0) || undefined);
 
     const finalMetadata = {
@@ -780,7 +1003,9 @@ Deno.serve(async (request) => {
       counters.errorCount > 0 ? "warning" : "success",
       "SYNC_COMPLETED",
       "Sincronizacao concluida",
-      `A importacao do ${body.source} terminou com ${counters.createdCount} contatos novos e ${counters.mergedCount} merges.`,
+      body.source === "activecampaign" && isRecord(finalMetadata.cursor) && finalMetadata.cursor.hasMore
+        ? `A sincronizacao do ${body.source} processou mais um lote e ainda possui contatos pendentes para continuar.`
+        : `A importacao do ${body.source} terminou com ${counters.createdCount} contatos novos e ${counters.mergedCount} merges.`,
       {
         runId,
         ...counters,

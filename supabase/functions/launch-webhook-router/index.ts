@@ -102,6 +102,8 @@ const corsHeaders = {
 };
 
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
+const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
 const DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS = ["1050", "1055"] as const;
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
   utm_source: "21",
@@ -367,6 +369,27 @@ function extractGenericContact(payload: JsonRecord) {
   };
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(response: Response, attempt: number) {
+  const retryAfter = response.headers.get("Retry-After");
+  if (!retryAfter) return 500 * (attempt + 1);
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const parsedDate = Date.parse(retryAfter);
+  if (Number.isFinite(parsedDate)) {
+    return Math.max(0, parsedDate - Date.now());
+  }
+
+  return 500 * (attempt + 1);
+}
+
 function stringifyScalar(value: unknown) {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     const normalized = String(value).trim();
@@ -587,23 +610,41 @@ async function requestJson(
   url: string,
   init: RequestInit,
 ) {
-  const response = await fetch(url, init);
-  const rawText = await response.text();
-  let parsed: unknown = {};
+  let lastError: Error | null = null;
 
-  if (rawText.trim()) {
+  for (let attempt = 0; attempt <= ACTIVECAMPAIGN_REQUEST_RETRIES; attempt += 1) {
     try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      parsed = { rawText };
+      const response = await fetch(url, init);
+      const rawText = await response.text();
+      let parsed: unknown = {};
+
+      if (rawText.trim()) {
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          parsed = { rawText };
+        }
+      }
+
+      if (!response.ok) {
+        if ((response.status === 429 || response.status >= 500) && attempt < ACTIVECAMPAIGN_REQUEST_RETRIES) {
+          await delay(parseRetryAfterMs(response, attempt));
+          continue;
+        }
+
+        throw new Error(`HTTP ${response.status}: ${rawText}`);
+      }
+
+      return parsed;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < ACTIVECAMPAIGN_REQUEST_RETRIES) {
+        await delay(500 * (attempt + 1));
+      }
     }
   }
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${rawText}`);
-  }
-
-  return parsed;
+  throw lastError || new Error("Unknown request error");
 }
 
 function extractUchatUserNs(payload?: JsonRecord | null) {
@@ -1198,6 +1239,12 @@ async function claimRoutingAction(
 }
 
 async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
+  const cacheKey = `${normalizeActiveCampaignBaseUrl(apiUrl)}::${apiKey}`;
+  const cachedTags = activeCampaignTagCache.get(cacheKey);
+  if (cachedTags) {
+    return cachedTags;
+  }
+
   const tags: Array<{ id: string; tag: string }> = [];
   let offset = 0;
 
@@ -1223,6 +1270,7 @@ async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
     if (batch.length < 100) break;
   }
 
+  activeCampaignTagCache.set(cacheKey, tags);
   return tags;
 }
 
@@ -1263,6 +1311,10 @@ async function resolveActiveCampaignTagId(
   if (!createdId) {
     throw new ProcessContactError("Failed to create ActiveCampaign tag", 500);
   }
+
+  const cacheKey = `${normalizeActiveCampaignBaseUrl(launch.ac_api_url)}::${launch.ac_api_key}`;
+  const cachedTags = activeCampaignTagCache.get(cacheKey) || [];
+  activeCampaignTagCache.set(cacheKey, [...cachedTags, { id: createdId, tag: tagLabel }]);
 
   return createdId;
 }

@@ -693,6 +693,19 @@ export type Database = {
         }
         Returns: Json
       }
+      get_launch_visible_leads: {
+        Args: { limit_count?: number; target_launch_id: string }
+        Returns: {
+          id: string
+          last_source: string | null
+          merged_from_count: number
+          primary_email: string | null
+          primary_name: string | null
+          primary_phone: string | null
+          status: string
+          updated_at: string
+        }[]
+      }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
