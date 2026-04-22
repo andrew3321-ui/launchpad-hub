@@ -101,19 +101,6 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
     void fetchLaunches();
   }, [fetchLaunches]);
 
-  useEffect(() => {
-    if (authLoading || !session || !user || !profileReady) return;
-
-    const onFocus = () => {
-      void fetchLaunches();
-    };
-
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [authLoading, fetchLaunches, profileReady, session, user]);
-
   return (
     <LaunchContext.Provider
       value={{ launches, activeLaunch, setActiveLaunch, loading, refreshLaunches: fetchLaunches }}

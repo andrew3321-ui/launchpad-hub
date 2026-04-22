@@ -74,15 +74,8 @@ export function AdminApprovalsBell() {
       void loadRequests();
     }, 10000);
 
-    const onFocus = () => {
-      void loadRequests();
-    };
-
-    window.addEventListener("focus", onFocus);
-
     return () => {
       clearInterval(intervalId);
-      window.removeEventListener("focus", onFocus);
     };
   }, [isAdmin, loadRequests]);
 
