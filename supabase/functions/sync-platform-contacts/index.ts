@@ -116,6 +116,7 @@ async function requireAuthenticatedUser(request: Request, supabaseUrl: string, s
   const userAuthKey =
     Deno.env.get("SUPABASE_ANON_KEY") ||
     Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+    Deno.env.get("SB_PUBLISHABLE_KEY") ||
     serviceRoleKey;
 
   const authClient = createClient(supabaseUrl, userAuthKey, {

@@ -254,6 +254,68 @@ async function withTimeout<T,>(promise: PromiseLike<T>, timeoutMs: number, messa
   }
 }
 
+function extractJsonErrorMessage(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  const directMessage =
+    typeof record.error === "string"
+      ? record.error
+      : typeof record.message === "string"
+        ? record.message
+        : null;
+
+  if (directMessage) return directMessage;
+
+  if (record.details && typeof record.details === "object") {
+    const detailRecord = record.details as Record<string, unknown>;
+    if (typeof detailRecord.message === "string") return detailRecord.message;
+    if (typeof detailRecord.error === "string") return detailRecord.error;
+  }
+
+  return null;
+}
+
+async function extractFunctionInvokeErrorMessage(error: unknown, fallback: string) {
+  const defaultMessage = error instanceof Error ? error.message : fallback;
+
+  if (!error || typeof error !== "object" || !("context" in error)) {
+    return defaultMessage;
+  }
+
+  const context = (error as { context?: unknown }).context;
+  if (!(context instanceof Response)) {
+    return defaultMessage;
+  }
+
+  try {
+    const response = context.clone();
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      const parsedMessage = extractJsonErrorMessage(payload);
+
+      if (parsedMessage) {
+        return parsedMessage;
+      }
+    } else {
+      const rawText = (await response.text()).trim();
+      if (rawText) {
+        return rawText;
+      }
+    }
+  } catch {
+    return defaultMessage;
+  }
+
+  if (context.status) {
+    return `HTTP ${context.status}: ${defaultMessage}`;
+  }
+
+  return defaultMessage;
+}
+
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
     <Badge variant={connected ? "default" : "secondary"}>
@@ -402,13 +464,15 @@ export default function Sources() {
           });
         }
       } catch (error) {
+        const description = await extractFunctionInvokeErrorMessage(
+          error,
+          "Nao foi possivel consultar as tags da conta agora.",
+        );
+
         if (!options?.silent) {
           toast({
             title: "Erro ao carregar tags do ActiveCampaign",
-            description:
-              error instanceof Error
-                ? error.message
-                : "Nao foi possivel consultar as tags da conta agora.",
+            description,
             variant: "destructive",
           });
         }
@@ -751,11 +815,15 @@ export default function Sources() {
 
         throw new Error("A sincronizacao excedeu o limite interno de lotes e precisa ser retomada.");
       } catch (error) {
+        const description = await extractFunctionInvokeErrorMessage(
+          error,
+          "Nao foi possivel concluir a sincronizacao.",
+        );
+
         setActiveCampaignSyncMessage(null);
         toast({
           title: "Erro ao sincronizar a base do ActiveCampaign",
-          description:
-            error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao.",
+          description,
           variant: "destructive",
         });
       } finally {
