@@ -74,6 +74,16 @@ const MANAGED_SOURCE_ALIASES = [
     label: "ManyChat",
     helper: "Tags aplicadas quando o contato entrar pelo webhook do ManyChat.",
   },
+  {
+    alias: "tally",
+    label: "Tally",
+    helper: "Tags aplicadas quando a resposta da pesquisa entrar pelo webhook do Tally.",
+  },
+  {
+    alias: "sendflow",
+    label: "Sendflow",
+    helper: "Tags aplicadas quando o contato entrar pelo webhook do Sendflow.",
+  },
 ] as const;
 const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 
@@ -688,7 +698,7 @@ export default function Sources() {
           <div className="space-y-1 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Modelo webhook-first por lancamento</p>
             <p>
-              Entradas: ActiveCampaign, UChat, ManyChat, Typebot e Sendflow.
+              Entradas: ActiveCampaign, UChat, ManyChat, Typebot, Tally e Sendflow.
             </p>
             <p>Saidas: ActiveCampaign e UChat, apos verificacao e tratamento da base canonica.</p>
           </div>
@@ -748,7 +758,7 @@ export default function Sources() {
                       <p className="font-medium text-foreground">Tags sincronizadas do ActiveCampaign</p>
                       <p className="text-sm text-muted-foreground">
                         Carregue as tags reais da conta e escolha quais devem ser aplicadas quando o
-                        webhook vier do Typebot ou do ManyChat.
+                        webhook vier do Typebot, do ManyChat, do Tally ou do Sendflow.
                       </p>
                     </div>
                     <Button
@@ -784,7 +794,7 @@ export default function Sources() {
                   <p className="text-sm font-medium text-foreground">Mapeamentos avancados</p>
                   <p className="text-sm text-muted-foreground">
                     Use esta area para aliases extras, estados personalizados ou qualquer regra que
-                    nao seja o roteamento padrao de Typebot e ManyChat.
+                    nao seja o roteamento padrao de Typebot, ManyChat, Tally e Sendflow.
                   </p>
                   <NamedTagsEditor
                     tags={advancedNamedTags}

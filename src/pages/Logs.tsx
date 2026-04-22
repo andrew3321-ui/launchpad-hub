@@ -20,6 +20,7 @@ type LogSource =
   | "activecampaign"
   | "manychat"
   | "typebot"
+  | "tally"
   | "sendflow"
   | "uchat"
   | "manual";
@@ -46,6 +47,7 @@ const sourceLabels: Record<LogSource, string> = {
   activecampaign: "ActiveCampaign",
   manychat: "ManyChat",
   typebot: "Typebot",
+  tally: "Tally",
   sendflow: "Sendflow",
   uchat: "UChat",
   manual: "Manual",
@@ -230,6 +232,7 @@ export default function Logs() {
                 <SelectItem value="activecampaign">ActiveCampaign</SelectItem>
                 <SelectItem value="manychat">ManyChat</SelectItem>
                 <SelectItem value="typebot">Typebot</SelectItem>
+                <SelectItem value="tally">Tally</SelectItem>
                 <SelectItem value="sendflow">Sendflow</SelectItem>
                 <SelectItem value="uchat">UChat</SelectItem>
                 <SelectItem value="manual">Manual</SelectItem>

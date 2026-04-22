@@ -290,7 +290,7 @@ CREATE TABLE public.lead_contact_identities (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   launch_id UUID NOT NULL REFERENCES public.launches(id) ON DELETE CASCADE,
   contact_id UUID NOT NULL REFERENCES public.lead_contacts(id) ON DELETE CASCADE,
-  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'uchat', 'manual')),
+  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual')),
   external_contact_id TEXT,
   external_email TEXT,
   external_phone TEXT,
@@ -360,7 +360,7 @@ CREATE TRIGGER set_lead_contact_identities_updated_at
 CREATE TABLE public.inbound_contact_events (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   launch_id UUID NOT NULL REFERENCES public.launches(id) ON DELETE CASCADE,
-  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'uchat', 'manual')),
+  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual')),
   event_type TEXT NOT NULL,
   external_contact_id TEXT,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -414,7 +414,7 @@ CREATE TABLE public.contact_processing_logs (
   launch_id UUID NOT NULL REFERENCES public.launches(id) ON DELETE CASCADE,
   event_id UUID REFERENCES public.inbound_contact_events(id) ON DELETE SET NULL,
   contact_id UUID REFERENCES public.lead_contacts(id) ON DELETE SET NULL,
-  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'uchat', 'manual')),
+  source TEXT NOT NULL CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual')),
   level TEXT NOT NULL CHECK (level IN ('info', 'warning', 'error', 'success')),
   code TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -543,21 +543,21 @@ ALTER TABLE public.lead_contact_identities
 
 ALTER TABLE public.lead_contact_identities
   ADD CONSTRAINT lead_contact_identities_source_check
-  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'sendflow', 'uchat', 'manual'));
+  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual'));
 
 ALTER TABLE public.inbound_contact_events
   DROP CONSTRAINT IF EXISTS inbound_contact_events_source_check;
 
 ALTER TABLE public.inbound_contact_events
   ADD CONSTRAINT inbound_contact_events_source_check
-  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'sendflow', 'uchat', 'manual'));
+  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual'));
 
 ALTER TABLE public.contact_processing_logs
   DROP CONSTRAINT IF EXISTS contact_processing_logs_source_check;
 
 ALTER TABLE public.contact_processing_logs
   ADD CONSTRAINT contact_processing_logs_source_check
-  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'sendflow', 'uchat', 'manual'));
+  CHECK (source IN ('activecampaign', 'manychat', 'typebot', 'tally', 'sendflow', 'uchat', 'manual'));
 
 CREATE TABLE IF NOT EXISTS public.contact_routing_actions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,

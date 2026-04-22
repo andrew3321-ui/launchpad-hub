@@ -6,7 +6,14 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ListOrdered, Loader2 } from "lucide-react";
 
-type EventSource = "activecampaign" | "manychat" | "typebot" | "sendflow" | "uchat" | "manual";
+type EventSource =
+  | "activecampaign"
+  | "manychat"
+  | "typebot"
+  | "tally"
+  | "sendflow"
+  | "uchat"
+  | "manual";
 type EventStatus = "pending" | "processed" | "ignored" | "error";
 type ActionStatus = "pending" | "success" | "failed" | "skipped";
 

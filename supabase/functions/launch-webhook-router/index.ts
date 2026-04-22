@@ -8,7 +8,13 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 type AnySupabaseClient = any;
-type WebhookSource = "activecampaign" | "manychat" | "typebot" | "sendflow" | "uchat";
+type WebhookSource =
+  | "activecampaign"
+  | "manychat"
+  | "typebot"
+  | "tally"
+  | "sendflow"
+  | "uchat";
 
 interface LaunchRow {
   id: string;
@@ -361,6 +367,109 @@ function extractGenericContact(payload: JsonRecord) {
   };
 }
 
+function stringifyScalar(value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const normalized = String(value).trim();
+    return normalized || null;
+  }
+
+  return null;
+}
+
+function resolveTallyFieldValue(field: JsonRecord) {
+  const options = Array.isArray(field.options)
+    ? field.options.filter(isRecord)
+    : [];
+
+  const optionLookup = new Map<string, string>();
+  options.forEach((option) => {
+    const optionId =
+      nonEmptyString(option.id) ||
+      nonEmptyString(option.value);
+    const optionLabel =
+      nonEmptyString(option.text) ||
+      nonEmptyString(option.label) ||
+      optionId;
+
+    if (optionId && optionLabel) {
+      optionLookup.set(optionId, optionLabel);
+    }
+  });
+
+  const resolveSingleValue = (value: unknown) => {
+    const scalar =
+      stringifyScalar(value) ||
+      (isRecord(value)
+        ? nonEmptyString(value.text) ||
+          nonEmptyString(value.label) ||
+          nonEmptyString(value.value) ||
+          nonEmptyString(value.id)
+        : null);
+
+    if (!scalar) return null;
+    return optionLookup.get(scalar) || scalar;
+  };
+
+  if (Array.isArray(field.value)) {
+    const resolvedValues = uniqueStrings(field.value.map((item) => resolveSingleValue(item)));
+    return resolvedValues.length > 0 ? resolvedValues.join(", ") : null;
+  }
+
+  return resolveSingleValue(field.value);
+}
+
+function flattenTallyPayload(payload: JsonRecord) {
+  const data = isRecord(payload.data) ? payload.data : null;
+  const fields = Array.isArray(data?.fields)
+    ? data.fields.filter(isRecord)
+    : [];
+
+  if (fields.length === 0) {
+    return payload;
+  }
+
+  const byKey: JsonRecord = {};
+  const byLabel: JsonRecord = {};
+  const normalizedFields: JsonRecord = {};
+  const answers: JsonRecord[] = [];
+
+  fields.forEach((field) => {
+    const key = nonEmptyString(field.key);
+    const label = nonEmptyString(field.label);
+    const type = nonEmptyString(field.type);
+    const value = resolveTallyFieldValue(field);
+
+    if (!value) return;
+
+    if (key) {
+      byKey[key] = value;
+      normalizedFields[key] = value;
+      normalizedFields[normalizeKey(key)] = value;
+    }
+
+    if (label) {
+      byLabel[label] = value;
+      normalizedFields[label] = value;
+      normalizedFields[normalizeKey(label)] = value;
+    }
+
+    answers.push({
+      ...(key ? { key } : {}),
+      ...(label ? { label } : {}),
+      ...(type ? { type } : {}),
+      value,
+    });
+  });
+
+  return {
+    ...payload,
+    tally_fields: normalizedFields,
+    tally_fields_by_key: byKey,
+    tally_fields_by_label: byLabel,
+    tally_answers: answers,
+  } satisfies JsonRecord;
+}
+
 function normalizeWebhookSource(value: string | null) {
   if (!value) return null;
   const normalized = normalizeKey(value);
@@ -368,6 +477,7 @@ function normalizeWebhookSource(value: string | null) {
   if (normalized === "activecampaign") return "activecampaign";
   if (normalized === "manychat") return "manychat";
   if (normalized === "typebot") return "typebot";
+  if (normalized === "tally") return "tally";
   if (normalized === "sendflow") return "sendflow";
   if (normalized === "uchat") return "uchat";
 
@@ -410,6 +520,32 @@ function normalizeIncomingWebhook(
         phone: findStringDeep(payload, ["phone"]) || contact.phone,
       },
       payload,
+    };
+  }
+
+  if (source === "tally") {
+    const tallyPayload = flattenTallyPayload(payload);
+    const tallyContact = extractGenericContact(tallyPayload);
+
+    return {
+      source,
+      eventType,
+      externalContactId:
+        findStringDeep(tallyPayload, [
+          "response_id",
+          "submission_id",
+          "respondent_id",
+          "external_contact_id",
+          "contact_id",
+          "user_id",
+          "id",
+        ]) || externalContactId,
+      contact: {
+        name: tallyContact.name,
+        email: tallyContact.email,
+        phone: tallyContact.phone,
+      },
+      payload: tallyPayload,
     };
   }
 
@@ -663,7 +799,7 @@ function resolveActiveCampaignFieldId(source: WebhookSource, fieldKey: unknown) 
   if (!normalizedFieldKey) return null;
   if (/^\d+$/.test(normalizedFieldKey)) return normalizedFieldKey;
 
-  if (source === "typebot") {
+  if (source === "typebot" || source === "tally") {
     return resolveImplicitTypebotFieldId(normalizedFieldKey);
   }
 
@@ -695,7 +831,7 @@ function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRe
     resolvedValues.set(fieldId, value);
   };
 
-  if (source === "typebot") {
+  if (source === "typebot" || source === "tally") {
     for (const [payloadKey, fieldId] of Object.entries(DEFAULT_TYPEBOT_UTM_FIELD_IDS)) {
       const value = findStringDeep(payload, [payloadKey]);
       if (value) {
@@ -2405,33 +2541,65 @@ async function dispatchRoutes(
     };
   }
 
-  if (["manychat", "typebot"].includes(normalizedEvent.source)) {
-    const routed = await routeToActiveCampaign(
-      supabase,
-      launch,
-      contact,
-      eventId,
-      normalizedEvent.source,
-      routingPayload,
-    );
+  let activeCampaignRoute: JsonRecord | null = null;
 
-    if (!("skipped" in routed) || !routed.skipped) {
+  if (["manychat", "typebot", "tally", "sendflow"].includes(normalizedEvent.source)) {
+    try {
+      const routed = await routeToActiveCampaign(
+        supabase,
+        launch,
+        contact,
+        eventId,
+        normalizedEvent.source,
+        routingPayload,
+      );
+
+      activeCampaignRoute = routed as unknown as JsonRecord;
+
+      if (!("skipped" in routed) || !routed.skipped) {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          normalizedEvent.source,
+          "success",
+          "ROUTED_TO_ACTIVECAMPAIGN",
+          "Contato enviado ao ActiveCampaign",
+          "O Launch Hub enviou o contato tratado para o ActiveCampaign depois da verificacao de estado.",
+          routed as unknown as JsonRecord,
+        );
+      }
+
+      if (["manychat", "typebot", "tally"].includes(normalizedEvent.source)) {
+        return routed;
+      }
+    } catch (error) {
+      if (normalizedEvent.source !== "sendflow") {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      activeCampaignRoute = {
+        failed: true,
+        error: message,
+      } satisfies JsonRecord;
+
       await insertProcessingLog(
         supabase,
         launch.id,
         contact.id,
         eventId,
         normalizedEvent.source,
-        "success",
-        "ROUTED_TO_ACTIVECAMPAIGN",
-        "Contato enviado ao ActiveCampaign",
-        "O Launch Hub enviou o contato tratado para o ActiveCampaign depois da verificacao de estado.",
-        routed as unknown as JsonRecord,
+        "warning",
+        "ROUTING_TO_ACTIVECAMPAIGN_FAILED",
+        "Falha ao enviar contato ao ActiveCampaign",
+        "O contato do Sendflow foi tratado, mas o envio complementar ao ActiveCampaign falhou. O retorno ao UChat continuou normalmente.",
+        {
+          error: message,
+        },
       );
-
     }
-
-    return routed;
   }
 
   if (["activecampaign", "sendflow"].includes(normalizedEvent.source)) {
@@ -2465,6 +2633,13 @@ async function dispatchRoutes(
         routed as unknown as JsonRecord,
       );
 
+      if (normalizedEvent.source === "sendflow") {
+        return {
+          activeCampaign: activeCampaignRoute,
+          uchatReturn: routed,
+        };
+      }
+
       return routed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2485,6 +2660,7 @@ async function dispatchRoutes(
           workspaceHint:
             findStringDeep(normalizedEvent.payload, ["workspace_id", "workspaceId", "uchat_workspace_id", "bot_id"]) ||
             null,
+          activeCampaignRoute,
         },
       );
       throw error;

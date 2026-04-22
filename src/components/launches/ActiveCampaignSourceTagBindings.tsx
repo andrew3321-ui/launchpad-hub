@@ -31,7 +31,7 @@ export function ActiveCampaignSourceTagBindings({
   if (availableTags.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
-        Carregue as tags do ActiveCampaign para vincular o roteamento do Typebot e do ManyChat.
+        Carregue as tags do ActiveCampaign para vincular o roteamento do Typebot, do ManyChat, do Tally e do Sendflow.
       </div>
     );
   }

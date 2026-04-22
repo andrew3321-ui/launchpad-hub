@@ -22,6 +22,11 @@ export const inboundWebhookSources = [
     hint: "Use um bloco HTTP Request no Typebot para enviar o resultado ao Launch Hub.",
   },
   {
+    key: "tally",
+    label: "Tally",
+    hint: "Configure o webhook de resposta do Tally para enviar a pesquisa concluida ao Launch Hub.",
+  },
+  {
     key: "sendflow",
     label: "Sendflow",
     hint: "Crie um webhook/API no Sendflow apontando para esta URL para disparar o subflow padrao de boas-vindas no UChat.",
