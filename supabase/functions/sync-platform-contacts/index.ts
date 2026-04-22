@@ -988,7 +988,7 @@ Deno.serve(async (request) => {
         ? await syncActiveCampaignContacts(supabase, launch, body, counters, sampleErrors)
         : await syncUchatContacts(supabase, launch, counters, sampleErrors, ensureNumber(body.maxContacts, 0) || undefined);
 
-    const finalMetadata = {
+    const finalMetadata: Record<string, unknown> = {
       ...syncMetadata,
       fetchedCount: counters.fetchedCount,
       sampleErrors,
