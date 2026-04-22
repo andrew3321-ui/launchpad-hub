@@ -18,6 +18,7 @@ const uchatPageSize = 100;
 const defaultActiveCampaignProcessConcurrency = 3;
 const defaultUchatConcurrency = 10;
 const defaultActiveCampaignChunkSize = 150;
+const activeCampaignCheckpointBatchSize = 25;
 const maxActiveCampaignChunkSize = 2000;
 const defaultActiveCampaignRuntimeMs = 12000;
 const maxSampleErrors = 10;
@@ -91,6 +92,21 @@ interface ActiveCampaignSyncCursor {
   hasMore: boolean;
   updatedAfter: string | null;
   updatedBefore: string | null;
+}
+
+type ActiveCampaignCompletionReason =
+  | "in_progress"
+  | "finished"
+  | "chunk_limit"
+  | "runtime_limit";
+
+interface ActiveCampaignSyncProgress {
+  plan: ActiveCampaignSyncPlan;
+  lastContactId: number;
+  pagesProcessed: number;
+  lastSeenUpdatedAt: string | null;
+  completionReason: ActiveCampaignCompletionReason;
+  hasMore: boolean;
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -466,6 +482,27 @@ async function completeSyncRun(
     .eq("id", runId);
 }
 
+async function updateRunningSyncRun(
+  supabase: AnySupabaseClient,
+  runId: string,
+  counters: SyncCounters,
+  metadata: JsonRecord,
+  lastError?: string | null,
+) {
+  await supabase
+    .from("platform_sync_runs")
+    .update({
+      processed_count: counters.processedCount,
+      created_count: counters.createdCount,
+      merged_count: counters.mergedCount,
+      skipped_count: counters.skippedCount,
+      error_count: counters.errorCount,
+      metadata,
+      last_error: lastError || null,
+    })
+    .eq("id", runId);
+}
+
 async function resolveLaunch(
   supabase: AnySupabaseClient,
   body: SyncRequestBody,
@@ -596,6 +633,40 @@ function buildActiveCampaignSyncPlan(
   };
 }
 
+function buildActiveCampaignSyncMetadata(
+  body: SyncRequestBody,
+  progress: ActiveCampaignSyncProgress,
+  counters: SyncCounters,
+  sampleErrors: string[],
+): JsonRecord {
+  const aggregateCounters = sumCounters(progress.plan.aggregateBase, counters);
+  const syncedUntil = progress.hasMore
+    ? progress.plan.previousSyncedUntil
+    : progress.plan.updatedBefore || new Date().toISOString();
+
+  return {
+    mode: progress.plan.mode,
+    requestedSyncMode: parseActiveCampaignSyncMode(body.syncMode),
+    pagesProcessed: progress.pagesProcessed,
+    chunkSize: progress.plan.chunkSize,
+    resumedFromRunId: progress.plan.resumedFromRunId,
+    previousSyncedUntil: progress.plan.previousSyncedUntil,
+    syncedUntil,
+    lastSeenUpdatedAt: progress.lastSeenUpdatedAt,
+    completionReason: progress.completionReason,
+    cursor: {
+      mode: progress.plan.mode,
+      lastContactId: progress.lastContactId,
+      hasMore: progress.hasMore,
+      updatedAfter: progress.plan.updatedAfter,
+      updatedBefore: progress.plan.updatedBefore,
+    },
+    aggregateCounters,
+    fetchedCount: counters.fetchedCount,
+    sampleErrors: sampleErrors.slice(0, maxSampleErrors),
+  };
+}
+
 async function fetchActiveCampaignContactsPage(
   apiUrl: string,
   apiKey: string,
@@ -678,6 +749,9 @@ async function syncActiveCampaignContacts(
   body: SyncRequestBody,
   counters: SyncCounters,
   sampleErrors: string[],
+  runId: string,
+  latestRun: PlatformSyncRunRow | null,
+  onProgress?: (progress: ActiveCampaignSyncProgress) => void,
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError(
@@ -686,25 +760,29 @@ async function syncActiveCampaignContacts(
     );
   }
 
-  const latestRun = await fetchLatestSyncRun(supabase, launch.id, "activecampaign");
   const plan = buildActiveCampaignSyncPlan(body, latestRun);
   const startedAt = Date.now();
-  let lastContactId = plan.lastContactId;
-  let pagesProcessed = 0;
-  let hasMore = false;
-  let lastSeenUpdatedAt: string | null = null;
-  let completionReason: "finished" | "chunk_limit" | "runtime_limit" = "finished";
+  const progress: ActiveCampaignSyncProgress = {
+    plan,
+    lastContactId: plan.lastContactId,
+    pagesProcessed: 0,
+    lastSeenUpdatedAt: null,
+    completionReason: "in_progress",
+    hasMore: true,
+  };
 
-  while (true) {
+  onProgress?.(progress);
+
+  syncLoop: while (true) {
     if (counters.fetchedCount >= plan.chunkSize) {
-      hasMore = true;
-      completionReason = "chunk_limit";
+      progress.hasMore = true;
+      progress.completionReason = "chunk_limit";
       break;
     }
 
     if (Date.now() - startedAt >= defaultActiveCampaignRuntimeMs) {
-      hasMore = true;
-      completionReason = "runtime_limit";
+      progress.hasMore = true;
+      progress.completionReason = "runtime_limit";
       break;
     }
 
@@ -712,93 +790,100 @@ async function syncActiveCampaignContacts(
       launch.ac_api_url,
       launch.ac_api_key,
       plan,
-      lastContactId,
+      progress.lastContactId,
     );
-    if (contacts.length === 0) break;
+    if (contacts.length === 0) {
+      progress.hasMore = false;
+      break;
+    }
 
     const remainingCapacity = Math.max(0, plan.chunkSize - counters.fetchedCount);
     const allowedContacts = contacts.slice(0, remainingCapacity);
 
-    counters.fetchedCount += allowedContacts.length;
-    pagesProcessed += 1;
+    progress.pagesProcessed += 1;
 
-    await mapWithConcurrency(
-      allowedContacts,
-      defaultActiveCampaignProcessConcurrency,
-      async (contact) => {
-        try {
-          const contactId = nonEmptyString(contact.id);
-          if (!contactId) {
+    for (let index = 0; index < allowedContacts.length; index += activeCampaignCheckpointBatchSize) {
+      if (Date.now() - startedAt >= defaultActiveCampaignRuntimeMs) {
+        progress.hasMore = true;
+        progress.completionReason = "runtime_limit";
+        break syncLoop;
+      }
+
+      const checkpointContacts = allowedContacts.slice(index, index + activeCampaignCheckpointBatchSize);
+      if (checkpointContacts.length === 0) continue;
+
+      counters.fetchedCount += checkpointContacts.length;
+
+      await mapWithConcurrency(
+        checkpointContacts,
+        defaultActiveCampaignProcessConcurrency,
+        async (contact) => {
+          try {
+            const contactId = nonEmptyString(contact.id);
+            if (!contactId) {
+              counters.errorCount += 1;
+              if (sampleErrors.length < maxSampleErrors) {
+                sampleErrors.push("Contato do ActiveCampaign sem id retornado pela API.");
+              }
+              return;
+            }
+
+            await processPlatformContact(
+              supabase,
+              counters,
+              sampleErrors,
+              buildActiveCampaignIncomingBody(launch, contact),
+            );
+          } catch (error) {
             counters.errorCount += 1;
             if (sampleErrors.length < maxSampleErrors) {
-              sampleErrors.push("Contato do ActiveCampaign sem id retornado pela API.");
+              sampleErrors.push(toErrorMessage(error));
             }
-            return;
           }
+        },
+      );
 
-          await processPlatformContact(
-            supabase,
-            counters,
-            sampleErrors,
-            buildActiveCampaignIncomingBody(launch, contact),
-          );
-        } catch (error) {
-          counters.errorCount += 1;
-          if (sampleErrors.length < maxSampleErrors) {
-            sampleErrors.push(toErrorMessage(error));
-          }
+      for (const contact of checkpointContacts) {
+        const numericContactId = ensureNumber(contact.id, 0);
+        if (numericContactId > progress.lastContactId) {
+          progress.lastContactId = numericContactId;
         }
-      },
-    );
 
-    for (const contact of allowedContacts) {
-      const numericContactId = ensureNumber(contact.id, 0);
-      if (numericContactId > lastContactId) {
-        lastContactId = numericContactId;
+        const updatedAt = extractActiveCampaignTimestamp(contact);
+        if (updatedAt && (!progress.lastSeenUpdatedAt || updatedAt > progress.lastSeenUpdatedAt)) {
+          progress.lastSeenUpdatedAt = updatedAt;
+        }
       }
 
-      const updatedAt = extractActiveCampaignTimestamp(contact);
-      if (updatedAt && (!lastSeenUpdatedAt || updatedAt > lastSeenUpdatedAt)) {
-        lastSeenUpdatedAt = updatedAt;
-      }
+      progress.hasMore = true;
+      progress.completionReason = "in_progress";
+      onProgress?.(progress);
+      await updateRunningSyncRun(
+        supabase,
+        runId,
+        counters,
+        buildActiveCampaignSyncMetadata(body, progress, counters, sampleErrors),
+      );
     }
 
     if (allowedContacts.length < contacts.length) {
-      hasMore = true;
-      completionReason = "chunk_limit";
+      progress.hasMore = true;
+      progress.completionReason = "chunk_limit";
       break;
     }
 
     if (contacts.length < activeCampaignPageSize) {
-      hasMore = false;
+      progress.hasMore = false;
       break;
     }
   }
 
-  const aggregateCounters = sumCounters(plan.aggregateBase, counters);
-  const syncedUntil = hasMore
-    ? plan.previousSyncedUntil
-    : plan.updatedBefore || new Date().toISOString();
+  if (progress.completionReason === "in_progress") {
+    progress.completionReason = progress.hasMore ? "chunk_limit" : "finished";
+  }
 
-  return {
-    mode: plan.mode,
-    requestedSyncMode: parseActiveCampaignSyncMode(body.syncMode),
-    pagesProcessed,
-    chunkSize: plan.chunkSize,
-    resumedFromRunId: plan.resumedFromRunId,
-    previousSyncedUntil: plan.previousSyncedUntil,
-    syncedUntil,
-    lastSeenUpdatedAt,
-    completionReason,
-    cursor: {
-      mode: plan.mode,
-      lastContactId,
-      hasMore,
-      updatedAfter: plan.updatedAfter,
-      updatedBefore: plan.updatedBefore,
-    },
-    aggregateCounters,
-  };
+  onProgress?.(progress);
+  return buildActiveCampaignSyncMetadata(body, progress, counters, sampleErrors);
 }
 
 async function syncUchatContacts(
@@ -927,6 +1012,8 @@ Deno.serve(async (request) => {
   const isInternalSync = hasInternalSyncAuthorization(request);
   let runId: string | null = null;
   let launch: LaunchRow | null = null;
+  let latestActiveCampaignRun: PlatformSyncRunRow | null = null;
+  let activeCampaignProgress: ActiveCampaignSyncProgress | null = null;
   const counters: SyncCounters = {
     fetchedCount: 0,
     processedCount: 0,
@@ -953,6 +1040,10 @@ Deno.serve(async (request) => {
     }
 
     launch = await resolveLaunch(supabase, body);
+    if (body.source === "activecampaign") {
+      latestActiveCampaignRun = await fetchLatestSyncRun(supabase, launch.id, "activecampaign");
+    }
+
     runId = await createSyncRun(supabase, launch.id, body.source, {
       requestedSource: body.source,
       requestedSyncMode: parseActiveCampaignSyncMode(body.syncMode),
@@ -986,7 +1077,24 @@ Deno.serve(async (request) => {
 
     const syncMetadata =
       body.source === "activecampaign"
-        ? await syncActiveCampaignContacts(supabase, launch, body, counters, sampleErrors)
+        ? await syncActiveCampaignContacts(
+            supabase,
+            launch,
+            body,
+            counters,
+            sampleErrors,
+            runId,
+            latestActiveCampaignRun,
+            (progress) => {
+              activeCampaignProgress = {
+                ...progress,
+                plan: {
+                  ...progress.plan,
+                  aggregateBase: { ...progress.plan.aggregateBase },
+                },
+              };
+            },
+          )
         : await syncUchatContacts(supabase, launch, counters, sampleErrors, ensureNumber(body.maxContacts, 0) || undefined);
 
     const finalMetadata: Record<string, unknown> = {
@@ -1025,15 +1133,32 @@ Deno.serve(async (request) => {
     const message = toErrorMessage(error);
 
     if (runId) {
+      const failureMetadata =
+        body.source === "activecampaign" && activeCampaignProgress
+          ? buildActiveCampaignSyncMetadata(
+              body,
+              {
+                ...activeCampaignProgress,
+                hasMore: true,
+                completionReason:
+                  activeCampaignProgress.completionReason === "finished"
+                    ? "in_progress"
+                    : activeCampaignProgress.completionReason,
+              },
+              counters,
+              [...sampleErrors, message],
+            )
+          : {
+              fetchedCount: counters.fetchedCount,
+              sampleErrors: [...sampleErrors, message].slice(0, maxSampleErrors),
+            };
+
       await completeSyncRun(
         supabase,
         runId,
         "failed",
         counters,
-        {
-          fetchedCount: counters.fetchedCount,
-          sampleErrors: [...sampleErrors, message].slice(0, maxSampleErrors),
-        },
+        failureMetadata,
         message,
       );
     }
