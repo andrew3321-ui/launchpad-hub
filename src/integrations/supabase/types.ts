@@ -683,6 +683,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      configure_activecampaign_sync_scheduler: {
+        Args: { anon_key: string; cron_secret: string; project_url: string }
+        Returns: Json
+      }
       create_launch_metadata: {
         Args: {
           next_custom_states?: Json
@@ -693,20 +697,21 @@ export type Database = {
         }
         Returns: Json
       }
+      dispatch_activecampaign_sync_jobs: { Args: never; Returns: Json }
+      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       get_launch_visible_leads: {
         Args: { limit_count?: number; target_launch_id: string }
         Returns: {
           id: string
-          last_source: string | null
+          last_source: string
           merged_from_count: number
-          primary_email: string | null
-          primary_name: string | null
-          primary_phone: string | null
+          primary_email: string
+          primary_name: string
+          primary_phone: string
           status: string
           updated_at: string
         }[]
       }
-      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
       list_pending_signup_requests: {
@@ -766,6 +771,14 @@ export type Database = {
           target_launch_id: string
         }
         Returns: Json
+      }
+      upsert_launchhub_scheduler_secret: {
+        Args: {
+          secret_description?: string
+          secret_name: string
+          secret_value: string
+        }
+        Returns: string
       }
       user_owns_launch: {
         Args: { _launch_id: string; _user_id: string }
