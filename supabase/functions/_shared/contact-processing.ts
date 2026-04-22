@@ -14,6 +14,11 @@ export const validSources = [
 
 export type ValidSource = (typeof validSources)[number];
 type JsonRecord = Record<string, unknown>;
+type LaunchLookupRow = {
+  id: string;
+  slug: string | null;
+  name: string;
+};
 
 export interface IncomingContact {
   name?: string | null;
@@ -52,6 +57,13 @@ const defaultSettings: DedupeSettingsRow = {
   auto_merge_duplicates: true,
   prefer_most_complete_record: true,
 };
+
+const importOnlyEventTypes = new Set(["contact_import", "subscriber_import"]);
+const launchProcessingContextCache = new Map<string, {
+  launch: LaunchLookupRow;
+  settings: DedupeSettingsRow;
+  countryCode: string;
+}>();
 
 export interface ProcessIncomingContactResult {
   status: "processed" | "rejected";
@@ -212,16 +224,22 @@ function uniqueValues(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-export async function processIncomingContactEvent(
+function buildLaunchCacheKeys(launchId?: string | null, launchSlug?: string | null) {
+  const keys: string[] = [];
+  if (launchId) keys.push(`id:${launchId}`);
+  if (launchSlug) keys.push(`slug:${launchSlug}`);
+  return keys;
+}
+
+async function resolveLaunchProcessingContext(
   supabase: AnySupabaseClient,
   body: IncomingEventBody,
-): Promise<ProcessIncomingContactResult> {
-  if (!body.source || !validSources.includes(body.source)) {
-    throw new ProcessContactError("Invalid source", 400);
-  }
+) {
+  const cacheKeys = buildLaunchCacheKeys(body.launchId, body.launchSlug);
 
-  if (!body.launchId && !body.launchSlug) {
-    throw new ProcessContactError("launchId or launchSlug is required", 400);
+  for (const key of cacheKeys) {
+    const cached = launchProcessingContextCache.get(key);
+    if (cached) return cached;
   }
 
   const launchLookup = body.launchId
@@ -241,7 +259,34 @@ export async function processIncomingContactEvent(
     .maybeSingle();
 
   const settings = (settingsRow as DedupeSettingsRow | null) || defaultSettings;
-  const countryCode = normalizeCountryCode(settings.default_country_code);
+  const context = {
+    launch: launch as LaunchLookupRow,
+    settings,
+    countryCode: normalizeCountryCode(settings.default_country_code),
+  };
+
+  for (const key of buildLaunchCacheKeys(context.launch.id, context.launch.slug)) {
+    launchProcessingContextCache.set(key, context);
+  }
+
+  return context;
+}
+
+export async function processIncomingContactEvent(
+  supabase: AnySupabaseClient,
+  body: IncomingEventBody,
+): Promise<ProcessIncomingContactResult> {
+  if (!body.source || !validSources.includes(body.source)) {
+    throw new ProcessContactError("Invalid source", 400);
+  }
+
+  if (!body.launchId && !body.launchSlug) {
+    throw new ProcessContactError("launchId or launchSlug is required", 400);
+  }
+
+  const { launch, settings, countryCode } = await resolveLaunchProcessingContext(supabase, body);
+  const eventType = body.eventType || "contact_upsert";
+  const shouldPersistInboundEvent = !importOnlyEventTypes.has(eventType);
 
   const normalizedEmail = normalizeEmail(body.contact?.email);
   const normalizedName = normalizeName(body.contact?.name);
@@ -250,23 +295,29 @@ export async function processIncomingContactEvent(
   const validPhoneCandidates = phoneCandidates.filter(isLikelyValidPhone);
   const canonicalPhone = rawPhone ? pickCanonicalPhone(validPhoneCandidates, countryCode) : null;
 
-  const { data: event, error: eventInsertError } = await supabase
-    .from("inbound_contact_events")
-    .insert({
-      launch_id: launch.id,
-      source: body.source,
-      event_type: body.eventType || "contact_upsert",
-      external_contact_id: body.externalContactId || null,
-      payload: {
-        contact: body.contact || {},
-        payload: body.payload || {},
-      },
-    })
-    .select("id")
-    .single();
+  let eventId: string | null = null;
 
-  if (eventInsertError || !event) {
-    throw new ProcessContactError("Failed to create inbound event", 500, eventInsertError?.message);
+  if (shouldPersistInboundEvent) {
+    const { data: event, error: eventInsertError } = await supabase
+      .from("inbound_contact_events")
+      .insert({
+        launch_id: launch.id,
+        source: body.source,
+        event_type: eventType,
+        external_contact_id: body.externalContactId || null,
+        payload: {
+          contact: body.contact || {},
+          payload: body.payload || {},
+        },
+      })
+      .select("id")
+      .single();
+
+    if (eventInsertError || !event) {
+      throw new ProcessContactError("Failed to create inbound event", 500, eventInsertError?.message);
+    }
+
+    eventId = event.id;
   }
 
   const logs: Array<Record<string, unknown>> = [];
@@ -274,7 +325,7 @@ export async function processIncomingContactEvent(
   if (rawPhone && validPhoneCandidates.length === 0) {
     logs.push({
       launch_id: launch.id,
-      event_id: event.id,
+      event_id: eventId,
       source: body.source,
       level: "warning",
       code: "INVALID_PHONE",
@@ -290,7 +341,7 @@ export async function processIncomingContactEvent(
   if (!normalizedEmail && !canonicalPhone) {
     logs.push({
       launch_id: launch.id,
-      event_id: event.id,
+      event_id: eventId,
       source: body.source,
       level: "error",
       code: "UNIDENTIFIABLE_CONTACT",
@@ -302,23 +353,25 @@ export async function processIncomingContactEvent(
       },
     });
 
-    await supabase
-      .from("inbound_contact_events")
-      .update({
-        processing_status: "error",
-        processed_at: new Date().toISOString(),
-        processing_summary: {
-          action: "rejected",
-          reason: "missing_valid_email_or_phone",
-        },
-      })
-      .eq("id", event.id);
+    if (eventId) {
+      await supabase
+        .from("inbound_contact_events")
+        .update({
+          processing_status: "error",
+          processed_at: new Date().toISOString(),
+          processing_summary: {
+            action: "rejected",
+            reason: "missing_valid_email_or_phone",
+          },
+        })
+        .eq("id", eventId);
+    }
 
     if (logs.length > 0) {
       await supabase.from("contact_processing_logs").insert(logs);
     }
 
-    return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: event.id, logsCreated: logs.length };
+    return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: eventId ?? undefined, logsCreated: logs.length };
   }
 
   const candidateIds = new Set<string>();
@@ -400,7 +453,7 @@ export async function processIncomingContactEvent(
         phone: rawPhone,
       },
       latestSource: body.source,
-      lastEventType: body.eventType || "contact_upsert",
+      lastEventType: eventType,
       sources: uniqueValues([
         ...(Array.isArray(existingData.sources) ? (existingData.sources as string[]) : []),
         body.source,
@@ -442,7 +495,7 @@ export async function processIncomingContactEvent(
 
     logs.push({
       launch_id: launch.id,
-      event_id: event.id,
+      event_id: eventId,
       contact_id: processedContactId,
       source: body.source,
       level: "success",
@@ -476,7 +529,7 @@ export async function processIncomingContactEvent(
             phone: rawPhone,
           },
           latestSource: body.source,
-          lastEventType: body.eventType || "contact_upsert",
+          lastEventType: eventType,
           sources: [body.source],
           platforms: {
             [body.source]: body.payload || {},
@@ -492,19 +545,21 @@ export async function processIncomingContactEvent(
 
     processedContactId = createdContact.id;
 
-    logs.push({
-      launch_id: launch.id,
-      event_id: event.id,
-      contact_id: processedContactId,
-      source: body.source,
-      level: "info",
-      code: "CONTACT_IMPORTED",
-      title: "Contato importado",
-      message: `O contato recebido de ${body.source} foi salvo como um novo cadastro canonico.`,
-      details: {
-        externalContactId: body.externalContactId || null,
-      },
-    });
+    if (shouldPersistInboundEvent) {
+      logs.push({
+        launch_id: launch.id,
+        event_id: eventId,
+        contact_id: processedContactId,
+        source: body.source,
+        level: "info",
+        code: "CONTACT_IMPORTED",
+        title: "Contato importado",
+        message: `O contato recebido de ${body.source} foi salvo como um novo cadastro canonico.`,
+        details: {
+          externalContactId: body.externalContactId || null,
+        },
+      });
+    }
   }
 
   if (processedContactId) {
@@ -553,19 +608,21 @@ export async function processIncomingContactEvent(
     }
   }
 
-  await supabase
-    .from("inbound_contact_events")
-    .update({
-      processing_status: "processed",
-      processed_contact_id: processedContactId,
-      processed_at: new Date().toISOString(),
-      processing_summary: {
-        action,
-        canonicalPhone,
-        validPhoneCandidates,
-      },
-    })
-    .eq("id", event.id);
+  if (eventId) {
+    await supabase
+      .from("inbound_contact_events")
+      .update({
+        processing_status: "processed",
+        processed_contact_id: processedContactId,
+        processed_at: new Date().toISOString(),
+        processing_summary: {
+          action,
+          canonicalPhone,
+          validPhoneCandidates,
+        },
+      })
+      .eq("id", eventId);
+  }
 
   if (logs.length > 0) {
     await supabase.from("contact_processing_logs").insert(logs);
@@ -575,7 +632,7 @@ export async function processIncomingContactEvent(
     status: "processed",
     action,
     contactId: processedContactId,
-    eventId: event.id,
+    eventId: eventId ?? undefined,
     logsCreated: logs.length,
   };
 }

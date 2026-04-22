@@ -15,11 +15,11 @@ const corsHeaders = {
 
 const activeCampaignPageSize = 100;
 const uchatPageSize = 100;
-const defaultActiveCampaignProcessConcurrency = 10;
+const defaultActiveCampaignProcessConcurrency = 3;
 const defaultUchatConcurrency = 10;
-const defaultActiveCampaignChunkSize = 10000;
-const maxActiveCampaignChunkSize = 25000;
-const defaultActiveCampaignRuntimeMs = 45000;
+const defaultActiveCampaignChunkSize = 150;
+const maxActiveCampaignChunkSize = 2000;
+const defaultActiveCampaignRuntimeMs = 12000;
 const maxSampleErrors = 10;
 
 type SyncSource = "activecampaign" | "uchat";
