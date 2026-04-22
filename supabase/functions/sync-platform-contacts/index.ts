@@ -1213,15 +1213,16 @@ Deno.serve(async (request) => {
         activeCampaignPageSize,
         maxActiveCampaignChunkSize,
       );
+      const chainLaunchId = launch.id;
       const backgroundPromise = dispatchChainedActiveCampaignSync(
         supabaseUrl,
-        launch.id,
+        chainLaunchId,
         continuationMaxContacts,
       ).catch(async (dispatchError) => {
         console.error("Failed to dispatch chained ActiveCampaign sync", dispatchError);
         await insertProcessingLog(
           supabase,
-          launch.id,
+          chainLaunchId,
           body.source,
           "warning",
           "SYNC_CHAIN_FAILED",
