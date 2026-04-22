@@ -21,6 +21,7 @@ const defaultActiveCampaignChunkSize = 150;
 const activeCampaignCheckpointBatchSize = 25;
 const maxActiveCampaignChunkSize = 2000;
 const defaultActiveCampaignRuntimeMs = 12000;
+const activeCampaignChainGraceMs = 120000;
 const maxSampleErrors = 10;
 
 type SyncSource = "activecampaign" | "uchat";
@@ -109,6 +110,10 @@ interface ActiveCampaignSyncProgress {
   hasMore: boolean;
 }
 
+interface EdgeRuntimeLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -121,6 +126,45 @@ function jsonResponse(body: unknown, status = 200) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getEdgeRuntime() {
+  return (globalThis as typeof globalThis & { EdgeRuntime?: EdgeRuntimeLike }).EdgeRuntime ?? null;
+}
+
+function buildFunctionUrl(supabaseUrl: string, functionName: string) {
+  const normalizedBase = `${supabaseUrl.replace(/\/+$/, "")}/`;
+  return new URL(`functions/v1/${functionName}`, normalizedBase).toString();
+}
+
+async function dispatchChainedActiveCampaignSync(
+  supabaseUrl: string,
+  launchId: string,
+  maxContacts: number,
+) {
+  const cronSecret = nonEmptyString(Deno.env.get("LAUNCHHUB_SYNC_CRON_SECRET"));
+  if (!cronSecret) {
+    throw new Error("LAUNCHHUB_SYNC_CRON_SECRET is not configured.");
+  }
+
+  const response = await fetch(buildFunctionUrl(supabaseUrl, "sync-platform-contacts"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-launchhub-cron-secret": cronSecret,
+    },
+    body: JSON.stringify({
+      launchId,
+      source: "activecampaign",
+      syncMode: "resume",
+      maxContacts,
+      trigger: "background_chain",
+    } satisfies SyncRequestBody),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  }
 }
 
 async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
@@ -633,6 +677,20 @@ function buildActiveCampaignSyncPlan(
   };
 }
 
+function hasRecentActiveCampaignSyncActivity(run: PlatformSyncRunRow | null) {
+  if (!run) return false;
+
+  const referenceAt =
+    (run.status === "running" ? nonEmptyString(run.started_at) : nonEmptyString(run.finished_at)) ||
+    nonEmptyString(run.started_at);
+  if (!referenceAt) return false;
+
+  const referenceAtMs = Date.parse(referenceAt);
+  if (!Number.isFinite(referenceAtMs)) return false;
+
+  return Date.now() - referenceAtMs < activeCampaignChainGraceMs;
+}
+
 function buildActiveCampaignSyncMetadata(
   body: SyncRequestBody,
   progress: ActiveCampaignSyncProgress,
@@ -1042,6 +1100,28 @@ Deno.serve(async (request) => {
     launch = await resolveLaunch(supabase, body);
     if (body.source === "activecampaign") {
       latestActiveCampaignRun = await fetchLatestSyncRun(supabase, launch.id, "activecampaign");
+
+      if (
+        nonEmptyString(body.trigger) === "scheduled_cron" &&
+        latestActiveCampaignRun &&
+        hasRecentActiveCampaignSyncActivity(latestActiveCampaignRun)
+      ) {
+        const latestCursor = parseActiveCampaignCursor(latestActiveCampaignRun.metadata);
+        if (
+          latestActiveCampaignRun.status === "running" ||
+          latestCursor.hasMore
+        ) {
+          return jsonResponse({
+            skipped: true,
+            reason:
+              latestActiveCampaignRun.status === "running"
+                ? "activecampaign_sync_already_running"
+                : "activecampaign_background_chain_in_progress",
+            launchId: launch.id,
+            latestRunId: latestActiveCampaignRun.id,
+          }, 202);
+        }
+      }
     }
 
     runId = await createSyncRun(supabase, launch.id, body.source, {
@@ -1121,6 +1201,46 @@ Deno.serve(async (request) => {
         ...finalMetadata,
       },
     );
+
+    if (
+      body.source === "activecampaign" &&
+      isRecord(finalMetadata.cursor) &&
+      finalMetadata.cursor.hasMore === true
+    ) {
+      const continuationMaxContacts = clampNumber(
+        ensureNumber(finalMetadata.chunkSize ?? body.maxContacts, defaultActiveCampaignChunkSize) ||
+          defaultActiveCampaignChunkSize,
+        activeCampaignPageSize,
+        maxActiveCampaignChunkSize,
+      );
+      const backgroundPromise = dispatchChainedActiveCampaignSync(
+        supabaseUrl,
+        launch.id,
+        continuationMaxContacts,
+      ).catch(async (dispatchError) => {
+        console.error("Failed to dispatch chained ActiveCampaign sync", dispatchError);
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          body.source,
+          "warning",
+          "SYNC_CHAIN_FAILED",
+          "Continuacao automatica falhou",
+          "O lote atual terminou, mas o backend nao conseguiu iniciar automaticamente o proximo lote.",
+          {
+            runId,
+            error: toErrorMessage(dispatchError),
+            maxContacts: continuationMaxContacts,
+          },
+        );
+      });
+      const runtime = getEdgeRuntime();
+      if (runtime) {
+        runtime.waitUntil(backgroundPromise);
+      } else {
+        void backgroundPromise;
+      }
+    }
 
     return jsonResponse({
       runId,

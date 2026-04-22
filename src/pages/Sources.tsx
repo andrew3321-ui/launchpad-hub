@@ -191,6 +191,11 @@ function parseActiveCampaignSyncCursor(metadata: Json | null | undefined): Activ
   };
 }
 
+function hasActiveCampaignPendingContinuation(run: ActiveCampaignSyncRunSummary | null) {
+  if (!run || run.status === "failed") return false;
+  return parseActiveCampaignSyncCursor(run.metadata).hasMore;
+}
+
 function parseAggregateSyncCounters(
   run: ActiveCampaignSyncRunSummary | null,
 ): SyncCountersSummary {
@@ -216,8 +221,23 @@ function isActiveCampaignSyncRunStale(run: ActiveCampaignSyncRunSummary | null) 
   return Date.now() - startedAtMs >= ACTIVE_CAMPAIGN_STALE_SYNC_MS;
 }
 
+function isActiveCampaignSyncPendingContinuationStale(
+  run: ActiveCampaignSyncRunSummary | null,
+) {
+  if (!run || run.status === "running" || run.status === "failed") return false;
+  if (!hasActiveCampaignPendingContinuation(run)) return false;
+
+  const referenceAtMs = Date.parse(run.finished_at ?? run.started_at);
+  if (!Number.isFinite(referenceAtMs)) return false;
+
+  return Date.now() - referenceAtMs >= ACTIVE_CAMPAIGN_STALE_SYNC_MS;
+}
+
 function buildInterruptedSyncMessage(run: ActiveCampaignSyncRunSummary | null, fallback?: string) {
   if (run?.last_error?.trim()) return run.last_error;
+  if (hasActiveCampaignPendingContinuation(run)) {
+    return fallback || "A continuacao automatica da sincronizacao foi interrompida antes do proximo lote.";
+  }
   return fallback || "A sincronizacao anterior foi interrompida antes da finalizacao.";
 }
 
@@ -644,6 +664,13 @@ export default function Sources() {
           buildInterruptedSyncMessage(typedRun),
           { silent: true },
         );
+      } else if (typedRun && isActiveCampaignSyncPendingContinuationStale(typedRun)) {
+        typedRun = {
+          ...typedRun,
+          status: "failed",
+          last_error: buildInterruptedSyncMessage(typedRun),
+          error_count: Math.max(typedRun.error_count, 1),
+        };
       }
 
       if (latestLaunchIdRef.current === launchId) {
@@ -667,18 +694,30 @@ export default function Sources() {
     () => parseActiveCampaignSyncCursor(visibleActiveCampaignSyncRun?.metadata ?? null),
     [visibleActiveCampaignSyncRun],
   );
+  const activeCampaignSyncHasPendingContinuation = useMemo(
+    () => hasActiveCampaignPendingContinuation(visibleActiveCampaignSyncRun),
+    [visibleActiveCampaignSyncRun],
+  );
   const activeCampaignSyncIsStale = useMemo(
-    () => isActiveCampaignSyncRunStale(visibleActiveCampaignSyncRun),
+    () =>
+      isActiveCampaignSyncRunStale(visibleActiveCampaignSyncRun) ||
+      isActiveCampaignSyncPendingContinuationStale(visibleActiveCampaignSyncRun),
     [visibleActiveCampaignSyncRun],
   );
   const activeCampaignSyncIsRunning = useMemo(
     () =>
       syncingActiveCampaign ||
       Boolean(
-        visibleActiveCampaignSyncRun?.status === "running" &&
+        (visibleActiveCampaignSyncRun?.status === "running" ||
+          activeCampaignSyncHasPendingContinuation) &&
           !activeCampaignSyncIsStale,
       ),
-    [activeCampaignSyncIsStale, syncingActiveCampaign, visibleActiveCampaignSyncRun?.status],
+    [
+      activeCampaignSyncHasPendingContinuation,
+      activeCampaignSyncIsStale,
+      syncingActiveCampaign,
+      visibleActiveCampaignSyncRun?.status,
+    ],
   );
   const activeCampaignSyncBadgeLabel = useMemo(() => {
     if (activeCampaignSyncIsRunning) return "Sincronizando";
@@ -697,6 +736,27 @@ export default function Sources() {
 
     return null;
   }, [activeCampaignSyncIsStale, visibleActiveCampaignSyncRun]);
+  const activeCampaignSyncStatusMessage = useMemo(() => {
+    if (activeCampaignSyncMessage) return activeCampaignSyncMessage;
+
+    if (!visibleActiveCampaignSyncRun) {
+      return "A base sera sincronizada automaticamente depois que as credenciais forem salvas.";
+    }
+
+    if (activeCampaignSyncIsRunning) {
+      return activeCampaignSyncCursor.hasMore
+        ? `Sincronizando contatos no backend... ${activeCampaignSyncCounters.processedCount} contato(s) tratados ate agora. A fila continua mesmo se voce trocar de tela ou fechar a aba.`
+        : "Sincronizacao em andamento no backend.";
+    }
+
+    return "A ultima sincronizacao da conta ja foi registrada no backend.";
+  }, [
+    activeCampaignSyncCounters.processedCount,
+    activeCampaignSyncCursor.hasMore,
+    activeCampaignSyncIsRunning,
+    activeCampaignSyncMessage,
+    visibleActiveCampaignSyncRun,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -933,49 +993,45 @@ export default function Sources() {
       setActiveCampaignSyncMessage("Sincronizando contatos no backend. Nenhum contato sera exibido na tela.");
 
       try {
-        let nextMode: "full" | "resume" = "full";
-        let latestRun: ActiveCampaignSyncRunSummary | null = null;
+        const { data, error } = await supabase.functions.invoke("sync-platform-contacts", {
+          body: {
+            launchId,
+            source: "activecampaign",
+            syncMode: "full",
+            trigger: "save_activecampaign",
+          },
+        });
 
-        for (let attempt = 0; attempt < 500; attempt += 1) {
-          const { data, error } = await supabase.functions.invoke("sync-platform-contacts", {
-            body: {
-              launchId,
-              source: "activecampaign",
-              syncMode: nextMode,
-              trigger: "save_activecampaign",
-            },
-          });
+        const typedData = (data as SyncPlatformContactsResponse | null) ?? null;
 
-          const typedData = (data as SyncPlatformContactsResponse | null) ?? null;
-
-          if (error || !typedData) {
-            throw new Error(error?.message || "O backend nao conseguiu iniciar a sincronizacao.");
-          }
-
-          latestRun =
-            (await loadLatestActiveCampaignSyncRun(launchId, { silent: true })) ?? latestRun;
-
-          const latestCounters = parseAggregateSyncCounters(latestRun);
-          const latestCursor = parseActiveCampaignSyncCursor(latestRun?.metadata ?? typedData.metadata);
-
-          setActiveCampaignSyncMessage(
-            latestCursor.hasMore
-              ? `Sincronizando contatos no backend... ${latestCounters.processedCount} contato(s) tratados ate agora.`
-              : `Base sincronizada: ${latestCounters.processedCount} contato(s) tratados no backend.`,
-          );
-
-          if (!latestCursor.hasMore) {
-            toast({
-              title: "Base do ActiveCampaign sincronizada",
-              description: `${latestCounters.processedCount} contato(s) tratados no backend para este lancamento.`,
-            });
-            return;
-          }
-
-          nextMode = "resume";
+        if (error || !typedData) {
+          throw new Error(error?.message || "O backend nao conseguiu iniciar a sincronizacao.");
         }
 
-        throw new Error("A sincronizacao excedeu o limite interno de lotes e precisa ser retomada.");
+        const latestRun =
+          (await loadLatestActiveCampaignSyncRun(launchId, { silent: true })) ?? null;
+        const latestCounters = parseAggregateSyncCounters(latestRun);
+        const latestCursor = parseActiveCampaignSyncCursor(latestRun?.metadata ?? typedData.metadata);
+
+        setActiveCampaignSyncMessage(
+          latestCursor.hasMore
+            ? `Sincronizando contatos no backend... ${latestCounters.processedCount} contato(s) tratados ate agora. A fila continuara automaticamente mesmo se voce fechar a aba.`
+            : `Base sincronizada: ${latestCounters.processedCount} contato(s) tratados no backend.`,
+        );
+
+        if (latestCursor.hasMore) {
+          toast({
+            title: "Sincronizacao iniciada",
+            description:
+              "Os proximos lotes continuarao automaticamente no backend, mesmo se voce trocar de tela ou fechar a aba.",
+          });
+          return;
+        }
+
+        toast({
+          title: "Base do ActiveCampaign sincronizada",
+          description: `${latestCounters.processedCount} contato(s) tratados no backend para este lancamento.`,
+        });
       } catch (error) {
         const description = await extractFunctionInvokeErrorMessage(
           error,
@@ -1254,10 +1310,7 @@ export default function Sources() {
                     )}
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <p>
-                        {activeCampaignSyncMessage ||
-                          (visibleActiveCampaignSyncRun
-                            ? "A ultima sincronizacao da conta ja foi registrada no backend."
-                            : "A base sera sincronizada automaticamente depois que as credenciais forem salvas.")}
+                        {activeCampaignSyncStatusMessage}
                       </p>
 
                       {visibleActiveCampaignSyncRun && (
