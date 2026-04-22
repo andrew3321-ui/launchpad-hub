@@ -122,6 +122,7 @@ const MANAGED_SOURCE_ALIASES = [
   },
 ] as const;
 const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
+const ACTIVE_CAMPAIGN_STALE_SYNC_MS = 90_000;
 
 function buildCatalogScopeKey(launchId: string, apiUrl: string, apiKey: string) {
   return [launchId, apiUrl.trim(), apiKey.trim()].join("::");
@@ -204,6 +205,20 @@ function parseAggregateSyncCounters(
     skippedCount: ensureSyncNumber(aggregate?.skippedCount ?? run?.skipped_count),
     errorCount: ensureSyncNumber(aggregate?.errorCount ?? run?.error_count),
   };
+}
+
+function isActiveCampaignSyncRunStale(run: ActiveCampaignSyncRunSummary | null) {
+  if (!run || run.status !== "running" || run.finished_at) return false;
+
+  const startedAtMs = Date.parse(run.started_at);
+  if (!Number.isFinite(startedAtMs)) return false;
+
+  return Date.now() - startedAtMs >= ACTIVE_CAMPAIGN_STALE_SYNC_MS;
+}
+
+function buildInterruptedSyncMessage(run: ActiveCampaignSyncRunSummary | null, fallback?: string) {
+  if (run?.last_error?.trim()) return run.last_error;
+  return fallback || "A sincronizacao anterior foi interrompida antes da finalizacao.";
 }
 
 function resolveAliasTagIds(
@@ -488,6 +503,114 @@ export default function Sources() {
     [acApiKey, acApiUrl, toast],
   );
 
+  const markActiveCampaignSyncRunAsFailed = useCallback(
+    async (
+      launchId: string,
+      run: ActiveCampaignSyncRunSummary,
+      reason: string,
+      options?: { silent?: boolean },
+    ) => {
+      const nextFinishedAt = new Date().toISOString();
+      const metadataRecord = asRecord(run.metadata);
+      const nextMetadata = {
+        ...(metadataRecord ?? {}),
+        interruptedAt: nextFinishedAt,
+        interruptedReason: reason,
+      } satisfies Record<string, unknown>;
+
+      const { data, error } = await supabase
+        .from("platform_sync_runs")
+        .update({
+          status: "failed",
+          finished_at: nextFinishedAt,
+          last_error: reason,
+          error_count: Math.max(run.error_count, 1),
+          metadata: nextMetadata as Json,
+        })
+        .eq("id", run.id)
+        .eq("status", "running")
+        .select(
+          "id, status, processed_count, created_count, merged_count, skipped_count, error_count, started_at, finished_at, last_error, metadata",
+        )
+        .maybeSingle();
+
+      if (error) {
+        if (!options?.silent) {
+          toast({
+            title: "Erro ao finalizar a sincronizacao interrompida",
+            description: error.message,
+            variant: "destructive",
+          });
+        }
+
+        const fallbackRun: ActiveCampaignSyncRunSummary = {
+          ...run,
+          status: "failed",
+          finished_at: nextFinishedAt,
+          last_error: reason,
+          error_count: Math.max(run.error_count, 1),
+          metadata: nextMetadata as Json,
+        };
+
+        if (latestLaunchIdRef.current === launchId) {
+          setActiveCampaignSyncRun(fallbackRun);
+        }
+
+        return fallbackRun;
+      }
+
+      const typedRun = (data as ActiveCampaignSyncRunSummary | null) ?? {
+        ...run,
+        status: "failed",
+        finished_at: nextFinishedAt,
+        last_error: reason,
+        error_count: Math.max(run.error_count, 1),
+        metadata: nextMetadata as Json,
+      };
+
+      if (latestLaunchIdRef.current === launchId) {
+        setActiveCampaignSyncRun(typedRun);
+      }
+
+      return typedRun;
+    },
+    [toast],
+  );
+
+  const markLatestActiveCampaignSyncRunAsFailed = useCallback(
+    async (launchId: string, reason: string, options?: { silent?: boolean }) => {
+      const { data, error } = await supabase
+        .from("platform_sync_runs")
+        .select(
+          "id, status, processed_count, created_count, merged_count, skipped_count, error_count, started_at, finished_at, last_error, metadata",
+        )
+        .eq("launch_id", launchId)
+        .eq("source", "activecampaign")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        if (!options?.silent) {
+          toast({
+            title: "Erro ao verificar a ultima sincronizacao",
+            description: error.message,
+            variant: "destructive",
+          });
+        }
+        return null;
+      }
+
+      const typedRun = (data as ActiveCampaignSyncRunSummary | null) ?? null;
+      if (!typedRun || typedRun.status !== "running") {
+        return typedRun;
+      }
+
+      return await markActiveCampaignSyncRunAsFailed(launchId, typedRun, reason, options);
+    },
+    [markActiveCampaignSyncRunAsFailed, toast],
+  );
+
   const loadLatestActiveCampaignSyncRun = useCallback(
     async (launchId: string, options?: { silent?: boolean }) => {
       const { data, error } = await supabase
@@ -512,15 +635,68 @@ export default function Sources() {
         return null;
       }
 
-      const typedRun = (data as ActiveCampaignSyncRunSummary | null) ?? null;
+      let typedRun = (data as ActiveCampaignSyncRunSummary | null) ?? null;
+
+      if (typedRun && isActiveCampaignSyncRunStale(typedRun)) {
+        typedRun = await markActiveCampaignSyncRunAsFailed(
+          launchId,
+          typedRun,
+          buildInterruptedSyncMessage(typedRun),
+          { silent: true },
+        );
+      }
+
       if (latestLaunchIdRef.current === launchId) {
         setActiveCampaignSyncRun(typedRun);
       }
 
       return typedRun;
     },
-    [toast],
+    [markActiveCampaignSyncRunAsFailed, toast],
   );
+
+  const activeConnected = useMemo(
+    () => Boolean(visibleAcApiUrl.trim() && visibleAcApiKey.trim()),
+    [visibleAcApiKey, visibleAcApiUrl],
+  );
+  const activeCampaignSyncCounters = useMemo(
+    () => parseAggregateSyncCounters(visibleActiveCampaignSyncRun),
+    [visibleActiveCampaignSyncRun],
+  );
+  const activeCampaignSyncCursor = useMemo(
+    () => parseActiveCampaignSyncCursor(visibleActiveCampaignSyncRun?.metadata ?? null),
+    [visibleActiveCampaignSyncRun],
+  );
+  const activeCampaignSyncIsStale = useMemo(
+    () => isActiveCampaignSyncRunStale(visibleActiveCampaignSyncRun),
+    [visibleActiveCampaignSyncRun],
+  );
+  const activeCampaignSyncIsRunning = useMemo(
+    () =>
+      syncingActiveCampaign ||
+      Boolean(
+        visibleActiveCampaignSyncRun?.status === "running" &&
+          !activeCampaignSyncIsStale,
+      ),
+    [activeCampaignSyncIsStale, syncingActiveCampaign, visibleActiveCampaignSyncRun?.status],
+  );
+  const activeCampaignSyncBadgeLabel = useMemo(() => {
+    if (activeCampaignSyncIsRunning) return "Sincronizando";
+    if (visibleActiveCampaignSyncRun?.status === "failed" || activeCampaignSyncIsStale) return "Falhou";
+    if (visibleActiveCampaignSyncRun) return "Sincronizado";
+    return "Aguardando";
+  }, [activeCampaignSyncIsRunning, activeCampaignSyncIsStale, visibleActiveCampaignSyncRun]);
+  const activeCampaignSyncLastError = useMemo(() => {
+    if (visibleActiveCampaignSyncRun?.last_error?.trim()) {
+      return visibleActiveCampaignSyncRun.last_error;
+    }
+
+    if (activeCampaignSyncIsStale) {
+      return buildInterruptedSyncMessage(visibleActiveCampaignSyncRun);
+    }
+
+    return null;
+  }, [activeCampaignSyncIsStale, visibleActiveCampaignSyncRun]);
 
   useEffect(() => {
     let cancelled = false;
@@ -699,7 +875,7 @@ export default function Sources() {
   useEffect(() => {
     if (!activeLaunchId || !isHydratedActiveLaunch) return;
 
-    const isRunning = visibleActiveCampaignSyncRun?.status === "running" || syncingActiveCampaign;
+    const isRunning = activeCampaignSyncIsRunning;
     if (!isRunning) return;
 
     const intervalId = window.setInterval(() => {
@@ -709,24 +885,10 @@ export default function Sources() {
     return () => window.clearInterval(intervalId);
   }, [
     activeLaunchId,
+    activeCampaignSyncIsRunning,
     isHydratedActiveLaunch,
     loadLatestActiveCampaignSyncRun,
-    syncingActiveCampaign,
-    visibleActiveCampaignSyncRun?.status,
   ]);
-
-  const activeConnected = useMemo(
-    () => Boolean(visibleAcApiUrl.trim() && visibleAcApiKey.trim()),
-    [visibleAcApiKey, visibleAcApiUrl],
-  );
-  const activeCampaignSyncCounters = useMemo(
-    () => parseAggregateSyncCounters(visibleActiveCampaignSyncRun),
-    [visibleActiveCampaignSyncRun],
-  );
-  const activeCampaignSyncCursor = useMemo(
-    () => parseActiveCampaignSyncCursor(visibleActiveCampaignSyncRun?.metadata ?? null),
-    [visibleActiveCampaignSyncRun],
-  );
   const uchatConnected = useMemo(
     () =>
       visibleUchatWorkspaces.some(
@@ -820,6 +982,8 @@ export default function Sources() {
           "Nao foi possivel concluir a sincronizacao.",
         );
 
+        await markLatestActiveCampaignSyncRunAsFailed(launchId, description, { silent: true });
+
         setActiveCampaignSyncMessage(null);
         toast({
           title: "Erro ao sincronizar a base do ActiveCampaign",
@@ -831,7 +995,13 @@ export default function Sources() {
         await loadLatestActiveCampaignSyncRun(launchId, { silent: true });
       }
     },
-    [acApiKey, acApiUrl, loadLatestActiveCampaignSyncRun, toast],
+    [
+      acApiKey,
+      acApiUrl,
+      loadLatestActiveCampaignSyncRun,
+      markLatestActiveCampaignSyncRunAsFailed,
+      toast,
+    ],
   );
 
   const saveActiveCampaign = async () => {
@@ -1064,18 +1234,22 @@ export default function Sources() {
                       em lotes automaticos. Os contatos nao aparecem no front.
                     </p>
                   </div>
-                  <Badge variant={syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running" ? "default" : "secondary"}>
-                    {syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running"
-                      ? "Sincronizando"
-                      : visibleActiveCampaignSyncRun
-                        ? "Sincronizado"
-                        : "Aguardando"}
+                  <Badge
+                    variant={
+                      activeCampaignSyncIsRunning
+                        ? "default"
+                        : activeCampaignSyncBadgeLabel === "Falhou"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                  >
+                    {activeCampaignSyncBadgeLabel}
                   </Badge>
                 </div>
 
                 <div className="rounded-xl border border-border/60 bg-background/50 p-4">
                   <div className="flex items-start gap-3">
-                    {(syncingActiveCampaign || visibleActiveCampaignSyncRun?.status === "running") && (
+                    {activeCampaignSyncIsRunning && (
                       <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-primary" />
                     )}
                     <div className="space-y-2 text-sm text-muted-foreground">
@@ -1109,9 +1283,9 @@ export default function Sources() {
                         </p>
                       )}
 
-                      {visibleActiveCampaignSyncRun?.last_error && (
+                      {activeCampaignSyncLastError && (
                         <p className="text-destructive">
-                          Ultimo erro: {visibleActiveCampaignSyncRun.last_error}
+                          Ultimo erro: {activeCampaignSyncLastError}
                         </p>
                       )}
                     </div>
