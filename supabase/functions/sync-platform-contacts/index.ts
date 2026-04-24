@@ -23,6 +23,7 @@ const maxActiveCampaignChunkSize = 2000;
 const defaultActiveCampaignRuntimeMs = 12000;
 const activeCampaignChainGraceMs = 120000;
 const maxSampleErrors = 10;
+const ACTIVE_CAMPAIGN_SYNC_DISABLED = true;
 
 type SyncSource = "activecampaign" | "uchat";
 type ActiveCampaignSyncMode = "full" | "resume" | "incremental";
@@ -1098,6 +1099,17 @@ Deno.serve(async (request) => {
     }
 
     launch = await resolveLaunch(supabase, body);
+
+    if (body.source === "activecampaign" && ACTIVE_CAMPAIGN_SYNC_DISABLED) {
+      return jsonResponse({
+        skipped: true,
+        reason: "activecampaign_sync_disabled",
+        launchId: launch.id,
+        source: body.source,
+        message: "ActiveCampaign base sync has been disabled. Launch Hub now processes only webhook contacts.",
+      }, 202);
+    }
+
     if (body.source === "activecampaign") {
       latestActiveCampaignRun = await fetchLatestSyncRun(supabase, launch.id, "activecampaign");
 
