@@ -217,6 +217,50 @@ export type Database = {
           },
         ]
       }
+      launch_cycle_archives: {
+        Row: {
+          created_at: string
+          created_by: string
+          csv_content: string
+          cycle_number: number
+          file_name: string
+          id: string
+          launch_id: string
+          row_count: number
+          summary: Json
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          csv_content: string
+          cycle_number: number
+          file_name: string
+          id?: string
+          launch_id: string
+          row_count?: number
+          summary?: Json
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          csv_content?: string
+          cycle_number?: number
+          file_name?: string
+          id?: string
+          launch_id?: string
+          row_count?: number
+          summary?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_cycle_archives_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launch_dedupe_settings: {
         Row: {
           auto_add_country_code: boolean
@@ -305,50 +349,6 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "uchat_workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      launch_cycle_archives: {
-        Row: {
-          created_at: string
-          created_by: string
-          csv_content: string
-          cycle_number: number
-          file_name: string
-          id: string
-          launch_id: string
-          row_count: number
-          summary: Json
-        }
-        Insert: {
-          created_at?: string
-          created_by: string
-          csv_content: string
-          cycle_number: number
-          file_name: string
-          id?: string
-          launch_id: string
-          row_count?: number
-          summary?: Json
-        }
-        Update: {
-          created_at?: string
-          created_by?: string
-          csv_content?: string
-          cycle_number?: number
-          file_name?: string
-          id?: string
-          launch_id?: string
-          row_count?: number
-          summary?: Json
-        }
-        Relationships: [
-          {
-            foreignKeyName: "launch_cycle_archives_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
             referencedColumns: ["id"]
           },
         ]
@@ -781,6 +781,7 @@ export type Database = {
         }
         Returns: Json
       }
+      csv_escape: { Args: { value: string }; Returns: string }
       dispatch_activecampaign_sync_jobs: { Args: never; Returns: Json }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       get_launch_visible_leads: {
