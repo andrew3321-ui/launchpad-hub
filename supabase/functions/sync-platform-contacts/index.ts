@@ -1266,7 +1266,7 @@ Deno.serve(async (request) => {
     const message = toErrorMessage(error);
 
     if (runId) {
-      const progressSnapshot: ActiveCampaignSyncProgress | null = activeCampaignProgress;
+      const progressSnapshot = activeCampaignProgress as unknown as ActiveCampaignSyncProgress | null;
       const failureMetadata =
         body.source === "activecampaign" && progressSnapshot
           ? buildActiveCampaignSyncMetadata(
