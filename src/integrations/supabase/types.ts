@@ -19,7 +19,6 @@ export type Database = {
           code: string
           contact_id: string | null
           created_at: string
-          cycle_number: number
           details: Json
           event_id: string | null
           id: string
@@ -33,7 +32,6 @@ export type Database = {
           code: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
           details?: Json
           event_id?: string | null
           id?: string
@@ -47,7 +45,6 @@ export type Database = {
           code?: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
           details?: Json
           event_id?: string | null
           id?: string
@@ -87,7 +84,6 @@ export type Database = {
           action_type: string
           contact_id: string | null
           created_at: string
-          cycle_number: number
           error_message: string | null
           event_id: string | null
           id: string
@@ -104,7 +100,6 @@ export type Database = {
           action_type: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
           error_message?: string | null
           event_id?: string | null
           id?: string
@@ -121,7 +116,6 @@ export type Database = {
           action_type?: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
           error_message?: string | null
           event_id?: string | null
           id?: string
@@ -159,7 +153,6 @@ export type Database = {
       }
       inbound_contact_events: {
         Row: {
-          cycle_number: number
           event_type: string
           external_contact_id: string | null
           id: string
@@ -173,7 +166,6 @@ export type Database = {
           source: string
         }
         Insert: {
-          cycle_number?: number
           event_type: string
           external_contact_id?: string | null
           id?: string
@@ -187,7 +179,6 @@ export type Database = {
           source: string
         }
         Update: {
-          cycle_number?: number
           event_type?: string
           external_contact_id?: string | null
           id?: string
@@ -309,50 +300,6 @@ export type Database = {
           },
         ]
       }
-      launch_cycle_archives: {
-        Row: {
-          created_at: string
-          created_by: string
-          csv_content: string
-          cycle_number: number
-          file_name: string
-          id: string
-          launch_id: string
-          row_count: number
-          summary: Json
-        }
-        Insert: {
-          created_at?: string
-          created_by: string
-          csv_content: string
-          cycle_number: number
-          file_name: string
-          id?: string
-          launch_id: string
-          row_count?: number
-          summary?: Json
-        }
-        Update: {
-          created_at?: string
-          created_by?: string
-          csv_content?: string
-          cycle_number?: number
-          file_name?: string
-          id?: string
-          launch_id?: string
-          row_count?: number
-          summary?: Json
-        }
-        Relationships: [
-          {
-            foreignKeyName: "launch_cycle_archives_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       launches: {
         Row: {
           ac_api_key: string | null
@@ -362,14 +309,7 @@ export type Database = {
           ac_named_tags: Json
           created_at: string
           created_by: string
-          current_cycle_number: number
-          current_cycle_started_at: string
           custom_states: Json
-          gs_enabled: boolean
-          gs_private_key: string | null
-          gs_service_account_email: string | null
-          gs_sheet_name: string | null
-          gs_spreadsheet_id: string | null
           id: string
           manychat_account_id: string | null
           manychat_api_key: string | null
@@ -389,14 +329,7 @@ export type Database = {
           ac_named_tags?: Json
           created_at?: string
           created_by: string
-          current_cycle_number?: number
-          current_cycle_started_at?: string
           custom_states?: Json
-          gs_enabled?: boolean
-          gs_private_key?: string | null
-          gs_service_account_email?: string | null
-          gs_sheet_name?: string | null
-          gs_spreadsheet_id?: string | null
           id?: string
           manychat_account_id?: string | null
           manychat_api_key?: string | null
@@ -416,14 +349,7 @@ export type Database = {
           ac_named_tags?: Json
           created_at?: string
           created_by?: string
-          current_cycle_number?: number
-          current_cycle_started_at?: string
           custom_states?: Json
-          gs_enabled?: boolean
-          gs_private_key?: string | null
-          gs_service_account_email?: string | null
-          gs_sheet_name?: string | null
-          gs_spreadsheet_id?: string | null
           id?: string
           manychat_account_id?: string | null
           manychat_api_key?: string | null
@@ -449,7 +375,6 @@ export type Database = {
         Row: {
           contact_id: string
           created_at: string
-          cycle_number: number
           external_contact_id: string | null
           external_email: string | null
           external_phone: string | null
@@ -463,7 +388,6 @@ export type Database = {
         Insert: {
           contact_id: string
           created_at?: string
-          cycle_number?: number
           external_contact_id?: string | null
           external_email?: string | null
           external_phone?: string | null
@@ -477,7 +401,6 @@ export type Database = {
         Update: {
           contact_id?: string
           created_at?: string
-          cycle_number?: number
           external_contact_id?: string | null
           external_email?: string | null
           external_phone?: string | null
@@ -508,7 +431,6 @@ export type Database = {
       lead_contacts: {
         Row: {
           created_at: string
-          cycle_number: number
           data: Json
           first_source: string | null
           id: string
@@ -524,7 +446,6 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          cycle_number?: number
           data?: Json
           first_source?: string | null
           id?: string
@@ -540,7 +461,6 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          cycle_number?: number
           data?: Json
           first_source?: string | null
           id?: string
@@ -763,10 +683,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      advance_launch_cycle: {
-        Args: { target_launch_id: string }
-        Returns: Json
-      }
       configure_activecampaign_sync_scheduler: {
         Args: { anon_key: string; cron_secret: string; project_url: string }
         Returns: Json
@@ -841,17 +757,6 @@ export type Database = {
           next_api_url?: string
           next_default_list_id?: string
           next_named_tags?: Json
-          target_launch_id: string
-        }
-        Returns: Json
-      }
-      update_launch_google_sheets_settings: {
-        Args: {
-          next_enabled?: boolean
-          next_private_key?: string
-          next_service_account_email?: string
-          next_sheet_name?: string
-          next_spreadsheet_id?: string
           target_launch_id: string
         }
         Returns: Json
