@@ -18,6 +18,7 @@ type LaunchLookupRow = {
   id: string;
   slug: string | null;
   name: string;
+  current_cycle_number: number;
 };
 
 export interface IncomingContact {
@@ -243,13 +244,13 @@ async function resolveLaunchProcessingContext(
   }
 
   const launchLookup = body.launchId
-    ? supabase.from("launches").select("id, slug, name").eq("id", body.launchId).maybeSingle()
-    : supabase.from("launches").select("id, slug, name").eq("slug", body.launchSlug).maybeSingle();
+    ? supabase.from("launches").select("id, slug, name, current_cycle_number").eq("id", body.launchId).maybeSingle()
+    : supabase.from("launches").select("id, slug, name, current_cycle_number").eq("slug", body.launchSlug).maybeSingle();
 
   const { data: launch, error: launchError } = await launchLookup;
 
   if (launchError || !launch) {
-    throw new ProcessContactError("Launch not found", 404, launchError?.message);
+    throw new ProcessContactError("Expert not found", 404, launchError?.message);
   }
 
   const { data: settingsRow } = await supabase
@@ -281,7 +282,7 @@ export async function processIncomingContactEvent(
   }
 
   if (!body.launchId && !body.launchSlug) {
-    throw new ProcessContactError("launchId or launchSlug is required", 400);
+    throw new ProcessContactError("expertId or expertSlug is required", 400);
   }
 
   const { launch, settings, countryCode } = await resolveLaunchProcessingContext(supabase, body);
@@ -381,6 +382,7 @@ export async function processIncomingContactEvent(
       .from("lead_contacts")
       .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
       .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
       .eq("primary_email", normalizedEmail);
 
     emailMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
@@ -391,6 +393,7 @@ export async function processIncomingContactEvent(
       .from("lead_contact_identities")
       .select("contact_id")
       .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
       .in("normalized_phone", validPhoneCandidates);
 
     phoneIdentityMatches?.forEach((row: { contact_id: string }) => candidateIds.add(row.contact_id));
@@ -399,6 +402,7 @@ export async function processIncomingContactEvent(
       .from("lead_contacts")
       .select("id")
       .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
       .in("normalized_phone", validPhoneCandidates);
 
     phoneMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
@@ -515,6 +519,7 @@ export async function processIncomingContactEvent(
       .from("lead_contacts")
       .insert({
         launch_id: launch.id,
+        cycle_number: launch.current_cycle_number,
         primary_name: normalizedName,
         primary_email: normalizedEmail,
         primary_phone: rawPhone,
@@ -568,6 +573,7 @@ export async function processIncomingContactEvent(
         .from("lead_contact_identities")
         .select("id")
         .eq("launch_id", launch.id)
+        .eq("cycle_number", launch.current_cycle_number)
         .eq("source", body.source)
         .eq("external_contact_id", body.externalContactId)
         .maybeSingle();
@@ -586,6 +592,7 @@ export async function processIncomingContactEvent(
       } else {
         await supabase.from("lead_contact_identities").insert({
           launch_id: launch.id,
+          cycle_number: launch.current_cycle_number,
           contact_id: processedContactId,
           source: body.source,
           external_contact_id: body.externalContactId,
@@ -598,6 +605,7 @@ export async function processIncomingContactEvent(
     } else {
       await supabase.from("lead_contact_identities").insert({
         launch_id: launch.id,
+        cycle_number: launch.current_cycle_number,
         contact_id: processedContactId,
         source: body.source,
         external_email: normalizedEmail,

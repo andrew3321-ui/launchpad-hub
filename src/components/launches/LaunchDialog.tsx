@@ -68,7 +68,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       .single();
 
     if (error) {
-      toast({ title: "Erro ao carregar lancamento", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao carregar expert", description: error.message, variant: "destructive" });
       setLoading(false);
       return;
     }
@@ -115,7 +115,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     if (!name.trim()) {
       toast({
         title: "Nome obrigatorio",
-        description: "Informe o nome do lancamento para continuar.",
+        description: "Informe o nome do expert para continuar.",
         variant: "destructive",
       });
       return;
@@ -138,7 +138,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
       if (!baseSlug) {
         toast({
           title: "Slug invalido",
-          description: "Use um nome com letras ou numeros para gerar o identificador do lancamento.",
+          description: "Use um nome com letras ou numeros para gerar o identificador interno do expert.",
           variant: "destructive",
         });
         setSaving(false);
@@ -155,7 +155,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
             next_custom_states: customStates as unknown as Json,
             next_whatsapp_group_link: whatsappLink || null,
           }),
-          "O backend demorou demais para responder ao salvar o lancamento. Tente novamente.",
+            "O backend demorou demais para responder ao salvar o expert. Tente novamente.",
         );
 
         if (error || !data) {
@@ -181,7 +181,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
               next_custom_states: customStates as unknown as Json,
               next_whatsapp_group_link: whatsappLink || null,
             }),
-            "O backend demorou demais para responder ao criar o lancamento. Tente novamente.",
+            "O backend demorou demais para responder ao criar o expert. Tente novamente.",
           );
 
           const createdLaunch = (data ?? null) as unknown as LaunchMutationResult | null;
@@ -196,7 +196,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           if (!isDuplicateSlugError(error)) {
             toast({
               title: "Erro ao criar",
-              description: error?.message || "O backend nao confirmou a criacao do lancamento.",
+              description: error?.message || "O backend nao confirmou a criacao do expert.",
               variant: "destructive",
             });
             return;
@@ -206,7 +206,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
         if (!created) {
           toast({
             title: "Slug em uso",
-            description: "Nao conseguimos reservar um identificador unico para esse lancamento. Tente outro nome ou slug.",
+            description: "Nao conseguimos reservar um identificador unico para esse expert. Tente outro nome ou slug.",
             variant: "destructive",
           });
           return;
@@ -217,17 +217,17 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           setSlugManual(true);
           toast({
             title: "Slug ajustado automaticamente",
-            description: `Ja existia um lancamento com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
+            description: `Ja existia um expert com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
           });
         }
       }
 
-      toast({ title: isEditing ? "Lancamento atualizado!" : "Lancamento criado!" });
+      toast({ title: isEditing ? "Expert atualizado!" : "Expert criado!" });
       onSaved();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o lancamento.";
+      const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o expert.";
       console.error("launch save failed", error);
-      toast({ title: "Erro no lancamento", description: message, variant: "destructive" });
+      toast({ title: "Erro no expert", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -237,7 +237,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Editar lancamento" : "Novo lancamento"}</DialogTitle>
+          <DialogTitle>{isEditing ? "Editar expert" : "Novo expert"}</DialogTitle>
         </DialogHeader>
 
         {loading ? (
@@ -251,7 +251,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
               <Input
                 value={name}
                 onChange={(event) => handleNameChange(event.target.value)}
-                placeholder="Ex: Lancamento Curso X - Abril 2026"
+                placeholder="Ex: Elza - Maio 2026"
               />
             </div>
 
@@ -267,7 +267,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
                 className="font-mono text-sm"
               />
               <p className="text-xs text-muted-foreground">
-                Identificador usado nas URLs e na organizacao interna.
+                Identificador usado nas URLs e na organizacao interna do expert.
               </p>
             </div>
 
@@ -286,7 +286,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
             </div>
 
             <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-              As credenciais de ActiveCampaign, ManyChat e UChat agora ficam em{" "}
+              As credenciais de ActiveCampaign, UChat e Google Sheets ficam em{" "}
               <span className="font-medium text-foreground">Fontes</span>.
             </div>
           </div>

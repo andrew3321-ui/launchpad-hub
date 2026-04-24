@@ -48,6 +48,7 @@ export default function Queue() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
   const activeLaunchId = activeLaunch?.id ?? null;
+  const activeCycleNumber = activeLaunch?.current_cycle_number ?? null;
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
@@ -57,7 +58,7 @@ export default function Queue() {
     let mounted = true;
 
     const load = async (silent = false) => {
-      if (!activeLaunchId) {
+      if (!activeLaunchId || activeCycleNumber === null) {
         if (mounted) {
           setEvents([]);
           setActions([]);
@@ -84,12 +85,14 @@ export default function Queue() {
           .from("inbound_contact_events")
           .select("id, source, event_type, processing_status, received_at, processing_summary")
           .eq("launch_id", launchId)
+          .eq("cycle_number", activeCycleNumber)
           .order("received_at", { ascending: false })
           .limit(20),
         supabase
           .from("contact_routing_actions")
           .select("id, source, target, action_type, status, action_key, created_at, error_message")
           .eq("launch_id", launchId)
+          .eq("cycle_number", activeCycleNumber)
           .order("created_at", { ascending: false })
           .limit(30),
       ]);
@@ -122,7 +125,7 @@ export default function Queue() {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, [activeLaunchId, toast]);
+  }, [activeCycleNumber, activeLaunchId, toast]);
 
   const visibleEvents = loadedLaunchId === activeLaunchId ? events : [];
   const visibleActions = loadedLaunchId === activeLaunchId ? actions : [];
@@ -141,9 +144,9 @@ export default function Queue() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um lancamento para acompanhar os webhooks recebidos e as acoes que o
+              Escolha um expert para acompanhar os webhooks recebidos e as acoes que o
               Launch Hub esta disparando.
             </CardDescription>
           </CardHeader>
@@ -159,8 +162,9 @@ export default function Queue() {
         <div>
           <h1 className="text-2xl font-bold">Fila</h1>
           <p className="text-sm text-muted-foreground">
-            Acompanhe os webhooks e o roteamento em tempo real do lancamento{" "}
-            <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Acompanhe os webhooks e o roteamento em tempo real do expert{" "}
+            <span className="font-medium text-foreground">{activeLaunch.name}</span>, ciclo #
+            {activeLaunch.current_cycle_number}.
           </p>
         </div>
       </div>
@@ -202,7 +206,7 @@ export default function Queue() {
             <CardContent className="space-y-4">
               {visibleEvents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nenhum webhook recebido ainda para esse lancamento.
+                  Nenhum webhook recebido ainda para esse expert neste ciclo.
                 </p>
               ) : (
                 visibleEvents.map((event) => (
@@ -240,7 +244,7 @@ export default function Queue() {
             <CardContent className="space-y-4">
               {visibleActions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nenhuma acao de roteamento ainda para esse lancamento.
+                  Nenhuma acao de roteamento ainda para esse expert neste ciclo.
                 </p>
               ) : (
                 visibleActions.map((action) => (

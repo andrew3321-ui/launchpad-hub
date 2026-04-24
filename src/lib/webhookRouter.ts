@@ -4,7 +4,7 @@ export const inboundWebhookSources = [
   {
     key: "activecampaign",
     label: "ActiveCampaign",
-    hint: "Use a webhook de contato no ActiveCampaign apontando para esta URL.",
+    hint: "Use a webhook de contato no ActiveCampaign apontando para esta URL do expert.",
   },
   {
     key: "uchat",
@@ -46,14 +46,14 @@ export function buildLaunchWebhookUrl(
   source: InboundWebhookSource,
 ) {
   const config = getSupabaseConnectionConfig();
-  const launchSlug = launch.slug || launch.id;
+  const expertSlug = launch.slug || launch.id;
 
-  if (!config.url || !launchSlug || !launch.webhook_secret) {
+  if (!config.url || !expertSlug || !launch.webhook_secret) {
     return "";
   }
 
   const url = new URL(`${config.url}/functions/v1/launch-webhook-router`);
-  url.searchParams.set("launchSlug", launchSlug);
+  url.searchParams.set("expertSlug", expertSlug);
   url.searchParams.set("source", source);
   url.searchParams.set("token", launch.webhook_secret);
   return url.toString();

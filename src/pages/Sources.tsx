@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useLaunch } from "@/contexts/LaunchContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -43,6 +46,13 @@ interface LaunchSettingsRow {
   ac_api_key: string | null;
   ac_default_list_id: string | null;
   ac_named_tags: unknown;
+  current_cycle_number: number;
+  current_cycle_started_at: string | null;
+  gs_enabled: boolean;
+  gs_service_account_email: string | null;
+  gs_private_key: string | null;
+  gs_spreadsheet_id: string | null;
+  gs_sheet_name: string | null;
 }
 
 interface SourcesDraft {
@@ -51,6 +61,11 @@ interface SourcesDraft {
   acListId: string;
   acNamedTags: NamedTagDraft[];
   uchatWorkspaces: UChatWorkspaceDraft[];
+  gsEnabled: boolean;
+  gsServiceAccountEmail: string;
+  gsPrivateKey: string;
+  gsSpreadsheetId: string;
+  gsSheetName: string;
 }
 
 interface LaunchSourcesPayload {
@@ -99,6 +114,16 @@ interface SyncPlatformContactsResponse {
   metadata: Json | null;
 }
 
+interface GoogleSheetsCatalogResponse {
+  spreadsheetId: string;
+  title: string | null;
+  sheets: Array<{
+    id: number | null;
+    title: string | null;
+    index: number | null;
+  }>;
+}
+
 const MANAGED_SOURCE_ALIASES = [
   {
     alias: "typebot",
@@ -145,6 +170,12 @@ function parseSourcesDraft(raw: string | null): SourcesDraft | null {
       uchatWorkspaces: Array.isArray(parsed.uchatWorkspaces)
         ? (parsed.uchatWorkspaces as UChatWorkspaceDraft[])
         : [],
+      gsEnabled: typeof parsed.gsEnabled === "boolean" ? parsed.gsEnabled : false,
+      gsServiceAccountEmail:
+        typeof parsed.gsServiceAccountEmail === "string" ? parsed.gsServiceAccountEmail : "",
+      gsPrivateKey: typeof parsed.gsPrivateKey === "string" ? parsed.gsPrivateKey : "",
+      gsSpreadsheetId: typeof parsed.gsSpreadsheetId === "string" ? parsed.gsSpreadsheetId : "",
+      gsSheetName: typeof parsed.gsSheetName === "string" ? parsed.gsSheetName : "",
     };
   } catch {
     return null;
@@ -366,7 +397,7 @@ export default function Sources() {
   const catalogRequestRef = useRef(0);
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState<"active" | "uchat" | null>(null);
+  const [saving, setSaving] = useState<"active" | "uchat" | "gsheets" | null>(null);
   const [hydratedLaunchId, setHydratedLaunchId] = useState<string | null>(null);
 
   const [launchSettings, setLaunchSettings] = useState<LaunchSettingsRow | null>(null);
@@ -375,6 +406,14 @@ export default function Sources() {
   const [acListId, setAcListId] = useState("");
   const [acNamedTags, setAcNamedTags] = useState<NamedTagDraft[]>([]);
   const [uchatWorkspaces, setUchatWorkspaces] = useState<UChatWorkspaceDraft[]>([]);
+  const [gsEnabled, setGsEnabled] = useState(false);
+  const [gsServiceAccountEmail, setGsServiceAccountEmail] = useState("");
+  const [gsPrivateKey, setGsPrivateKey] = useState("");
+  const [gsSpreadsheetId, setGsSpreadsheetId] = useState("");
+  const [gsSheetName, setGsSheetName] = useState("");
+  const [gsSpreadsheetTitle, setGsSpreadsheetTitle] = useState<string | null>(null);
+  const [gsAvailableSheets, setGsAvailableSheets] = useState<Array<{ id: number | null; title: string | null }>>([]);
+  const [loadingGoogleSheetsCatalog, setLoadingGoogleSheetsCatalog] = useState(false);
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
@@ -395,6 +434,11 @@ export default function Sources() {
   const visibleAcListId = isHydratedActiveLaunch ? acListId : "";
   const visibleAcNamedTags = isHydratedActiveLaunch ? acNamedTags : [];
   const visibleUchatWorkspaces = isHydratedActiveLaunch ? uchatWorkspaces : [];
+  const visibleGsEnabled = isHydratedActiveLaunch ? gsEnabled : false;
+  const visibleGsServiceAccountEmail = isHydratedActiveLaunch ? gsServiceAccountEmail : "";
+  const visibleGsPrivateKey = isHydratedActiveLaunch ? gsPrivateKey : "";
+  const visibleGsSpreadsheetId = isHydratedActiveLaunch ? gsSpreadsheetId : "";
+  const visibleGsSheetName = isHydratedActiveLaunch ? gsSheetName : "";
   const visibleActiveCampaignTags = isHydratedActiveLaunch ? activeCampaignTags : [];
   const visibleActiveCampaignTagsLoadedAt = isHydratedActiveLaunch
     ? activeCampaignTagsLoadedAt
@@ -769,6 +813,14 @@ export default function Sources() {
         setAcListId("");
         setAcNamedTags([]);
         setUchatWorkspaces([]);
+        setGsEnabled(false);
+        setGsServiceAccountEmail("");
+        setGsPrivateKey("");
+        setGsSpreadsheetId("");
+        setGsSheetName("");
+        setGsSpreadsheetTitle(null);
+        setGsAvailableSheets([]);
+        setLoadingGoogleSheetsCatalog(false);
         setActiveCampaignTags([]);
         setActiveCampaignTagsLoadedAt(null);
         setActiveCampaignTagsScopeKey(null);
@@ -789,6 +841,14 @@ export default function Sources() {
       setAcListId("");
       setAcNamedTags([]);
       setUchatWorkspaces([]);
+      setGsEnabled(false);
+      setGsServiceAccountEmail("");
+      setGsPrivateKey("");
+      setGsSpreadsheetId("");
+      setGsSheetName("");
+      setGsSpreadsheetTitle(null);
+      setGsAvailableSheets([]);
+      setLoadingGoogleSheetsCatalog(false);
       setActiveCampaignTags([]);
       setActiveCampaignTagsLoadedAt(null);
       setActiveCampaignTagsScopeKey(null);
@@ -817,7 +877,7 @@ export default function Sources() {
           title: "Erro ao carregar as fontes",
           description:
             sourcesError?.message ||
-            "Nao foi possivel carregar as configuracoes do lancamento.",
+            "Nao foi possivel carregar as configuracoes do expert.",
           variant: "destructive",
         });
         setLoading(false);
@@ -853,9 +913,15 @@ export default function Sources() {
             : []),
       );
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
+      setGsEnabled(draft?.gsEnabled ?? typedLaunch.gs_enabled ?? false);
+      setGsServiceAccountEmail(
+        draft?.gsServiceAccountEmail ?? typedLaunch.gs_service_account_email ?? "",
+      );
+      setGsPrivateKey(draft?.gsPrivateKey ?? typedLaunch.gs_private_key ?? "");
+      setGsSpreadsheetId(draft?.gsSpreadsheetId ?? typedLaunch.gs_spreadsheet_id ?? "");
+      setGsSheetName(draft?.gsSheetName ?? typedLaunch.gs_sheet_name ?? "");
       setHydratedLaunchId(launchId);
       setLoading(false);
-      void loadLatestActiveCampaignSyncRun(launchId, { silent: true });
     };
 
     void load();
@@ -863,7 +929,7 @@ export default function Sources() {
     return () => {
       cancelled = true;
     };
-  }, [activeLaunchId, loadLatestActiveCampaignSyncRun, toast]);
+  }, [activeLaunchId, toast]);
 
   useEffect(() => {
     if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
@@ -919,6 +985,11 @@ export default function Sources() {
         acListId,
         acNamedTags,
         uchatWorkspaces,
+        gsEnabled,
+        gsServiceAccountEmail,
+        gsPrivateKey,
+        gsSpreadsheetId,
+        gsSheetName,
       } satisfies SourcesDraft),
     );
   }, [
@@ -930,31 +1001,34 @@ export default function Sources() {
     acListId,
     acNamedTags,
     uchatWorkspaces,
+    gsEnabled,
+    gsServiceAccountEmail,
+    gsPrivateKey,
+    gsSpreadsheetId,
+    gsSheetName,
   ]);
 
-  useEffect(() => {
-    if (!activeLaunchId || !isHydratedActiveLaunch) return;
-
-    const isRunning = activeCampaignSyncIsRunning;
-    if (!isRunning) return;
-
-    const intervalId = window.setInterval(() => {
-      void loadLatestActiveCampaignSyncRun(activeLaunchId, { silent: true });
-    }, 5000);
-
-    return () => window.clearInterval(intervalId);
-  }, [
-    activeLaunchId,
-    activeCampaignSyncIsRunning,
-    isHydratedActiveLaunch,
-    loadLatestActiveCampaignSyncRun,
-  ]);
   const uchatConnected = useMemo(
     () =>
       visibleUchatWorkspaces.some(
         (workspace) => workspace.workspace_id.trim() && workspace.api_token.trim(),
       ),
     [visibleUchatWorkspaces],
+  );
+  const googleSheetsConnected = useMemo(
+    () =>
+      Boolean(
+        visibleGsEnabled &&
+          visibleGsServiceAccountEmail.trim() &&
+          visibleGsSpreadsheetId.trim() &&
+          visibleGsSheetName.trim(),
+      ),
+    [
+      visibleGsEnabled,
+      visibleGsServiceAccountEmail,
+      visibleGsSheetName,
+      visibleGsSpreadsheetId,
+    ],
   );
 
   const updateManagedSourceTags = (alias: string, tagId: string, checked: boolean) => {
@@ -980,6 +1054,99 @@ export default function Sources() {
       return [...managedTags, ...nextAdvancedTags];
     });
   };
+
+  const loadGoogleSheetsCatalog = useCallback(
+    async (options?: {
+      launchId?: string | null;
+      serviceAccountEmail?: string;
+      privateKey?: string;
+      spreadsheetId?: string;
+      silent?: boolean;
+    }) => {
+      const requestLaunchId = options?.launchId ?? activeLaunchId;
+      const serviceAccountEmail = (options?.serviceAccountEmail ?? gsServiceAccountEmail).trim();
+      const privateKey = (options?.privateKey ?? gsPrivateKey).trim();
+      const spreadsheetId = (options?.spreadsheetId ?? gsSpreadsheetId).trim();
+
+      if (!requestLaunchId) return;
+
+      if (!serviceAccountEmail || !privateKey || !spreadsheetId) {
+        if (!options?.silent) {
+          toast({
+            title: "Preencha a conexão do Google Sheets",
+            description:
+              "Informe o e-mail da service account, a chave privada e o ID da planilha para carregar as abas.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      setLoadingGoogleSheetsCatalog(true);
+
+      try {
+        const { data, error } = await withTimeout(
+          supabase.functions.invoke("google-sheets-catalog", {
+            body: {
+              launchId: requestLaunchId,
+              serviceAccountEmail,
+              privateKey,
+              spreadsheetId,
+            },
+          }),
+          15000,
+          "O Google Sheets demorou demais para responder.",
+        );
+
+        const typedData = (data as GoogleSheetsCatalogResponse | null) ?? null;
+        if (error || !typedData) {
+          throw new Error(error?.message || "Nao foi possivel carregar as abas da planilha.");
+        }
+
+        setGsSpreadsheetTitle(typedData.title ?? null);
+        setGsAvailableSheets(
+          typedData.sheets.map((sheet) => ({
+            id: sheet.id,
+            title: sheet.title,
+          })),
+        );
+
+        const firstSheetName =
+          typedData.sheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
+            ?.title ?? "";
+
+        if (!gsSheetName.trim() && firstSheetName) {
+          setGsSheetName(firstSheetName);
+        }
+
+        if (!options?.silent) {
+          toast({
+            title: "Google Sheets conectado",
+            description:
+              typedData.title
+                ? `Planilha "${typedData.title}" carregada com ${typedData.sheets.length} aba(s).`
+                : `${typedData.sheets.length} aba(s) carregada(s).`,
+          });
+        }
+      } catch (error) {
+        const description = await extractFunctionInvokeErrorMessage(
+          error,
+          "Nao foi possivel validar a planilha informada.",
+        );
+
+        if (!options?.silent) {
+          toast({
+            title: "Erro ao carregar abas do Google Sheets",
+            description,
+            variant: "destructive",
+          });
+        }
+      } finally {
+        setLoadingGoogleSheetsCatalog(false);
+      }
+    },
+    [activeLaunchId, gsPrivateKey, gsServiceAccountEmail, gsSheetName, gsSpreadsheetId, toast],
+  );
 
   const syncActiveCampaignAfterSave = useCallback(
     async (launchId: string) => {
@@ -1030,7 +1197,7 @@ export default function Sources() {
 
         toast({
           title: "Base do ActiveCampaign sincronizada",
-          description: `${latestCounters.processedCount} contato(s) tratados no backend para este lancamento.`,
+          description: `${latestCounters.processedCount} contato(s) tratados no backend para este expert.`,
         });
       } catch (error) {
         const description = await extractFunctionInvokeErrorMessage(
@@ -1095,16 +1262,70 @@ export default function Sources() {
     toast({
       title: "ActiveCampaign salvo",
       description: activeConnected
-        ? "As credenciais foram atualizadas e a sincronizacao da base sera feita no backend."
+        ? "As credenciais e o roteamento por tags foram atualizados para este expert."
         : "As credenciais de saida para o ActiveCampaign foram atualizadas.",
     });
+    setActiveCampaignSyncRun(null);
+    setActiveCampaignSyncMessage(null);
+  };
 
-    if (acApiUrl.trim() && acApiKey.trim()) {
-      await syncActiveCampaignAfterSave(activeLaunch.id);
-    } else {
-      setActiveCampaignSyncRun(null);
-      setActiveCampaignSyncMessage(null);
+  const saveGoogleSheets = async () => {
+    if (!activeLaunch) return;
+
+    if (
+      gsEnabled &&
+      (!gsServiceAccountEmail.trim() ||
+        !gsPrivateKey.trim() ||
+        !gsSpreadsheetId.trim() ||
+        !gsSheetName.trim())
+    ) {
+      toast({
+        title: "Preencha a conexao do Google Sheets",
+        description:
+          "Ative o Google Sheets apenas depois de informar a service account, a chave privada, o ID da planilha e a aba de destino.",
+        variant: "destructive",
+      });
+      return;
     }
+
+    setSaving("gsheets");
+    const { error, data } = await supabase.rpc("update_launch_google_sheets_settings", {
+      target_launch_id: activeLaunch.id,
+      next_enabled: gsEnabled,
+      next_service_account_email: gsServiceAccountEmail || null,
+      next_private_key: gsPrivateKey || null,
+      next_spreadsheet_id: gsSpreadsheetId || null,
+      next_sheet_name: gsSheetName || null,
+    } as never);
+
+    setSaving(null);
+
+    if (error || !data) {
+      toast({
+        title: "Erro ao salvar Google Sheets",
+        description: error?.message || "O backend nao confirmou a atualizacao da planilha.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLaunchSettings(data as unknown as LaunchSettingsRow);
+    setHydratedLaunchId(activeLaunch.id);
+    if (gsEnabled && gsServiceAccountEmail.trim() && gsPrivateKey.trim() && gsSpreadsheetId.trim()) {
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunch.id,
+        serviceAccountEmail: gsServiceAccountEmail,
+        privateKey: gsPrivateKey,
+        spreadsheetId: gsSpreadsheetId,
+        silent: true,
+      });
+    }
+    toast({
+      title: "Google Sheets salvo",
+      description: gsEnabled
+        ? "Os webhooks do ActiveCampaign agora podem ser espelhados para a planilha escolhida."
+        : "A captura complementar no Google Sheets foi desativada para este expert.",
+    });
   };
 
   const saveUchat = async () => {
@@ -1192,10 +1413,10 @@ export default function Sources() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para configurar webhooks e as saidas para
-              ActiveCampaign e UChat.
+              Escolha um expert na barra lateral para configurar webhooks e as saidas para
+              ActiveCampaign, UChat e Google Sheets.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -1211,8 +1432,8 @@ export default function Sources() {
           <div>
             <h1 className="text-2xl font-bold">Fontes</h1>
             <p className="text-sm text-muted-foreground">
-              O Launch Hub agora recebe sinais por webhook e so usa ActiveCampaign e UChat
-              para devolver os contatos tratados do lancamento{" "}
+              O Launch Hub recebe sinais por webhook e usa ActiveCampaign, UChat e Google Sheets
+              como saidas do expert{" "}
               <span className="font-medium text-foreground">{activeLaunch.name}</span>.
             </p>
           </div>
@@ -1226,11 +1447,11 @@ export default function Sources() {
         <CardContent className="flex items-start gap-3 p-6">
           <Webhook className="mt-0.5 h-5 w-5 text-primary" />
           <div className="space-y-1 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Modelo webhook-first por lancamento</p>
+            <p className="font-medium text-foreground">Modelo webhook-first por expert</p>
             <p>
               Entradas: ActiveCampaign, UChat, ManyChat, Typebot, Tally e Sendflow.
             </p>
-            <p>Saidas: ActiveCampaign e UChat, apos verificacao e tratamento da base canonica.</p>
+            <p>Saidas: ActiveCampaign, UChat e espelhamento opcional no Google Sheets.</p>
           </div>
         </CardContent>
       </Card>
@@ -1246,8 +1467,7 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">ActiveCampaign</CardTitle>
                 <CardDescription>
-                  Credenciais de saida para receber os contatos tratados, aplicar tags/lista e
-                  sincronizar a base diretamente no backend apos cada salvamento.
+                  Credenciais de saida para devolver contatos tratados, aplicar tags/lista e validar as tags usadas pelo roteamento dos webhooks.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={activeConnected} />
@@ -1284,64 +1504,34 @@ export default function Sources() {
               <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <p className="font-medium text-foreground">Sincronizacao da base</p>
+                    <p className="font-medium text-foreground">Ciclo operacional</p>
                     <p className="text-sm text-muted-foreground">
-                      Ao salvar o ActiveCampaign, o Launch Hub sincroniza toda a base no backend
-                      em lotes automaticos. Os contatos nao aparecem no front.
+                      O ActiveCampaign nao sincroniza mais a base inteira. Este expert trabalha apenas com contatos que entrarem pelos webhooks.
                     </p>
                   </div>
-                  <Badge
-                    variant={
-                      activeCampaignSyncIsRunning
-                        ? "default"
-                        : activeCampaignSyncBadgeLabel === "Falhou"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                  >
-                    {activeCampaignSyncBadgeLabel}
-                  </Badge>
+                  <Badge variant="secondary">Webhook-only</Badge>
                 </div>
 
                 <div className="rounded-xl border border-border/60 bg-background/50 p-4">
-                  <div className="flex items-start gap-3">
-                    {activeCampaignSyncIsRunning && (
-                      <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-primary" />
-                    )}
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <p>
-                        {activeCampaignSyncStatusMessage}
-                      </p>
-
-                      {visibleActiveCampaignSyncRun && (
-                        <p>
-                          {activeCampaignSyncCounters.processedCount} tratado(s),{" "}
-                          {activeCampaignSyncCounters.createdCount} novo(s),{" "}
-                          {activeCampaignSyncCounters.mergedCount} mesclado(s),{" "}
-                          {activeCampaignSyncCounters.errorCount} erro(s).
-                        </p>
-                      )}
-
-                      {visibleActiveCampaignSyncRun?.finished_at && (
-                        <p>
-                          Ultima finalizacao em{" "}
-                          {new Date(visibleActiveCampaignSyncRun.finished_at).toLocaleString("pt-BR")}.
-                        </p>
-                      )}
-
-                      {visibleActiveCampaignSyncRun && activeCampaignSyncCursor.syncedUntil && !activeCampaignSyncCursor.hasMore && (
-                        <p>
-                          Base atualizada ate{" "}
-                          {new Date(activeCampaignSyncCursor.syncedUntil).toLocaleString("pt-BR")}.
-                        </p>
-                      )}
-
-                      {activeCampaignSyncLastError && (
-                        <p className="text-destructive">
-                          Ultimo erro: {activeCampaignSyncLastError}
-                        </p>
-                      )}
-                    </div>
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    <p>
+                      Ciclo atual:{" "}
+                      <span className="font-medium text-foreground">
+                        #{visibleLaunchSettings?.current_cycle_number ?? activeLaunch.current_cycle_number}
+                      </span>
+                    </p>
+                    <p>
+                      Inicio do ciclo:{" "}
+                      <span className="font-medium text-foreground">
+                        {visibleLaunchSettings?.current_cycle_started_at
+                          ? new Date(visibleLaunchSettings.current_cycle_started_at).toLocaleString("pt-BR")
+                          : "-"}
+                      </span>
+                    </p>
+                    <p>
+                      Quando voce usar <span className="font-medium text-foreground">Mudar ciclo</span> em Experts,
+                      os leads atuais serao arquivados em CSV e o proximo webhook abrira uma nova base canonica.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1361,7 +1551,7 @@ export default function Sources() {
                       variant="outline"
                       size="sm"
                       onClick={() => void loadActiveCampaignCatalog()}
-                      disabled={saving !== null || syncingActiveCampaign || loadingActiveCampaignTags || !activeConnected}
+                      disabled={saving !== null || loadingActiveCampaignTags || !activeConnected}
                     >
                       {loadingActiveCampaignTags && (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1399,11 +1589,127 @@ export default function Sources() {
               </div>
             </CardContent>
             <CardFooter className="justify-end">
-              <Button onClick={() => void saveActiveCampaign()} disabled={saving !== null || syncingActiveCampaign}>
-                {(saving === "active" || syncingActiveCampaign) && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Button onClick={() => void saveActiveCampaign()} disabled={saving !== null}>
+                {saving === "active" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar ActiveCampaign
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-start justify-between space-y-0">
+              <div className="space-y-1.5">
+                <CardTitle className="text-xl">Google Sheets</CardTitle>
+                <CardDescription>
+                  Espelhamento opcional dos contatos que entrarem pelo webhook do ActiveCampaign para uma planilha do Google.
+                </CardDescription>
+              </div>
+              <ConnectionBadge connected={googleSheetsConnected} />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between rounded-xl border border-border/70 bg-background/40 p-4">
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">Ativar captura em planilha</p>
+                  <p className="text-sm text-muted-foreground">
+                    Quando ligado, cada webhook do ActiveCampaign tambem grava nome, email, telefone, tags e payload na planilha escolhida.
+                  </p>
+                </div>
+                <Switch checked={visibleGsEnabled} onCheckedChange={setGsEnabled} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gs-email">Service account email</Label>
+                <Input
+                  id="gs-email"
+                  value={visibleGsServiceAccountEmail}
+                  onChange={(event) => setGsServiceAccountEmail(event.target.value)}
+                  placeholder="service-account@projeto.iam.gserviceaccount.com"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gs-key">Chave privada</Label>
+                <Textarea
+                  id="gs-key"
+                  value={visibleGsPrivateKey}
+                  onChange={(event) => setGsPrivateKey(event.target.value)}
+                  placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
+                  className="min-h-[160px] font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Compartilhe a planilha com esse email da service account antes de carregar as abas.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gs-spreadsheet">Spreadsheet ID</Label>
+                <Input
+                  id="gs-spreadsheet"
+                  value={visibleGsSpreadsheetId}
+                  onChange={(event) => setGsSpreadsheetId(event.target.value)}
+                  placeholder="Cole o ID da planilha do Google"
+                />
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">Abas disponiveis</p>
+                    <p className="text-sm text-muted-foreground">
+                      Carregue a planilha para escolher a aba onde os contatos do webhook do ActiveCampaign serao salvos.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void loadGoogleSheetsCatalog()}
+                    disabled={saving !== null || loadingGoogleSheetsCatalog}
+                  >
+                    {loadingGoogleSheetsCatalog && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Carregar abas
+                  </Button>
+                </div>
+
+                {gsSpreadsheetTitle && (
+                  <p className="text-xs text-muted-foreground">
+                    Planilha conectada: <span className="font-medium text-foreground">{gsSpreadsheetTitle}</span>
+                  </p>
                 )}
-                {syncingActiveCampaign ? "Sincronizando base..." : "Salvar ActiveCampaign"}
+
+                {gsAvailableSheets.length > 0 ? (
+                  <div className="space-y-2">
+                    <Label>Aba de destino</Label>
+                    <Select value={visibleGsSheetName || undefined} onValueChange={setGsSheetName}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Escolher aba" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {gsAvailableSheets.map((sheet) => (
+                          <SelectItem key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`} value={sheet.title || `sheet-${sheet.id ?? 0}`}>
+                            {sheet.title || `Aba ${sheet.id ?? ""}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="gs-sheet">Aba de destino</Label>
+                    <Input
+                      id="gs-sheet"
+                      value={visibleGsSheetName}
+                      onChange={(event) => setGsSheetName(event.target.value)}
+                      placeholder="Ex: Captura Active"
+                    />
+                  </div>
+                )}
+              </div>
+            </CardContent>
+            <CardFooter className="justify-end">
+              <Button onClick={() => void saveGoogleSheets()} disabled={saving !== null}>
+                {saving === "gsheets" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar Google Sheets
               </Button>
             </CardFooter>
           </Card>
@@ -1413,10 +1719,8 @@ export default function Sources() {
               <div className="space-y-1.5">
                 <CardTitle className="text-xl">UChat</CardTitle>
                 <CardDescription>
-                  Workspaces de destino para o retorno ActiveCampaign/Sendflow {"->"} Launch Hub {"->"} UChat,
-                  com subflow de boas-vindas e/ou add tag. Eventos vindos do proprio UChat
-                  consultam o ActiveCampaign para duplicidade, mas nao retornam ao subflow
-                  padrao de boas-vindas.
+                  Workspaces de destino para o retorno Launch Hub {"->"} UChat, com subflow de boas-vindas e/ou add tag.
+                  Eventos vindos do proprio UChat sao tratados no hub e nao retornam automaticamente ao subflow padrao.
                 </CardDescription>
               </div>
               <ConnectionBadge connected={uchatConnected} />
@@ -1437,10 +1741,10 @@ export default function Sources() {
 
           <Card className="xl:col-span-2">
             <CardHeader>
-              <CardTitle className="text-xl">Webhooks do lancamento</CardTitle>
+              <CardTitle className="text-xl">Webhooks do expert</CardTitle>
               <CardDescription>
                 Use estas URLs para ligar os sinais externos ao Launch Hub. Cada webhook ja sai
-                protegido pelo segredo do lancamento.
+                protegido pelo segredo do expert.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

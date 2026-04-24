@@ -9,6 +9,8 @@ interface Launch {
   slug: string | null;
   status: string;
   created_at: string;
+  current_cycle_number: number;
+  current_cycle_started_at: string | null;
 }
 
 interface LaunchContextType {
@@ -65,12 +67,12 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
 
     const { data, error } = await supabase
       .from("launches")
-      .select("id, name, slug, status, created_at")
+      .select("id, name, slug, status, created_at, current_cycle_number, current_cycle_started_at")
       .order("created_at", { ascending: false });
 
     if (error) {
       toast({
-        title: "Erro ao atualizar lancamentos",
+        title: "Erro ao atualizar experts",
         description: error.message,
         variant: "destructive",
       });

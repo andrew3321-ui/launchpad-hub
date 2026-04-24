@@ -159,9 +159,9 @@ export default function Rules() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para definir as regras de deduplicacao e merge.
+              Escolha um expert na barra lateral para definir as regras de deduplicacao e merge.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -176,7 +176,7 @@ export default function Rules() {
         <div>
           <h1 className="text-2xl font-bold">Regras</h1>
           <p className="text-sm text-muted-foreground">
-            Defina como o sistema vai reconhecer duplicatas e mesclar dados no lancamento{" "}
+            Defina como o sistema vai reconhecer duplicatas e mesclar dados no expert{" "}
             <span className="font-medium text-foreground">{activeLaunch.name}</span>.
           </p>
         </div>

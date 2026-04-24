@@ -5,6 +5,7 @@ import {
   processIncomingContactEvent,
   type IncomingEventBody,
 } from "../_shared/contact-processing.ts";
+import { appendGoogleSheetsRow, parseGoogleSheetsConfig } from "../_shared/google-sheets.ts";
 
 type JsonRecord = Record<string, unknown>;
 type AnySupabaseClient = any;
@@ -25,6 +26,12 @@ interface LaunchRow {
   ac_api_key: string | null;
   ac_default_list_id: string | null;
   ac_named_tags: unknown;
+  current_cycle_number: number;
+  gs_enabled: boolean;
+  gs_service_account_email: string | null;
+  gs_private_key: string | null;
+  gs_spreadsheet_id: string | null;
+  gs_sheet_name: string | null;
 }
 
 interface LeadContactRow {
@@ -939,6 +946,173 @@ function resolveActiveCampaignTags(
   return uniqueStrings([...directTags, ...mappedTags, ...fallbackTags]);
 }
 
+function extractObservedJourneyTags(source: WebhookSource, payload: JsonRecord) {
+  const tags = uniqueStrings([
+    ...extractTagNames(payload),
+    ...(source === "uchat" ? extractUchatSubscriberTags(payload) : []),
+  ]);
+
+  const aliases = uniqueStrings(extractTagAliases(payload, source));
+
+  return {
+    tags,
+    aliases,
+  };
+}
+
+async function updateLeadJourneyData(
+  supabase: AnySupabaseClient,
+  contact: LeadContactRow,
+  source: WebhookSource,
+  payload: JsonRecord,
+  extra?: {
+    tags?: string[];
+    aliases?: string[];
+  },
+) {
+  const data = isRecord(contact.data) ? { ...contact.data } : {};
+  const currentJourney = isRecord(data.journey) ? { ...data.journey } : {};
+  const currentSourceJourney =
+    isRecord(currentJourney.by_source) && isRecord(currentJourney.by_source[source])
+      ? { ...(currentJourney.by_source[source] as JsonRecord) }
+      : {};
+  const observed = extractObservedJourneyTags(source, payload);
+  const nextTags = uniqueStrings([
+    ...(Array.isArray(currentJourney.observed_tags) ? (currentJourney.observed_tags as string[]) : []),
+    ...observed.tags,
+    ...(extra?.tags ?? []),
+  ]);
+  const nextAliases = uniqueStrings([
+    ...(Array.isArray(currentJourney.observed_aliases) ? (currentJourney.observed_aliases as string[]) : []),
+    ...observed.aliases,
+    ...(extra?.aliases ?? []),
+  ]);
+  const nextSources = uniqueStrings([
+    ...(Array.isArray(data.sources) ? (data.sources as string[]) : []),
+    source,
+  ]);
+
+  const nextData = {
+    ...data,
+    sources: nextSources,
+    journey: {
+      ...currentJourney,
+      observed_tags: nextTags,
+      observed_aliases: nextAliases,
+      last_event_type:
+        findStringDeep(payload, ["event_type", "event", "type", "trigger_name"]) || null,
+      last_seen_at: new Date().toISOString(),
+      by_source: {
+        ...(isRecord(currentJourney.by_source) ? currentJourney.by_source : {}),
+        [source]: {
+          ...currentSourceJourney,
+          observed_tags: uniqueStrings([
+            ...(Array.isArray(currentSourceJourney.observed_tags)
+              ? (currentSourceJourney.observed_tags as string[])
+              : []),
+            ...observed.tags,
+            ...(extra?.tags ?? []),
+          ]),
+          observed_aliases: uniqueStrings([
+            ...(Array.isArray(currentSourceJourney.observed_aliases)
+              ? (currentSourceJourney.observed_aliases as string[])
+              : []),
+            ...observed.aliases,
+            ...(extra?.aliases ?? []),
+          ]),
+          latest_payload: payload,
+          updated_at: new Date().toISOString(),
+        },
+      },
+    },
+  } satisfies JsonRecord;
+
+  await supabase
+    .from("lead_contacts")
+    .update({ data: nextData } as Record<string, unknown>)
+    .eq("id", contact.id);
+}
+
+async function appendActiveCampaignWebhookToGoogleSheets(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  eventId: string | null,
+) {
+  const config = parseGoogleSheetsConfig({
+    enabled: launch.gs_enabled,
+    serviceAccountEmail: launch.gs_service_account_email,
+    privateKey: launch.gs_private_key,
+    spreadsheetId: launch.gs_spreadsheet_id,
+    sheetName: launch.gs_sheet_name,
+  });
+
+  if (!config) {
+    return { skipped: true, reason: "google_sheets_not_configured" } as const;
+  }
+
+  const observed = extractObservedJourneyTags("activecampaign", payload);
+  const activeContactId =
+    findStringDeep(payload, ["contact_id", "contact[id]", "id"]) || null;
+  const header = [
+    "Registrado em",
+    "Expert",
+    "Ciclo",
+    "Fonte",
+    "Evento",
+    "Event ID",
+    "Lead ID",
+    "Contato ActiveCampaign",
+    "Nome",
+    "Email",
+    "Telefone",
+    "Tags",
+    "Aliases",
+    "Payload JSON",
+  ];
+  const row = [
+    new Date().toISOString(),
+    launch.name,
+    launch.current_cycle_number,
+    "activecampaign",
+    findStringDeep(payload, ["event_type", "event", "type", "trigger_name"]) || "webhook_received",
+    eventId,
+    contact.id,
+    activeContactId,
+    contact.primary_name,
+    contact.primary_email,
+    contact.primary_phone,
+    observed.tags.join(" | "),
+    observed.aliases.join(" | "),
+    JSON.stringify(payload),
+  ];
+
+  const result = await appendGoogleSheetsRow(config, header, row);
+
+  await insertProcessingLog(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    "activecampaign",
+    result.skipped ? "info" : "success",
+    result.skipped ? "GOOGLE_SHEETS_SKIPPED" : "GOOGLE_SHEETS_APPENDED",
+    result.skipped ? "Google Sheets nao configurado" : "Contato enviado ao Google Sheets",
+    result.skipped
+      ? "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets nao estava configurada para este expert."
+      : "O webhook do ActiveCampaign foi registrado automaticamente na planilha configurada do expert.",
+    result.skipped
+      ? { reason: result.reason }
+      : {
+          spreadsheetId: result.spreadsheetId,
+          sheetName: result.sheetName,
+        },
+  );
+
+  return result;
+}
+
 async function fetchLaunch(
   supabase: AnySupabaseClient,
   launchId: string | null,
@@ -947,17 +1121,17 @@ async function fetchLaunch(
   const query = launchId
     ? supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_sheet_name")
         .eq("id", launchId)
     : supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_sheet_name")
         .eq("slug", launchSlug as string);
 
   const { data, error } = await query.maybeSingle();
 
   if (error || !data) {
-    throw new ProcessContactError("Launch not found", 404, error?.message);
+    throw new ProcessContactError("Expert not found", 404, error?.message);
   }
 
   return data as LaunchRow;
@@ -1279,7 +1453,7 @@ async function resolveActiveCampaignTagId(
   tagLabel: string,
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
-    throw new ProcessContactError("ActiveCampaign is not configured for this launch", 400);
+    throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
   }
 
   if (/^\d+$/.test(tagLabel)) {
@@ -1326,7 +1500,7 @@ async function syncContactToActiveCampaign(
   fieldValues: ActiveCampaignFieldValueInput[],
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
-    throw new ProcessContactError("ActiveCampaign is not configured for this launch", 400);
+    throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
   }
 
   if (!contact.primary_email && !contact.primary_phone) {
@@ -2195,7 +2369,7 @@ async function routeToUchat(
   const workspace = pickPreferredWorkspace(workspaces, payload);
 
   if (!workspace) {
-    throw new ProcessContactError("No valid UChat workspace configured for this launch", 400);
+    throw new ProcessContactError("No valid UChat workspace configured for this expert", 400);
   }
 
   const recipient = options.requireExplicitRecipient
@@ -2487,8 +2661,8 @@ async function dispatchRoutes(
       normalizedEvent.source,
       "info",
       "ACTIVE_ALREADY_TAGGED_CONTINUING",
-      "Contato ja possui as tags do lancamento",
-      "O evento vindo do ActiveCampaign ja chegou com tags do lancamento. Mesmo assim, o Launch Hub continuou o retorno para o UChat porque esse webhook pode ser usado como gatilho explicito do subflow.",
+      "Contato ja possui as tags do expert",
+      "O evento vindo do ActiveCampaign ja chegou com tags do expert. Mesmo assim, o Launch Hub continuou o retorno para o UChat porque esse webhook pode ser usado como gatilho explicito do subflow.",
       { inboundTags: activePayloadTags, configuredTags: configuredTagNames },
     );
   }
@@ -2608,6 +2782,18 @@ async function dispatchRoutes(
 
       activeCampaignRoute = routed as unknown as JsonRecord;
 
+      if ("appliedTags" in routed && Array.isArray(routed.appliedTags)) {
+        await updateLeadJourneyData(
+          supabase,
+          contact,
+          normalizedEvent.source,
+          routingPayload,
+          {
+            tags: routed.appliedTags as string[],
+          },
+        );
+      }
+
       if (!("skipped" in routed) || !routed.skipped) {
         await insertProcessingLog(
           supabase,
@@ -2681,9 +2867,22 @@ async function dispatchRoutes(
         "success",
         "ROUTED_TO_UCHAT",
         "Contato enviado ao UChat",
-        "O Launch Hub encaminhou o contato tratado para o UChat com a acao configurada do lancamento.",
+        "O Launch Hub encaminhou o contato tratado para o UChat com a acao configurada do expert.",
         routed as unknown as JsonRecord,
       );
+
+      if (isRecord(routed)) {
+        const routedTag = nonEmptyString(routed.configuredTagName);
+        await updateLeadJourneyData(
+          supabase,
+          contact,
+          normalizedEvent.source,
+          normalizedEvent.payload,
+          {
+            tags: routedTag ? [routedTag] : [],
+          },
+        );
+      }
 
       if (normalizedEvent.source === "sendflow") {
         return {
@@ -2740,8 +2939,12 @@ Deno.serve(async (request) => {
 
   const url = new URL(request.url);
   const source = normalizeWebhookSource(url.searchParams.get("source"));
-  const launchId = nonEmptyString(url.searchParams.get("launchId"));
-  const launchSlug = nonEmptyString(url.searchParams.get("launchSlug"));
+  const launchId =
+    nonEmptyString(url.searchParams.get("expertId")) ||
+    nonEmptyString(url.searchParams.get("launchId"));
+  const launchSlug =
+    nonEmptyString(url.searchParams.get("expertSlug")) ||
+    nonEmptyString(url.searchParams.get("launchSlug"));
   const token = nonEmptyString(url.searchParams.get("token"));
 
   if (!source) {
@@ -2749,7 +2952,7 @@ Deno.serve(async (request) => {
   }
 
   if (!launchId && !launchSlug) {
-    return jsonResponse({ error: "launchId or launchSlug is required" }, 400);
+    return jsonResponse({ error: "expertId or expertSlug is required" }, 400);
   }
 
   try {
@@ -2779,11 +2982,46 @@ Deno.serve(async (request) => {
       });
     }
 
+    const contact = await fetchLeadContact(supabase, processingResult.contactId);
+
+    await updateLeadJourneyData(
+      supabase,
+      contact,
+      normalizedEvent.source,
+      normalizedEvent.payload,
+    );
+
+    if (normalizedEvent.source === "activecampaign") {
+      try {
+        await appendActiveCampaignWebhookToGoogleSheets(
+          supabase,
+          launch,
+          contact,
+          normalizedEvent.payload,
+          processingResult.eventId,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          processingResult.eventId,
+          normalizedEvent.source,
+          "warning",
+          "GOOGLE_SHEETS_APPEND_FAILED",
+          "Falha ao registrar no Google Sheets",
+          "O webhook do ActiveCampaign foi tratado, mas o espelhamento para a planilha configurada falhou.",
+          { error: message },
+        );
+      }
+    }
+
     const routingResult = await dispatchRoutes(
       supabase,
       launch,
       normalizedEvent,
-      processingResult.contactId,
+      contact.id,
       processingResult.eventId,
     );
 

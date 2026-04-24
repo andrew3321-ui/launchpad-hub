@@ -11,17 +11,17 @@ const operationalCards = [
   {
     icon: RadioTower,
     label: "Fontes conectadas",
-    description: "Configure ActiveCampaign, ManyChat e UChat no mesmo ambiente visual.",
+    description: "Conecte ActiveCampaign, UChat, Sendflow, ManyChat, Typebot e Tally no mesmo cockpit.",
   },
   {
     icon: Orbit,
-    label: "Tratamento automático",
-    description: "Padronize números, mescle duplicados e acompanhe tudo em tempo real.",
+    label: "Tratamento automatico",
+    description: "Padronize numeros, mescle duplicados e acompanhe as tags que surgiram em cada jornada.",
   },
   {
     icon: Users,
-    label: "Base tratada",
-    description: "Use o painel como cockpit da operação de leads e amplificação digital.",
+    label: "Ciclos por expert",
+    description: "Cada expert roda no proprio ciclo operacional e pode arquivar a base anterior em CSV.",
   },
 ];
 
@@ -46,11 +46,11 @@ export default function Dashboard() {
 
             <div className="space-y-4">
               <h2 className="max-w-4xl text-balance font-display text-4xl font-semibold leading-[1.02] text-white sm:text-5xl xl:text-6xl">
-                Quem tem um <span className="text-[#a9f0ff]">Megafone</span> não precisa gritar.
+                Quem tem um <span className="text-[#a9f0ff]">Megafone</span> nao precisa gritar.
               </h2>
               <p className="max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-                Centralize suas bases, deixe o tratamento de contatos no automático e transforme sua operação digital
-                em um fluxo mais previsível, escalável e alinhado com a marca Megafone.
+                Organize a operacao por expert, receba todos os sinais por webhook, trate contatos automaticamente
+                e direcione o que importa para ActiveCampaign, UChat e Google Sheets.
               </p>
             </div>
 
@@ -62,7 +62,7 @@ export default function Dashboard() {
                 </Link>
               </Button>
               <Button asChild variant="outline">
-                <Link to="/rules">Ajustar regras de tratamento</Link>
+                <Link to="/experts">Gerenciar experts</Link>
               </Button>
             </div>
 
@@ -87,14 +87,14 @@ export default function Dashboard() {
               className="brand-astronaut-image absolute bottom-0 right-0 h-full w-full object-contain object-bottom"
             />
             <div className="absolute inset-x-0 bottom-0 rounded-b-[2rem] bg-gradient-to-t from-[#051020] via-[#051020]/85 to-transparent p-5 pt-20">
-              <p className="brand-kicker">Operação em órbita</p>
+              <p className="brand-kicker">Operacao em orbita</p>
               <h3 className="mt-2 font-display text-2xl font-semibold text-white">
-                {activeLaunch ? activeLaunch.name : "Selecione um lançamento para amplificar"}
+                {activeLaunch ? activeLaunch.name : "Selecione um expert para amplificar"}
               </h3>
               <p className="mt-3 text-sm leading-7 text-slate-300">
                 {activeLaunch
-                  ? "Esse lançamento já pode receber conexões, regras e observabilidade com a nova identidade visual."
-                  : "Crie ou escolha um lançamento para ativar a cabine principal do sistema."}
+                  ? `Ciclo atual ${activeLaunch.current_cycle_number}. Esse expert ja pode receber conexoes, regras e observabilidade em tempo real.`
+                  : "Crie ou escolha um expert para ativar a cabine principal do sistema."}
               </p>
             </div>
           </div>
@@ -104,14 +104,14 @@ export default function Dashboard() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="brand-card border-white/10 bg-[linear-gradient(180deg,rgba(8,23,46,0.92),rgba(4,12,24,0.84))]">
           <CardHeader>
-            <CardTitle className="text-white">Panorama rápido</CardTitle>
+            <CardTitle className="text-white">Panorama rapido</CardTitle>
             <CardDescription className="text-slate-300">
-              Um resumo do ambiente atual enquanto você constrói a operação.
+              Um resumo do ambiente atual enquanto voce constroi a operacao.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4">
-              <p className="text-sm text-slate-400">Lançamentos mapeados</p>
+              <p className="text-sm text-slate-400">Experts mapeados</p>
               <p className="mt-3 font-display text-4xl font-semibold text-white">{launches.length}</p>
             </div>
             <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4">
@@ -128,21 +128,21 @@ export default function Dashboard() {
             <Settings2 className="h-5 w-5" />
           </span>
           <div className="space-y-1">
-            <h2 className="text-2xl font-semibold text-white">Configurações do ambiente</h2>
+            <h2 className="text-2xl font-semibold text-white">Configuracoes do ambiente</h2>
             <p className="max-w-2xl text-sm leading-7 text-slate-300">
-              Centralize aqui a conexão do Supabase e a validação do schema para acompanhar o estado técnico do app sem sair do dashboard.
+              Centralize aqui a conexao do Supabase e a validacao do schema para acompanhar o estado tecnico do app sem sair do dashboard.
             </p>
           </div>
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">
           <SupabaseConnectionCard
-            title="Conexão Supabase"
-            description="Troque rapidamente o backend ativo durante desenvolvimento e homologação, sem rebuild."
+            title="Conexao Supabase"
+            description="Troque rapidamente o backend ativo durante desenvolvimento e homologacao, sem rebuild."
           />
           <SchemaSetupCard
-            title="Validação do schema"
-            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
+            title="Validacao do schema"
+            description="Confira se o backend conectado ja recebeu todas as estruturas que o app precisa para operar."
           />
         </div>
       </section>

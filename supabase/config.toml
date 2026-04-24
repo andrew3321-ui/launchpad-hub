@@ -12,5 +12,8 @@ verify_jwt = true
 [functions.activecampaign-catalog]
 verify_jwt = false
 
+[functions.google-sheets-catalog]
+verify_jwt = true
+
 [functions.launch-webhook-router]
 verify_jwt = false

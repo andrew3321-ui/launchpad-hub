@@ -87,9 +87,9 @@ export default function Leads() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para visualizar a base canonica tratada
+              Escolha um expert na barra lateral para visualizar a base canonica tratada
               pelo Launch Hub.
             </CardDescription>
           </CardHeader>
@@ -105,8 +105,9 @@ export default function Leads() {
         <div>
           <h1 className="text-2xl font-bold">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            Base canonica do lancamento{" "}
-            <span className="font-medium text-foreground">{activeLaunch.name}</span>,
+            Base canonica do expert{" "}
+            <span className="font-medium text-foreground">{activeLaunch.name}</span>, ciclo #
+            {activeLaunch.current_cycle_number},
             mostrando apenas contatos que realmente entraram pelos webhooks operacionais do Launch Hub.
           </p>
         </div>
@@ -117,7 +118,7 @@ export default function Leads() {
           <CardTitle className="text-xl">Contatos tratados</CardTitle>
           <CardDescription>
             Cada linha representa um contato final depois da normalizacao, deduplicacao e
-            verificacao de estado. Contatos puxados por sincronizacao de base nao aparecem aqui.
+            verificacao de estado. Apenas os contatos recebidos pelos webhooks deste ciclo aparecem aqui.
           </CardDescription>
         </CardHeader>
         <CardContent>

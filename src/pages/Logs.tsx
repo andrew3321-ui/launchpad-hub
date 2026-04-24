@@ -64,6 +64,7 @@ export default function Logs() {
   const { activeLaunch } = useLaunch();
   const { toast } = useToast();
   const activeLaunchId = activeLaunch?.id ?? null;
+  const activeCycleNumber = activeLaunch?.current_cycle_number ?? null;
 
   const [rows, setRows] = useState<ProcessingLogRow[]>([]);
   const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
@@ -76,7 +77,7 @@ export default function Logs() {
     let mounted = true;
 
     const load = async (silent = false) => {
-      if (!activeLaunchId) {
+      if (!activeLaunchId || activeCycleNumber === null) {
         if (mounted) {
           setRows([]);
           setLoadedLaunchId(null);
@@ -97,6 +98,7 @@ export default function Logs() {
         .from("contact_processing_logs")
         .select("id, code, created_at, details, level, message, source, title")
         .eq("launch_id", launchId)
+        .eq("cycle_number", activeCycleNumber)
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -128,7 +130,7 @@ export default function Logs() {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, [activeLaunchId, toast]);
+  }, [activeCycleNumber, activeLaunchId, toast]);
 
   const visibleRows = loadedLaunchId === activeLaunchId ? rows : [];
 
@@ -164,9 +166,9 @@ export default function Logs() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Selecione um lancamento</CardTitle>
+            <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um lancamento na barra lateral para acompanhar os eventos processados e os erros de integracao.
+              Escolha um expert na barra lateral para acompanhar os eventos processados e os erros de integracao.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -181,8 +183,9 @@ export default function Logs() {
         <div>
           <h1 className="text-2xl font-bold">Logs</h1>
           <p className="text-sm text-muted-foreground">
-            Veja o que aconteceu com cada contato do lancamento{" "}
-            <span className="font-medium text-foreground">{activeLaunch.name}</span>.
+            Veja o que aconteceu com cada contato do expert{" "}
+            <span className="font-medium text-foreground">{activeLaunch.name}</span>, ciclo #
+            {activeLaunch.current_cycle_number}.
           </p>
         </div>
       </div>
