@@ -2910,12 +2910,17 @@ async function routeToActiveCampaign(
       contact.id,
       "activecampaign",
     );
+    const sendflowPhoneFromPayload =
+      source === "sendflow" ? findStringDeep(payload, ["number"]) : null;
     const response = await syncContactToActiveCampaign(
       launch,
       contact,
       tagNames,
       fieldValues,
       existingIdentity?.external_contact_id || null,
+      source === "sendflow"
+        ? { phoneOnlyMatch: true, phoneSearchValue: sendflowPhoneFromPayload }
+        : undefined,
     );
 
     await upsertLeadIdentity(
