@@ -4,9 +4,11 @@
 
 ## 1. Apresentação
 
-Esta Política de Privacidade descreve como o **Launch Hub**, solução operacional da **Megafone Digital**, coleta, utiliza, armazena, compartilha e protege dados pessoais tratados no contexto do uso da plataforma.
+Esta Política de Privacidade descreve como o **Launch Hub**, ferramenta operacional interna da **Megafone Digital**, coleta, utiliza, armazena, compartilha e protege dados pessoais tratados no contexto do uso da plataforma.
 
-O Launch Hub foi desenvolvido para apoiar operações de captação, tratamento, roteamento e organização de contatos oriundos de webhooks, integrações com plataformas de automação e, quando habilitado pelo usuário, integrações com Google Sheets.
+O Launch Hub foi desenvolvido para apoiar operações internas da Megafone Digital relacionadas à captação, tratamento, roteamento e organização de contatos oriundos de webhooks, integrações com plataformas de automação e, quando habilitado pelo usuário autorizado, integrações com Google Sheets.
+
+Esta plataforma não é oferecida como serviço aberto ao público em geral. Seu uso é restrito a colaboradores, operadores, administradores e parceiros autorizados pela Megafone Digital para fins operacionais internos.
 
 Ao utilizar a plataforma, você declara que leu e compreendeu esta Política.
 
@@ -17,11 +19,13 @@ Ao utilizar a plataforma, você declara que leu e compreendeu esta Política.
 - Site/aplicação: **https://painel-de-controle-megafone.lovable.app**
 - Contato principal para assuntos de privacidade: **andrehugo@megafone.digital**
 
+O acesso ao Launch Hub é restrito a usuários previamente autorizados pela Megafone Digital.
+
 Se desejar, este e-mail pode ser substituído futuramente pelo canal oficial de suporte ou encarregado de dados da operação.
 
 ## 3. Dados que podemos tratar
 
-Dependendo da forma como a plataforma for utilizada, o Launch Hub poderá tratar as seguintes categorias de dados:
+Dependendo da forma como a plataforma for utilizada internamente, o Launch Hub poderá tratar as seguintes categorias de dados:
 
 ### 3.1. Dados cadastrais de usuários da plataforma
 
@@ -45,7 +49,7 @@ O sistema pode receber e processar dados enviados por webhooks, automações ou 
 
 ### 3.3. Dados de integrações
 
-Quando o usuário conecta ferramentas externas, a plataforma poderá tratar dados técnicos e credenciais de integração, incluindo:
+Quando o usuário autorizado conecta ferramentas externas, a plataforma poderá tratar dados técnicos e credenciais de integração, incluindo:
 
 - URLs de API
 - Tokens e chaves de integração
@@ -54,35 +58,35 @@ Quando o usuário conecta ferramentas externas, a plataforma poderá tratar dado
 
 ### 3.4. Dados da conta Google, quando a integração com Google Sheets estiver habilitada
 
-Quando o usuário optar por conectar sua conta Google, o Launch Hub poderá acessar:
+Quando o usuário autorizado optar por conectar uma conta Google compatível com a operação da Megafone Digital, o Launch Hub poderá acessar:
 
 - Endereço de e-mail da conta Google conectada
 - Metadados de planilhas disponíveis na conta conectada, como nome da planilha, identificador, proprietário e data de modificação
 - Abas da planilha escolhida pelo usuário
 - Dados que precisarem ser gravados na planilha selecionada pelo próprio usuário
 
-O Launch Hub **não utiliza os dados da conta Google para publicidade**, **não vende dados do Google a terceiros** e **não acessa conteúdo além do necessário para a funcionalidade contratada e autorizada pelo usuário**.
+O Launch Hub **não utiliza os dados da conta Google para publicidade**, **não vende dados do Google a terceiros** e **não acessa conteúdo além do necessário para a funcionalidade operacional autorizada pelo usuário e pela Megafone Digital**.
 
 ## 4. Como os dados são coletados
 
 Os dados podem ser coletados das seguintes formas:
 
-- Cadastro e autenticação de usuários na plataforma
+- Cadastro, autenticação e gestão de acesso de usuários internos ou autorizados na plataforma
 - Recebimento de webhooks enviados por ferramentas conectadas
 - Integrações configuradas com plataformas como ActiveCampaign, UChat, ManyChat, Typebot, Tally, Sendflow e outras fontes compatíveis
-- Conexão voluntária com conta Google para seleção de planilhas e gravação em Google Sheets
+- Conexão voluntária com conta Google autorizada para seleção de planilhas e gravação em Google Sheets
 - Registros técnicos gerados automaticamente pelo uso da plataforma
 
 ## 5. Finalidades do tratamento
 
-Os dados tratados no Launch Hub são utilizados para as seguintes finalidades:
+Os dados tratados no Launch Hub são utilizados para as seguintes finalidades internas:
 
-- Permitir o acesso e gerenciamento da conta do usuário
+- Permitir o acesso e gerenciamento de contas de usuários autorizados
 - Organizar operações por expert, ciclo e origem de captura
 - Receber contatos por webhook e consolidar registros operacionais
 - Detectar duplicidades e realizar tratamento automatizado de contatos
 - Aplicar regras, tags, roteamentos e transições entre plataformas
-- Enviar, registrar ou espelhar dados em plataformas externas conectadas pelo usuário
+- Enviar, registrar ou espelhar dados em plataformas externas conectadas para a operação interna da Megafone Digital
 - Permitir a gravação complementar de contatos em Google Sheets, quando habilitado
 - Exibir logs, histórico, auditoria e fila operacional
 - Proteger a plataforma contra uso indevido, abuso, fraude e incidentes de segurança
@@ -100,21 +104,21 @@ Nos termos da Lei Geral de Proteção de Dados Pessoais (LGPD), o tratamento pod
 
 ## 7. Como usamos dados do Google
 
-Quando a integração com Google estiver habilitada pelo usuário:
+Quando a integração com Google estiver habilitada por usuário autorizado:
 
-- a conexão ocorre por autorização expressa do usuário;
+- a conexão ocorre por autorização expressa do usuário autorizado;
 - a plataforma utiliza a conta Google conectada para listar planilhas disponíveis, permitir a escolha da planilha correta e identificar a aba de destino;
 - a plataforma poderá inserir linhas na planilha selecionada para registrar dados operacionais oriundos dos webhooks;
-- o acesso é usado exclusivamente para a funcionalidade do produto;
+- o acesso é usado exclusivamente para a funcionalidade operacional interna da plataforma;
 - o Launch Hub não usa os dados do Google para anúncios, profiling comercial independente ou revenda de dados;
 - o usuário pode desconectar a conta Google a qualquer momento, revogando o uso futuro da integração.
 
 ## 8. Compartilhamento de dados
 
-Os dados podem ser compartilhados nas seguintes hipóteses:
+Os dados podem ser compartilhados nas seguintes hipóteses e sempre no contexto da operação interna da Megafone Digital:
 
 - Com provedores e subprocessadores necessários à hospedagem, autenticação, banco de dados e operação da plataforma
-- Com plataformas e integrações expressamente conectadas pelo próprio usuário
+- Com plataformas e integrações expressamente conectadas pelo próprio usuário autorizado
 - Com Google Sheets, quando a integração estiver habilitada pelo usuário
 - Quando necessário ao cumprimento de obrigação legal, ordem judicial ou requisição de autoridade competente
 - Em processos de defesa de direitos, segurança e prevenção a fraudes
@@ -201,7 +205,6 @@ A versão mais atual será disponibilizada no canal oficial em que este document
 
 ## 17. Contato
 
-Para dúvidas, solicitações ou assuntos relacionados a privacidade e proteção de dados, entre em contato por:
+Para dúvidas, solicitações ou assuntos relacionados a privacidade e proteção de dados no contexto do Launch Hub, entre em contato por:
 
 - **andrehugo@megafone.digital**
-

@@ -4,9 +4,11 @@
 
 ## 1. Apresentação
 
-Os presentes Termos de Serviço regulam o acesso e o uso do **Launch Hub**, plataforma operacional da **Megafone Digital** destinada ao recebimento, tratamento, organização e roteamento de contatos e eventos por meio de webhooks e integrações com ferramentas de terceiros.
+Os presentes Termos de Serviço regulam o acesso e o uso do **Launch Hub**, ferramenta operacional interna da **Megafone Digital** destinada ao recebimento, tratamento, organização e roteamento de contatos e eventos por meio de webhooks e integrações com ferramentas de terceiros.
 
 Ao acessar, cadastrar-se ou utilizar a plataforma, o usuário declara estar ciente e de acordo com estes Termos.
+
+O Launch Hub não é oferecido como plataforma aberta ao público em geral. Seu uso é restrito à Megafone Digital e a pessoas expressamente autorizadas pela empresa.
 
 ## 2. Identificação da plataforma
 
@@ -21,6 +23,7 @@ Para fins destes Termos:
 
 - **Plataforma**: o sistema Launch Hub.
 - **Usuário**: pessoa física autorizada a acessar a plataforma.
+- **Usuário autorizado**: colaborador, administrador, operador, prestador ou parceiro com permissão expressa da Megafone Digital para utilizar a plataforma.
 - **Administrador**: usuário com permissões ampliadas para aprovar acessos, configurar experts, integrações e regras.
 - **Expert**: entidade operacional cadastrada na plataforma para organizar campanhas, entradas, leads, ciclos e regras.
 - **Ciclo**: período operacional vinculado a um expert, utilizado para segmentar registros e históricos.
@@ -40,15 +43,19 @@ O Launch Hub oferece uma camada operacional intermediária para:
 
 A plataforma não garante, por si só, a disponibilidade, qualidade, conformidade ou continuidade dos serviços de terceiros integrados.
 
+O Launch Hub destina-se exclusivamente ao uso interno da Megafone Digital e à gestão de suas operações. Ele não constitui, por estes Termos, uma oferta pública de software a terceiros independentes.
+
 ## 5. Elegibilidade e uso autorizado
 
-O uso da plataforma é permitido somente a usuários autorizados pelo responsável da operação.
+O uso da plataforma é permitido somente a usuários autorizados pela Megafone Digital ou pelo responsável interno da operação.
 
 Dependendo da configuração vigente:
 
 - o cadastro pode ser restrito a determinados domínios de e-mail;
 - o acesso pode depender de aprovação administrativa;
 - determinadas permissões podem ser limitadas por perfil.
+
+Salvo autorização específica da Megafone Digital, o uso da plataforma é destinado a contas vinculadas ao domínio corporativo da empresa ou a usuários convidados para atuação operacional específica.
 
 O usuário é responsável por fornecer informações verdadeiras, atualizadas e completas.
 
@@ -62,6 +69,8 @@ O usuário deve:
 - comunicar imediatamente qualquer suspeita de uso indevido da conta.
 
 A Megafone Digital poderá adotar medidas de verificação, redefinição de acesso, bloqueio preventivo ou exigência de atualização de credenciais sempre que necessário à segurança da plataforma.
+
+O desligamento do usuário da operação, o encerramento do vínculo com a Megafone Digital ou a perda de autorização interna poderá resultar na suspensão ou remoção do acesso à plataforma.
 
 ## 7. Aprovação de usuários e administração
 
@@ -84,9 +93,11 @@ O usuário concorda em:
 - revisar cuidadosamente integrações, webhooks, tags, regras e automações antes de uso em produção;
 - não utilizar a plataforma para spam, fraude, abuso, engenharia social, coleta ilícita ou qualquer atividade irregular.
 
+O usuário também concorda em não utilizar o Launch Hub fora das finalidades operacionais internas aprovadas pela Megafone Digital.
+
 ## 9. Integrações com terceiros
 
-O Launch Hub pode se conectar a serviços externos mediante configuração realizada pelo usuário ou administrador.
+O Launch Hub pode se conectar a serviços externos mediante configuração realizada por usuário autorizado ou administrador.
 
 Ao utilizar integrações, o usuário reconhece que:
 
@@ -97,7 +108,7 @@ Ao utilizar integrações, o usuário reconhece que:
 
 ## 10. Integração com Google Sheets
 
-Quando habilitada, a integração com Google Sheets serve para permitir:
+Quando habilitada, a integração com Google Sheets serve para permitir, exclusivamente em apoio à operação interna da Megafone Digital:
 
 - conexão voluntária com conta Google autorizada pelo usuário;
 - listagem de planilhas disponíveis na conta conectada;
@@ -166,7 +177,7 @@ Poderemos suspender, restringir ou encerrar acessos, com ou sem aviso prévio, q
 - exigência legal, regulatória ou contratual;
 - necessidade técnica relevante.
 
-O usuário também pode deixar de utilizar a plataforma e solicitar encerramento do acesso, observadas eventuais retenções necessárias por segurança, auditoria ou obrigação legal.
+O usuário também pode deixar de utilizar a plataforma e solicitar encerramento do acesso, observadas eventuais retenções necessárias por segurança, auditoria ou obrigação legal. O encerramento do vínculo interno com a operação poderá implicar desativação imediata do acesso.
 
 ## 17. Indenização
 
