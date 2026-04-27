@@ -142,7 +142,7 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "24": "INT-GERAL",
   "60": "AUT",
 } as const;
-const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow"] as const;
+const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow", "uchat"] as const;
 const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v2";
 const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
 const ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX = "active-sheets:v1";
@@ -1125,6 +1125,16 @@ function extractTagNames(payload: JsonRecord) {
   ]);
 }
 
+function extractExplicitActiveCampaignTags(payload: JsonRecord) {
+  return collectStringListDeep(payload, [
+    "activecampaign_tags",
+    "activecampaign_tag_ids",
+    "active_campaign_tags",
+    "active_campaign_tag_ids",
+    "ac_tags",
+  ]);
+}
+
 function extractTagAliases(payload: JsonRecord, source?: WebhookSource | null) {
   return uniqueStrings([
     ...collectStringListDeep(payload, [
@@ -1260,8 +1270,13 @@ function resolveActiveCampaignTags(
   payload: JsonRecord,
   namedTags: NamedTag[],
 ) {
-  const directTags = extractTagNames(payload);
-  const aliases = extractTagAliases(payload, source).map(normalizeKey);
+  const directTags = uniqueStrings([
+    ...(source === "uchat" ? extractExplicitActiveCampaignTags(payload) : extractTagNames(payload)),
+  ]);
+  const aliases = uniqueStrings([
+    ...extractTagAliases(payload, source),
+    ...(source === "uchat" ? extractUchatSubscriberTags(payload) : []),
+  ]).map(normalizeKey);
   const mappedTags = namedTags
     .filter((item) => aliases.includes(normalizeKey(item.alias)))
     .map((item) => item.tag);
@@ -3437,43 +3452,36 @@ async function dispatchRoutes(
   }
 
   if (normalizedEvent.source === "uchat") {
-    let activeVerification:
-      | {
-          target: string;
-          skipped: boolean;
-          reason: string;
-        }
-      | {
-          target: string;
-          matched: boolean;
-          activeContactId?: string;
-          matchedBy?: string;
-        }
-      | null = null;
-
     try {
-      activeVerification = await verifyContactAgainstActiveCampaign(
+      const routed = await routeToActiveCampaign(
         supabase,
         launch,
         contact,
         eventId,
         normalizedEvent.source,
+        routingPayload,
       );
 
-      if ("skipped" in activeVerification && activeVerification.skipped) {
-        await insertProcessingLog(
+      const appliedActiveCampaignTags =
+        "appliedTags" in routed && Array.isArray(routed.appliedTags)
+          ? routed.appliedTags
+          : "tagsApplied" in routed && Array.isArray(routed.tagsApplied)
+            ? routed.tagsApplied
+            : [];
+
+      if (appliedActiveCampaignTags.length > 0) {
+        await updateLeadJourneyData(
           supabase,
-          launch.id,
-          contact.id,
-          eventId,
+          contact,
           normalizedEvent.source,
-          "info",
-          "ACTIVECAMPAIGN_VERIFICATION_SKIPPED",
-          "Verificacao do ActiveCampaign ignorada",
-          "O webhook do UChat foi aceito, mas a verificacao de duplicidade no ActiveCampaign foi ignorada por falta de configuracao ou dado minimo de busca.",
-          activeVerification as unknown as JsonRecord,
+          routingPayload,
+          {
+            tags: appliedActiveCampaignTags as string[],
+          },
         );
-      } else if ("matched" in activeVerification && activeVerification.matched) {
+      }
+
+      if (!("skipped" in routed) || !routed.skipped) {
         await insertProcessingLog(
           supabase,
           launch.id,
@@ -3481,25 +3489,34 @@ async function dispatchRoutes(
           eventId,
           normalizedEvent.source,
           "success",
-          "ACTIVECAMPAIGN_DUPLICATE_LINKED",
-          "Contato ja existia no ActiveCampaign",
-          "O Launch Hub encontrou um contato compativel no ActiveCampaign e vinculou a identidade existente sem reenviar o webhook do proprio UChat ao subflow de boas-vindas.",
-          activeVerification as unknown as JsonRecord,
-        );
-      } else {
-        await insertProcessingLog(
-          supabase,
-          launch.id,
-          contact.id,
-          eventId,
-          normalizedEvent.source,
-          "info",
-          "ACTIVECAMPAIGN_DUPLICATE_NOT_FOUND",
-          "Nenhum duplicado encontrado no ActiveCampaign",
-          "O Launch Hub consultou o ActiveCampaign, nao encontrou um contato correspondente e finalizou o tratamento sem retorno ao subflow de boas-vindas.",
-          activeVerification as unknown as JsonRecord,
+          "ROUTED_TO_ACTIVECAMPAIGN",
+          "Contato enviado ao ActiveCampaign",
+          "O webhook do UChat foi tratado e o contato foi sincronizado com o ActiveCampaign usando as tags configuradas para esta fonte.",
+          routed as unknown as JsonRecord,
         );
       }
+
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "info",
+        "UCHAT_WEBHOOK_PROCESSED_NO_RETURN",
+        "Webhook do UChat tratado sem retorno",
+        "O webhook do proprio UChat sincroniza o contato com o ActiveCampaign, mas nao retorna ao subflow de boas-vindas. Esse retorno fica reservado ao webhook do Sendflow.",
+        {
+          activeCampaignRoute: routed,
+          returnedToUchat: false,
+        } as JsonRecord,
+      );
+
+      return {
+        activeCampaign: routed,
+        returnedToUchat: false,
+        reason: "uchat_webhook_syncs_to_activecampaign_only",
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await insertProcessingLog(
@@ -3508,32 +3525,17 @@ async function dispatchRoutes(
         contact.id,
         eventId,
         normalizedEvent.source,
-        "warning",
-        "ACTIVECAMPAIGN_VERIFICATION_FAILED",
-        "Falha ao consultar o ActiveCampaign",
-        "A verificacao de duplicidade no ActiveCampaign falhou, mas o webhook do proprio UChat nao sera reenviado ao subflow de boas-vindas.",
-        { error: message },
+        "error",
+        "ROUTING_TO_ACTIVECAMPAIGN_FAILED",
+        "Falha ao enviar contato ao ActiveCampaign",
+        "O webhook do UChat foi tratado, mas a sincronizacao do contato com o ActiveCampaign falhou.",
+        {
+          error: message,
+          ...buildRoutingFailureContext(contact, routingPayload, normalizedEvent),
+        },
       );
+      throw error;
     }
-
-    await insertProcessingLog(
-      supabase,
-      launch.id,
-      contact.id,
-      eventId,
-      normalizedEvent.source,
-      "info",
-      "UCHAT_WEBHOOK_PROCESSED_NO_RETURN",
-      "Webhook do UChat tratado sem retorno",
-      "Eventos recebidos pelo webhook do proprio UChat ficam apenas no tratamento e na verificacao de duplicidade. O subflow padrao de boas-vindas fica reservado ao webhook do Sendflow.",
-      activeVerification ? ({ activeVerification } as JsonRecord) : {},
-    );
-
-    return {
-      checkedActiveCampaign: activeVerification,
-      returnedToUchat: false,
-      reason: "uchat_webhook_does_not_return_to_welcome_subflow",
-    };
   }
 
   let activeCampaignRoute: JsonRecord | null = null;

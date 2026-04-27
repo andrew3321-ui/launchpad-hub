@@ -185,6 +185,11 @@ const MANAGED_SOURCE_ALIASES = [
     label: "Sendflow",
     helper: "Tags aplicadas quando o contato entrar pelo webhook do Sendflow.",
   },
+  {
+    alias: "uchat",
+    label: "UChat",
+    helper: "Tags aplicadas quando o contato entrar pelo webhook do UChat.",
+  },
 ] as const;
 const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 const ACTIVE_CAMPAIGN_STALE_SYNC_MS = 90_000;
