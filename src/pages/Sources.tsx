@@ -484,6 +484,7 @@ export default function Sources() {
   const { toast } = useToast();
   const latestLaunchIdRef = useRef<string | null>(null);
   const catalogRequestRef = useRef(0);
+  const googleSheetsAutoRequestKeysRef = useRef<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<"active" | "uchat" | "gsheets" | null>(null);
@@ -1193,6 +1194,7 @@ export default function Sources() {
     async (options?: {
       launchId?: string | null;
       authMode?: GoogleSheetsAuthMode;
+      oauthConnected?: boolean;
       serviceAccountEmail?: string;
       privateKey?: string;
       spreadsheetId?: string;
@@ -1200,6 +1202,7 @@ export default function Sources() {
     }) => {
       const requestLaunchId = options?.launchId ?? activeLaunchId;
       const authMode = normalizeGoogleSheetsAuthMode(options?.authMode ?? gsAuthMode);
+      const oauthConnected = options?.oauthConnected ?? gsOauthConnected;
       const serviceAccountEmail = (options?.serviceAccountEmail ?? gsServiceAccountEmail).trim();
       const privateKey = (options?.privateKey ?? gsPrivateKey).trim();
       const spreadsheetId = (options?.spreadsheetId ?? gsSpreadsheetId).trim();
@@ -1218,7 +1221,7 @@ export default function Sources() {
         return;
       }
 
-      if (authMode === "oauth" && !gsOauthConnected) {
+      if (authMode === "oauth" && !oauthConnected) {
         if (!options?.silent) {
           toast({
             title: "Conecte sua conta Google",
@@ -1258,10 +1261,12 @@ export default function Sources() {
         setGsOauthEmail(typedData.connectionEmail ?? "");
         setGsOauthConnected(Boolean(typedData.authMode === "oauth" && typedData.connectionEmail));
         setGsAvailableSpreadsheets(typedData.spreadsheets ?? []);
-        setGsSpreadsheetTitle(typedData.selectedSpreadsheetTitle ?? "");
-        if (typedData.selectedSpreadsheetId) {
-          setGsSpreadsheetId(typedData.selectedSpreadsheetId);
-        }
+        setGsSpreadsheetTitle((currentTitle) =>
+          typedData.selectedSpreadsheetTitle ?? currentTitle,
+        );
+        setGsSpreadsheetId((currentSpreadsheetId) =>
+          typedData.selectedSpreadsheetId ?? currentSpreadsheetId,
+        );
         setGsAvailableSheets(
           typedData.sheets.map((sheet) => ({
             id: sheet.id,
@@ -1273,9 +1278,9 @@ export default function Sources() {
           typedData.sheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
             ?.title ?? "";
 
-        if (!gsSheetName.trim() && firstSheetName) {
-          setGsSheetName(firstSheetName);
-        }
+        setGsSheetName((currentSheetName) =>
+          currentSheetName.trim() ? currentSheetName : firstSheetName,
+        );
 
         if (!options?.silent) {
           toast({
@@ -1319,14 +1324,57 @@ export default function Sources() {
     if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
     if (loadingGoogleSheetsCatalog) return;
 
+    const startAutoRequest = (key: string) => {
+      if (googleSheetsAutoRequestKeysRef.current.has(key)) return false;
+      googleSheetsAutoRequestKeysRef.current.add(key);
+      return true;
+    };
+
     if (
       visibleGsAuthMode === "oauth" &&
       visibleGsOauthConnected &&
       gsAvailableSpreadsheets.length === 0
     ) {
+      const requestKey = `oauth:list:${activeLaunchId}`;
+      if (!startAutoRequest(requestKey)) return;
       void loadGoogleSheetsCatalog({
         launchId: activeLaunchId,
         authMode: "oauth",
+        oauthConnected: true,
+        spreadsheetId: visibleGsSpreadsheetId,
+        silent: true,
+      });
+      return;
+    }
+
+    if (
+      visibleGsAuthMode === "oauth" &&
+      visibleGsOauthConnected &&
+      !visibleGsSpreadsheetId.trim() &&
+      gsAvailableSpreadsheets.length > 0
+    ) {
+      const firstSpreadsheet = gsAvailableSpreadsheets[0] ?? null;
+      if (firstSpreadsheet?.id) {
+        setGsSpreadsheetId(firstSpreadsheet.id);
+        setGsSpreadsheetTitle(firstSpreadsheet.title ?? "");
+        setGsSheetName("");
+        setGsAvailableSheets([]);
+      }
+      return;
+    }
+
+    if (
+      visibleGsAuthMode === "oauth" &&
+      visibleGsOauthConnected &&
+      visibleGsSpreadsheetId.trim() &&
+      gsAvailableSheets.length === 0
+    ) {
+      const requestKey = `oauth:sheets:${activeLaunchId}:${visibleGsSpreadsheetId.trim()}`;
+      if (!startAutoRequest(requestKey)) return;
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunchId,
+        authMode: "oauth",
+        oauthConnected: true,
         spreadsheetId: visibleGsSpreadsheetId,
         silent: true,
       });
@@ -1340,6 +1388,8 @@ export default function Sources() {
       visibleGsSpreadsheetId.trim() &&
       gsAvailableSheets.length === 0
     ) {
+      const requestKey = `service:sheets:${activeLaunchId}:${visibleGsServiceAccountEmail.trim()}:${visibleGsSpreadsheetId.trim()}`;
+      if (!startAutoRequest(requestKey)) return;
       void loadGoogleSheetsCatalog({
         launchId: activeLaunchId,
         authMode: "service_account",
@@ -1363,6 +1413,10 @@ export default function Sources() {
     visibleGsServiceAccountEmail,
     visibleGsSpreadsheetId,
   ]);
+
+  useEffect(() => {
+    googleSheetsAutoRequestKeysRef.current = new Set();
+  }, [activeLaunchId, hydratedLaunchId, visibleGsAuthMode, visibleGsOauthConnected]);
 
   const connectGoogleSheetsOauth = useCallback(async () => {
     if (!activeLaunch) return;
@@ -1392,6 +1446,7 @@ export default function Sources() {
           client_id: GOOGLE_OAUTH_CLIENT_ID,
           scope: GOOGLE_OAUTH_SCOPES,
           ux_mode: "popup",
+          access_type: "offline",
           redirect_uri: window.location.origin,
           select_account: true,
           prompt: "consent",
@@ -1454,6 +1509,7 @@ export default function Sources() {
       await loadGoogleSheetsCatalog({
         launchId: activeLaunch.id,
         authMode: "oauth",
+        oauthConnected: true,
         spreadsheetId: gsSpreadsheetId,
         silent: true,
       });
