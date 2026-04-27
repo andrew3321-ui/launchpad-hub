@@ -1962,12 +1962,15 @@ async function findExistingActiveCampaignContact(
   launch: LaunchRow,
   contact: LeadContactRow,
   knownContactId?: string | null,
+  options?: { phoneOnly?: boolean; phoneSearchValue?: string | null },
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     return null;
   }
 
-  if (knownContactId) {
+  const phoneOnly = options?.phoneOnly === true;
+
+  if (knownContactId && !phoneOnly) {
     try {
       const payload = await activeCampaignRequest(
         launch.ac_api_url,
@@ -1990,7 +1993,7 @@ async function findExistingActiveCampaignContact(
     }
   }
 
-  if (contact.primary_email) {
+  if (!phoneOnly && contact.primary_email) {
     const payload = await activeCampaignRequest(
       launch.ac_api_url,
       launch.ac_api_key,
@@ -2012,6 +2015,7 @@ async function findExistingActiveCampaignContact(
   }
 
   const phoneCandidates = buildPhoneSearchCandidates([
+    options?.phoneSearchValue,
     contact.primary_phone,
     contact.normalized_phone,
   ]);
