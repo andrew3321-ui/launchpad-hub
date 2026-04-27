@@ -1665,6 +1665,7 @@ async function syncContactToActiveCampaign(
   tagNames: string[],
   fieldValues: ActiveCampaignFieldValueInput[],
   knownContactId?: string | null,
+  options?: { phoneOnlyMatch?: boolean; phoneSearchValue?: string | null },
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
@@ -1674,14 +1675,33 @@ async function syncContactToActiveCampaign(
     throw new ProcessContactError("The contact does not have email or phone to send to ActiveCampaign", 400);
   }
 
+  const phoneOnly = options?.phoneOnlyMatch === true;
+  const overridePhone = nonEmptyString(options?.phoneSearchValue) || null;
+
   const { firstName, lastName } = splitName(contact.primary_name);
+  // For Sendflow (phoneOnly), never overwrite the email of the existing AC contact;
+  // we only want to merge/update by phone and apply the configured tag.
   const contactPayload = {
-    email: contact.primary_email || undefined,
-    phone: contact.primary_phone || undefined,
+    email: phoneOnly ? undefined : (contact.primary_email || undefined),
+    phone: overridePhone || contact.primary_phone || undefined,
     firstName: firstName || undefined,
     lastName: lastName || undefined,
   };
-  const existingContact = await findExistingActiveCampaignContact(launch, contact, knownContactId);
+  const existingContact = await findExistingActiveCampaignContact(
+    launch,
+    contact,
+    knownContactId,
+    { phoneOnly, phoneSearchValue: overridePhone },
+  );
+  if (!existingContact && phoneOnly && !contact.primary_email) {
+    // Sendflow phone-only path: only update/merge an EXISTING ActiveCampaign contact.
+    // We never create a new contact from a Sendflow webhook that carries no email.
+    throw new ProcessContactError(
+      "ActiveCampaign contact not found by phone for Sendflow webhook",
+      404,
+    );
+  }
+
   const payload = existingContact
     ? await activeCampaignRequest(
         launch.ac_api_url,
@@ -1942,12 +1962,15 @@ async function findExistingActiveCampaignContact(
   launch: LaunchRow,
   contact: LeadContactRow,
   knownContactId?: string | null,
+  options?: { phoneOnly?: boolean; phoneSearchValue?: string | null },
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     return null;
   }
 
-  if (knownContactId) {
+  const phoneOnly = options?.phoneOnly === true;
+
+  if (knownContactId && !phoneOnly) {
     try {
       const payload = await activeCampaignRequest(
         launch.ac_api_url,
@@ -1970,7 +1993,7 @@ async function findExistingActiveCampaignContact(
     }
   }
 
-  if (contact.primary_email) {
+  if (!phoneOnly && contact.primary_email) {
     const payload = await activeCampaignRequest(
       launch.ac_api_url,
       launch.ac_api_key,
@@ -1992,6 +2015,7 @@ async function findExistingActiveCampaignContact(
   }
 
   const phoneCandidates = buildPhoneSearchCandidates([
+    options?.phoneSearchValue,
     contact.primary_phone,
     contact.normalized_phone,
   ]);
@@ -2886,12 +2910,17 @@ async function routeToActiveCampaign(
       contact.id,
       "activecampaign",
     );
+    const sendflowPhoneFromPayload =
+      source === "sendflow" ? findStringDeep(payload, ["number"]) : null;
     const response = await syncContactToActiveCampaign(
       launch,
       contact,
       tagNames,
       fieldValues,
       existingIdentity?.external_contact_id || null,
+      source === "sendflow"
+        ? { phoneOnlyMatch: true, phoneSearchValue: sendflowPhoneFromPayload }
+        : undefined,
     );
 
     await upsertLeadIdentity(
