@@ -1582,6 +1582,7 @@ async function syncContactToActiveCampaign(
   contact: LeadContactRow,
   tagNames: string[],
   fieldValues: ActiveCampaignFieldValueInput[],
+  knownContactId?: string | null,
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
@@ -1592,23 +1593,35 @@ async function syncContactToActiveCampaign(
   }
 
   const { firstName, lastName } = splitName(contact.primary_name);
-  const payload = await activeCampaignRequest(
-    launch.ac_api_url,
-    launch.ac_api_key,
-    "/api/3/contact/sync",
-    "POST",
-    {
-      contact: {
-        email: contact.primary_email || undefined,
-        phone: contact.primary_phone || undefined,
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-      },
-    },
-  );
+  const contactPayload = {
+    email: contact.primary_email || undefined,
+    phone: contact.primary_phone || undefined,
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+  };
+  const existingContact = await findExistingActiveCampaignContact(launch, contact, knownContactId);
+  const payload = existingContact
+    ? await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        `/api/3/contacts/${existingContact.activeContactId}`,
+        "PUT",
+        {
+          contact: contactPayload,
+        },
+      )
+    : await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        "/api/3/contact/sync",
+        "POST",
+        {
+          contact: contactPayload,
+        },
+      );
 
   const syncedContact = isRecord((payload as JsonRecord).contact) ? ((payload as JsonRecord).contact as JsonRecord) : {};
-  const activeContactId = nonEmptyString(syncedContact.id);
+  const activeContactId = nonEmptyString(syncedContact.id) || existingContact?.activeContactId;
 
   if (!activeContactId) {
     throw new ProcessContactError("ActiveCampaign did not return the synced contact id", 500);
@@ -1621,36 +1634,57 @@ async function syncContactToActiveCampaign(
   );
 
   if (launch.ac_default_list_id) {
-    await activeCampaignRequest(
-      launch.ac_api_url,
-      launch.ac_api_key,
-      "/api/3/contactLists",
-      "POST",
-      {
-        contactList: {
-          list: launch.ac_default_list_id,
-          contact: activeContactId,
-          status: 1,
+    try {
+      await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        "/api/3/contactLists",
+        "POST",
+        {
+          contactList: {
+            list: launch.ac_default_list_id,
+            contact: activeContactId,
+            status: 1,
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/\b(already|duplicate|exists|duplicado|existe)\b/i.test(message)) {
+        throw error;
+      }
+    }
   }
 
   const appliedTags: string[] = [];
+  const existingTagIds = new Set(await listActiveCampaignContactTagIds(launch, activeContactId));
   for (const tagName of uniqueStrings(tagNames)) {
     const tagId = await resolveActiveCampaignTagId(launch, tagName);
-    await activeCampaignRequest(
-      launch.ac_api_url,
-      launch.ac_api_key,
-      "/api/3/contactTags",
-      "POST",
-      {
-        contactTag: {
-          contact: activeContactId,
-          tag: tagId,
+    if (existingTagIds.has(tagId)) {
+      appliedTags.push(tagName);
+      continue;
+    }
+
+    try {
+      await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        "/api/3/contactTags",
+        "POST",
+        {
+          contactTag: {
+            contact: activeContactId,
+            tag: tagId,
+          },
         },
-      },
-    );
+      );
+      existingTagIds.add(tagId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/\b(already|duplicate|exists|duplicado|existe)\b/i.test(message)) {
+        throw error;
+      }
+    }
     appliedTags.push(tagName);
   }
 
@@ -1658,6 +1692,8 @@ async function syncContactToActiveCampaign(
     activeContactId,
     appliedTags,
     appliedFieldValues,
+    matchedBy: existingContact?.matchedBy || null,
+    operation: existingContact ? "updated_existing" : "synced",
   };
 }
 
@@ -1746,6 +1782,35 @@ async function upsertActiveCampaignFieldValues(
   }
 
   return appliedFieldValues;
+}
+
+async function listActiveCampaignContactTagIds(
+  launch: LaunchRow,
+  activeContactId: string,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) return [] as string[];
+
+  let payload: unknown;
+  try {
+    payload = await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      `/api/3/contacts/${activeContactId}/contactTags`,
+      "GET",
+    );
+  } catch {
+    return [] as string[];
+  }
+
+  const contactTags = Array.isArray((payload as JsonRecord).contactTags)
+    ? ((payload as JsonRecord).contactTags as JsonRecord[])
+    : [];
+
+  return uniqueStrings(
+    contactTags
+      .map((item) => nonEmptyString(item.tag))
+      .filter((tagId): tagId is string => Boolean(tagId)),
+  );
 }
 
 function extractActiveCampaignContact(payload: unknown) {
@@ -2676,7 +2741,19 @@ async function routeToActiveCampaign(
   }
 
   try {
-    const response = await syncContactToActiveCampaign(launch, contact, tagNames, fieldValues);
+    const existingIdentity = await fetchLeadIdentity(
+      supabase,
+      launch.id,
+      contact.id,
+      "activecampaign",
+    );
+    const response = await syncContactToActiveCampaign(
+      launch,
+      contact,
+      tagNames,
+      fieldValues,
+      existingIdentity?.external_contact_id || null,
+    );
 
     await upsertLeadIdentity(
       supabase,
@@ -2690,6 +2767,8 @@ async function routeToActiveCampaign(
         contact_id: response.activeContactId,
         applied_field_values: response.appliedFieldValues,
         applied_tags: response.appliedTags,
+        matched_by: response.matchedBy,
+        operation: response.operation,
       },
     );
 
@@ -2699,6 +2778,8 @@ async function routeToActiveCampaign(
       contactId: response.activeContactId,
       fieldValuesApplied: response.appliedFieldValues,
       tagsApplied: response.appliedTags,
+      matchedBy: response.matchedBy,
+      operation: response.operation,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
