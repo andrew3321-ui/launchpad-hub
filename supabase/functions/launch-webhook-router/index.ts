@@ -2624,24 +2624,28 @@ async function findOrCreateUchatUser(
   }
 
   if (contact.primary_phone) {
-    const phoneSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
-      limit: 1,
-      page: 1,
-      phone: contact.primary_phone,
-    });
+    const phoneCandidates = buildUchatPhoneCandidates(contact.primary_phone);
+    const phoneCandidatesToSearch = phoneCandidates.length > 0 ? phoneCandidates : [contact.primary_phone];
+    for (const phoneCandidate of phoneCandidatesToSearch) {
+      const phoneSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
+        limit: 1,
+        page: 1,
+        phone: phoneCandidate,
+      });
 
-    const phoneMatch = Array.isArray((phoneSearch as JsonRecord).data)
-      ? (((phoneSearch as JsonRecord).data as JsonRecord[])[0] || null)
-      : null;
+      const phoneMatch = Array.isArray((phoneSearch as JsonRecord).data)
+        ? (((phoneSearch as JsonRecord).data as JsonRecord[])[0] || null)
+        : null;
 
-    const userNs = nonEmptyString(phoneMatch?.user_ns);
-    if (userNs) {
-      return {
-        userNs,
-        userId: extractKnownUchatUserId(phoneMatch),
-        snapshot: phoneMatch,
-        resolutionSource: "phone_search",
-      } satisfies ResolvedUchatRecipient;
+      const userNs = nonEmptyString(phoneMatch?.user_ns);
+      if (userNs) {
+        return {
+          userNs,
+          userId: extractKnownUchatUserId(phoneMatch),
+          snapshot: phoneMatch,
+          resolutionSource: "phone_search",
+        } satisfies ResolvedUchatRecipient;
+      }
     }
   }
 
@@ -2668,11 +2672,14 @@ async function findOrCreateUchatUser(
   }
 
   const { firstName, lastName } = splitName(contact.primary_name);
+  const normalizedCreatePhone = contact.primary_phone
+    ? pickPreferredUchatCreatePhone(contact.primary_phone) || contact.primary_phone
+    : null;
   const created = await uchatRequest(workspace.api_token, "/subscriber/create", "POST", {
     first_name: firstName || undefined,
     last_name: lastName || undefined,
     name: contact.primary_name || undefined,
-    phone: contact.primary_phone || undefined,
+    phone: normalizedCreatePhone || undefined,
     email: contact.primary_email || undefined,
   });
 
