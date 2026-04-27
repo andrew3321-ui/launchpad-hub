@@ -177,6 +177,67 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map(nonEmptyString).filter((value): value is string => Boolean(value)))];
 }
 
+function digitsOnly(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const digits = String(value).replace(/\D/g, "");
+  return digits || null;
+}
+
+function addBrazilianPhoneNinthDigitVariants(localDigits: string) {
+  const variants = new Set<string>([localDigits]);
+
+  if (/^[1-9]{2}[6-9]\d{7}$/.test(localDigits)) {
+    variants.add(`${localDigits.slice(0, 2)}9${localDigits.slice(2)}`);
+  }
+
+  if (/^[1-9]{2}9[6-9]\d{7}$/.test(localDigits)) {
+    variants.add(`${localDigits.slice(0, 2)}${localDigits.slice(3)}`);
+  }
+
+  return [...variants];
+}
+
+function buildPhoneSearchCandidates(values: Array<string | null | undefined>) {
+  const candidates = new Set<string>();
+
+  for (const value of values) {
+    const raw = nonEmptyString(value);
+    const digits = digitsOnly(raw);
+
+    if (raw) candidates.add(raw);
+    if (!digits) continue;
+
+    candidates.add(digits);
+    candidates.add(`+${digits}`);
+
+    const localDigits = digits.startsWith("55") && digits.length > 11
+      ? digits.slice(2)
+      : digits;
+
+    for (const localVariant of addBrazilianPhoneNinthDigitVariants(localDigits)) {
+      candidates.add(localVariant);
+      candidates.add(`55${localVariant}`);
+      candidates.add(`+55${localVariant}`);
+    }
+  }
+
+  return uniqueStrings([...candidates]).slice(0, 18);
+}
+
+function phonesLookEquivalent(left: unknown, right: unknown) {
+  const leftDigits = digitsOnly(left);
+  const rightDigits = digitsOnly(right);
+
+  if (!leftDigits || !rightDigits) return false;
+  if (leftDigits === rightDigits) return true;
+
+  return (
+    leftDigits.length >= 10 &&
+    rightDigits.length >= 10 &&
+    (leftDigits.endsWith(rightDigits) || rightDigits.endsWith(leftDigits))
+  );
+}
+
 function splitName(fullName?: string | null) {
   const value = nonEmptyString(fullName);
   if (!value) return { firstName: null, lastName: null };
@@ -931,7 +992,17 @@ function extractTagNames(payload: JsonRecord) {
 
 function extractTagAliases(payload: JsonRecord, source?: WebhookSource | null) {
   return uniqueStrings([
-    ...collectStringListDeep(payload, ["tag_aliases", "tag_alias", "state", "states", "status"]),
+    ...collectStringListDeep(payload, [
+      "tag_aliases",
+      "tag_alias",
+      "state",
+      "states",
+      "status",
+      "campaign_name",
+      "campaign_id",
+      "group_name",
+      "group_id",
+    ]),
     findStringDeep(payload, ["event_type", "event", "source", "platform", "trigger_name"]),
     source,
   ]);
@@ -1838,6 +1909,35 @@ function extractActiveCampaignContact(payload: unknown) {
   return contacts[0] || null;
 }
 
+function extractActiveCampaignContacts(payload: unknown) {
+  if (!isRecord(payload)) return [] as JsonRecord[];
+
+  if (isRecord((payload as JsonRecord).contact)) {
+    return [(payload as JsonRecord).contact as JsonRecord];
+  }
+
+  return Array.isArray((payload as JsonRecord).contacts)
+    ? ((payload as JsonRecord).contacts as JsonRecord[]).filter(isRecord)
+    : [];
+}
+
+function pickActiveCampaignContactByPhone(
+  payload: unknown,
+  phoneCandidates: string[],
+) {
+  const contacts = extractActiveCampaignContacts(payload);
+
+  return (
+    contacts.find((candidate) =>
+      phoneCandidates.some((phoneCandidate) =>
+        phonesLookEquivalent(candidate.phone, phoneCandidate)
+      )
+    ) ||
+    contacts[0] ||
+    null
+  );
+}
+
 async function findExistingActiveCampaignContact(
   launch: LaunchRow,
   contact: LeadContactRow,
@@ -1891,30 +1991,37 @@ async function findExistingActiveCampaignContact(
     }
   }
 
-  const phoneCandidates = uniqueStrings([
+  const phoneCandidates = buildPhoneSearchCandidates([
     contact.primary_phone,
     contact.normalized_phone,
-    contact.primary_phone?.replace(/\D/g, "") || null,
   ]);
 
   for (const phoneCandidate of phoneCandidates) {
-    const payload = await activeCampaignRequest(
-      launch.ac_api_url,
-      launch.ac_api_key,
-      "/api/3/contacts",
-      "GET",
-      undefined,
+    const queryVariants = [
       { phone: phoneCandidate },
-    );
+      { "filters[phone]": phoneCandidate },
+      { search: phoneCandidate },
+    ];
 
-    const matchedContact = extractActiveCampaignContact(payload);
-    const activeContactId = nonEmptyString(matchedContact?.id);
-    if (matchedContact && activeContactId) {
-      return {
-        matchedBy: "phone",
-        activeContactId,
-        snapshot: matchedContact,
-      };
+    for (const query of queryVariants) {
+      const payload = await activeCampaignRequest(
+        launch.ac_api_url,
+        launch.ac_api_key,
+        "/api/3/contacts",
+        "GET",
+        undefined,
+        query,
+      );
+
+      const matchedContact = pickActiveCampaignContactByPhone(payload, phoneCandidates);
+      const activeContactId = nonEmptyString(matchedContact?.id);
+      if (matchedContact && activeContactId) {
+        return {
+          matchedBy: "phone",
+          activeContactId,
+          snapshot: matchedContact,
+        };
+      }
     }
   }
 
@@ -2695,6 +2802,24 @@ async function routeToActiveCampaign(
   const tagNames = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
   const fieldValues = extractActiveCampaignFieldValues(source, payload);
 
+  if (source === "sendflow" && tagNames.length === 0) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "warning",
+      "SENDFLOW_ACTIVE_TAG_NOT_CONFIGURED",
+      "Sendflow sem tag do ActiveCampaign",
+      "O contato do Sendflow sera pesquisado/enviado ao ActiveCampaign pelo telefone, mas nenhuma tag foi resolvida para aplicar. Configure uma tag no bloco Sendflow em Fontes.",
+      {
+        inboundAliases: extractTagAliases(payload, source),
+        inboundTags: extractTagNames(payload),
+      },
+    );
+  }
+
   if (source === "uchat" && tagNames.length === 0) {
     await insertProcessingLog(
       supabase,
@@ -2741,6 +2866,9 @@ async function routeToActiveCampaign(
       fieldValues,
       tags: tagNames,
       listId: launch.ac_default_list_id,
+      phoneCandidates: source === "sendflow"
+        ? buildPhoneSearchCandidates([contact.primary_phone, contact.normalized_phone])
+        : [],
     },
   );
 
