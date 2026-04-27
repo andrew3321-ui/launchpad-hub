@@ -143,6 +143,25 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function runAfterResponse(task: Promise<unknown>, label: string) {
+  const guardedTask = task.catch((error) => {
+    console.error(`${label} failed`, error);
+  });
+  const edgeRuntime = (globalThis as {
+    EdgeRuntime?: {
+      waitUntil?: (task: Promise<unknown>) => void;
+    };
+  }).EdgeRuntime;
+
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(guardedTask);
+    return "wait_until";
+  }
+
+  void guardedTask;
+  return "fire_and_forget";
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -3086,6 +3105,80 @@ async function dispatchRoutes(
   return { skipped: true, reason: "no_route_defined" };
 }
 
+async function runAcceptedContactJobs(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+  processedContactId: string,
+  eventId: string,
+) {
+  let contact: LeadContactRow | null = null;
+
+  try {
+    contact = await fetchLeadContact(supabase, processedContactId);
+
+    await updateLeadJourneyData(
+      supabase,
+      contact,
+      normalizedEvent.source,
+      normalizedEvent.payload,
+    );
+
+    if (normalizedEvent.source === "activecampaign") {
+      try {
+        await appendActiveCampaignWebhookToGoogleSheets(
+          supabase,
+          launch,
+          contact,
+          normalizedEvent.payload,
+          eventId,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          normalizedEvent.source,
+          "warning",
+          "GOOGLE_SHEETS_APPEND_FAILED",
+          "Falha ao registrar no Google Sheets",
+          "O webhook do ActiveCampaign foi tratado, mas o espelhamento para a planilha configurada falhou.",
+          { error: message },
+        );
+      }
+    }
+
+    return await dispatchRoutes(
+      supabase,
+      launch,
+      normalizedEvent,
+      contact.id,
+      eventId,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (contact) {
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        normalizedEvent.source,
+        "error",
+        "BACKGROUND_ROUTING_FAILED",
+        "Falha no processamento apos aceite do webhook",
+        "O Launch Hub aceitou o webhook rapidamente, mas uma etapa posterior de roteamento falhou.",
+        { error: message },
+      );
+    }
+
+    throw error;
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -3147,46 +3240,34 @@ Deno.serve(async (request) => {
       });
     }
 
-    const contact = await fetchLeadContact(supabase, processingResult.contactId);
-
-    await updateLeadJourneyData(
-      supabase,
-      contact,
-      normalizedEvent.source,
-      normalizedEvent.payload,
-    );
-
     if (normalizedEvent.source === "activecampaign") {
-      try {
-        await appendActiveCampaignWebhookToGoogleSheets(
+      const backgroundMode = runAfterResponse(
+        runAcceptedContactJobs(
           supabase,
           launch,
-          contact,
-          normalizedEvent.payload,
+          normalizedEvent,
+          processingResult.contactId,
           processingResult.eventId,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await insertProcessingLog(
-          supabase,
-          launch.id,
-          contact.id,
-          processingResult.eventId,
-          normalizedEvent.source,
-          "warning",
-          "GOOGLE_SHEETS_APPEND_FAILED",
-          "Falha ao registrar no Google Sheets",
-          "O webhook do ActiveCampaign foi tratado, mas o espelhamento para a planilha configurada falhou.",
-          { error: message },
-        );
-      }
+        ),
+        "activecampaign_webhook_background_jobs",
+      );
+
+      return jsonResponse({
+        accepted: true,
+        processing: processingResult,
+        routing: {
+          queued: true,
+          mode: backgroundMode,
+          reason: "activecampaign_webhook_acknowledged_before_external_routing",
+        },
+      });
     }
 
-    const routingResult = await dispatchRoutes(
+    const routingResult = await runAcceptedContactJobs(
       supabase,
       launch,
       normalizedEvent,
-      contact.id,
+      processingResult.contactId,
       processingResult.eventId,
     );
 
