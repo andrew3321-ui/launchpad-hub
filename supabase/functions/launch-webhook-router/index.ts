@@ -125,7 +125,6 @@ const corsHeaders = {
 };
 
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
-const SENDFLOW_WELCOME_LEGACY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
 const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
@@ -144,7 +143,7 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "60": "AUT",
 } as const;
 const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow"] as const;
-const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v1";
+const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v2";
 const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
 const ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX = "active-sheets:v1";
 const ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX = "active-job:v1";
@@ -1643,6 +1642,7 @@ function buildSendflowWelcomeSubflowActionKey(
   workspace: UChatWorkspaceRow,
   subflowNs: string,
   recipientKey: string,
+  groupEntryKey: string,
 ) {
   return [
     SENDFLOW_WELCOME_ACTION_PREFIX,
@@ -1650,6 +1650,43 @@ function buildSendflowWelcomeSubflowActionKey(
     `workspace:${workspace.id}`,
     `subflow:${subflowNs}`,
     `recipient:${normalizeKey(recipientKey)}`,
+    `entry:${normalizeDedupeKeyPart(groupEntryKey)}`,
+  ].join(":");
+}
+
+function buildSendflowGroupEntryKey(payload: JsonRecord, deliveryKey: string) {
+  const eventType =
+    findStringDeep(payload, ["event", "event_type", "type", "trigger_name"]) ||
+    "group.updated.members.added";
+  const groupKey =
+    findStringDeep(payload, [
+      "groupJid",
+      "group_jid",
+      "groupId",
+      "group_id",
+      "groupName",
+      "group_name",
+      "campaignId",
+      "campaign_id",
+    ]) || "unknown_group";
+  const entryTimestamp =
+    findStringDeep(payload, [
+      "createdAt_with_timezone_br",
+      "created_at_with_timezone_br",
+      "createdAt",
+      "created_at",
+      "memberAddedAt",
+      "member_added_at",
+      "joinedAt",
+      "joined_at",
+    ]);
+  const providerEventId = findStringDeep(payload, ["id", "event_id", "webhook_id"]);
+  const entryOccurrence = entryTimestamp || providerEventId || deliveryKey;
+
+  return [
+    `event:${normalizeDedupeKeyPart(eventType)}`,
+    `group:${normalizeDedupeKeyPart(groupKey)}`,
+    `occurrence:${normalizeDedupeKeyPart(entryOccurrence)}`,
   ].join(":");
 }
 
@@ -1724,38 +1761,6 @@ function buildActiveCampaignWebhookJobDedupeKey(
     `subflow:${normalizeDedupeKeyPart(subflowNs)}`,
     `tag:${normalizeDedupeKeyPart(tagName)}`,
   ].join(":");
-}
-
-async function findRecentUchatSubflowActionByPayload(
-  supabase: AnySupabaseClient,
-  launchId: string,
-  source: WebhookSource,
-  workspaceId: string | null,
-  userNs: string,
-  subflowNs: string,
-  cooldownMs: number,
-) {
-  const since = new Date(Date.now() - cooldownMs).toISOString();
-
-  const { data } = await supabase
-    .from("contact_routing_actions")
-    .select("id, status, created_at")
-    .eq("launch_id", launchId)
-    .eq("source", source)
-    .eq("target", "uchat")
-    .eq("action_type", "send-sub-flow")
-    .in("status", ["pending", "success"])
-    .gte("created_at", since)
-    .contains("request_payload", {
-      workspaceId,
-      userNs,
-      subflowNs,
-    })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return data ? (data as RoutingActionRow) : null;
 }
 
 async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
@@ -2913,8 +2918,17 @@ async function routeToUchat(
     const recipientKey = usesSendflowWelcomeLock || usesActiveCampaignSubflowLock
       ? phoneRecipientKey || targetUserId || userNs || contact.primary_email || contact.id
       : userNs || targetUserId || phoneRecipientKey || contact.primary_email || contact.id;
+    const sendflowGroupEntryKey = usesSendflowWelcomeLock
+      ? buildSendflowGroupEntryKey(payload, deliveryKey)
+      : null;
     const actionKey = usesSendflowWelcomeLock
-      ? buildSendflowWelcomeSubflowActionKey(launch, workspace, subflowNs, recipientKey)
+      ? buildSendflowWelcomeSubflowActionKey(
+          launch,
+          workspace,
+          subflowNs,
+          recipientKey,
+          sendflowGroupEntryKey || deliveryKey,
+        )
       : usesActiveCampaignSubflowLock
         ? buildActiveCampaignSubflowActionKey(launch, workspace, subflowNs, recipientKey)
         : `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
@@ -2927,6 +2941,7 @@ async function routeToUchat(
             dedupeScope: "sendflow_welcome_subflow",
             cycle: launch.current_cycle_number || 1,
             recipientKey: normalizeKey(recipientKey),
+            groupEntryKey: sendflowGroupEntryKey,
           }
         : {}),
       ...(usesActiveCampaignSubflowLock
@@ -2937,31 +2952,18 @@ async function routeToUchat(
           }
         : {}),
     };
-    const legacyDuplicate = usesSendflowWelcomeLock
-      ? await findRecentUchatSubflowActionByPayload(
-          supabase,
-          launch.id,
-          source,
-          workspace.workspace_id,
-          userNs,
-          subflowNs,
-          SENDFLOW_WELCOME_LEGACY_COOLDOWN_MS,
-        )
-      : null;
-    const actionId = legacyDuplicate
-      ? null
-      : await claimRoutingAction(
-          supabase,
-          launch.id,
-          contact.id,
-          eventId,
-          source,
-          "uchat",
-          "send-sub-flow",
-          actionKey,
-          requestPayload,
-          { releaseStalePending: !usesSendflowWelcomeLock },
-        );
+    const actionId = await claimRoutingAction(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "uchat",
+      "send-sub-flow",
+      actionKey,
+      requestPayload,
+      { releaseStalePending: !usesSendflowWelcomeLock },
+    );
 
     if (actionId) {
       try {
@@ -3008,8 +3010,7 @@ async function routeToUchat(
             subflowNs,
             actionKey,
             deliveryKey,
-            legacyDuplicateActionId: legacyDuplicate?.id ?? null,
-            legacyDuplicateCreatedAt: legacyDuplicate?.created_at ?? null,
+            groupEntryKey: sendflowGroupEntryKey,
           },
         );
       } else if (usesActiveCampaignSubflowLock) {
