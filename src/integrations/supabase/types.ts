@@ -357,6 +357,7 @@ export type Database = {
         Row: {
           attempts: number
           created_at: string
+          dedupe_key: string | null
           event_type: string | null
           id: string
           last_error: string | null
@@ -373,6 +374,7 @@ export type Database = {
         Insert: {
           attempts?: number
           created_at?: string
+          dedupe_key?: string | null
           event_type?: string | null
           id?: string
           last_error?: string | null
@@ -389,6 +391,7 @@ export type Database = {
         Update: {
           attempts?: number
           created_at?: string
+          dedupe_key?: string | null
           event_type?: string | null
           id?: string
           last_error?: string | null
