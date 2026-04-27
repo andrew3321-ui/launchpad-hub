@@ -594,29 +594,54 @@ export async function fetchGoogleSpreadsheetCatalog(config: GoogleSheetsConfigIn
     GOOGLE_SHEETS_SCOPE,
     GOOGLE_DRIVE_METADATA_SCOPE,
   ]);
-  const payload = await googleSheetsRequest(
+
+  const parseCatalogPayload = (payload: unknown) => {
+    const root = isRecord(payload) ? payload : {};
+    const sheets = Array.isArray(root.sheets) ? root.sheets : [];
+
+    return {
+      spreadsheetId: parsedConfig.spreadsheetId,
+      title: nonEmptyString(isRecord(root.properties) ? root.properties.title : null),
+      sheets: sheets.map((sheet) => {
+        const properties = isRecord(sheet) && isRecord(sheet.properties) ? sheet.properties : {};
+        return {
+          id: typeof properties.sheetId === "number" ? properties.sheetId : null,
+          title: nonEmptyString(properties.title),
+          index: typeof properties.index === "number" ? properties.index : null,
+        };
+      }),
+    } satisfies GoogleSpreadsheetCatalog;
+  };
+
+  const spreadsheetPath = `/spreadsheets/${encodeURIComponent(parsedConfig.spreadsheetId)}`;
+  const lightweightPayload = await googleSheetsRequest(
     accessToken,
-    `/spreadsheets/${encodeURIComponent(parsedConfig.spreadsheetId)}`,
+    spreadsheetPath,
     undefined,
     {
       fields: "spreadsheetId,properties.title,sheets.properties(sheetId,title,index)",
     },
   );
+  const lightweightCatalog = parseCatalogPayload(lightweightPayload);
 
-  const root = isRecord(payload) ? payload : {};
-  const sheets = Array.isArray(root.sheets) ? root.sheets : [];
+  if (lightweightCatalog.sheets.length > 0) {
+    return lightweightCatalog;
+  }
+
+  const completePayload = await googleSheetsRequest(
+    accessToken,
+    spreadsheetPath,
+    undefined,
+    {
+      includeGridData: "false",
+    },
+  );
+  const completeCatalog = parseCatalogPayload(completePayload);
 
   return {
     spreadsheetId: parsedConfig.spreadsheetId,
-    title: nonEmptyString(isRecord(root.properties) ? root.properties.title : null),
-    sheets: sheets.map((sheet) => {
-      const properties = isRecord(sheet) && isRecord(sheet.properties) ? sheet.properties : {};
-      return {
-        id: typeof properties.sheetId === "number" ? properties.sheetId : null,
-        title: nonEmptyString(properties.title),
-        index: typeof properties.index === "number" ? properties.index : null,
-      };
-    }),
+    title: completeCatalog.title ?? lightweightCatalog.title,
+    sheets: completeCatalog.sheets,
   } satisfies GoogleSpreadsheetCatalog;
 }
 

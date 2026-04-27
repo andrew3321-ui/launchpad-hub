@@ -215,6 +215,9 @@ Deno.serve(async (request) => {
           spreadsheetId: selectedSpreadsheetId,
         });
         selectedSpreadsheetTitle = catalog?.title ?? selectedSpreadsheetTitle;
+        if ((catalog?.sheets ?? []).length === 0) {
+          catalogWarning = "Google Sheets returned the spreadsheet but did not include any sheet tabs.";
+        }
       } catch (error) {
         if (config.authMode === "service_account") {
           throw error;
