@@ -1315,6 +1315,55 @@ export default function Sources() {
     ],
   );
 
+  useEffect(() => {
+    if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
+    if (loadingGoogleSheetsCatalog) return;
+
+    if (
+      visibleGsAuthMode === "oauth" &&
+      visibleGsOauthConnected &&
+      gsAvailableSpreadsheets.length === 0
+    ) {
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunchId,
+        authMode: "oauth",
+        spreadsheetId: visibleGsSpreadsheetId,
+        silent: true,
+      });
+      return;
+    }
+
+    if (
+      visibleGsAuthMode === "service_account" &&
+      visibleGsServiceAccountEmail.trim() &&
+      visibleGsPrivateKey.trim() &&
+      visibleGsSpreadsheetId.trim() &&
+      gsAvailableSheets.length === 0
+    ) {
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunchId,
+        authMode: "service_account",
+        serviceAccountEmail: visibleGsServiceAccountEmail,
+        privateKey: visibleGsPrivateKey,
+        spreadsheetId: visibleGsSpreadsheetId,
+        silent: true,
+      });
+    }
+  }, [
+    activeLaunchId,
+    gsAvailableSheets.length,
+    gsAvailableSpreadsheets.length,
+    hydratedLaunchId,
+    loadGoogleSheetsCatalog,
+    loading,
+    loadingGoogleSheetsCatalog,
+    visibleGsAuthMode,
+    visibleGsOauthConnected,
+    visibleGsPrivateKey,
+    visibleGsServiceAccountEmail,
+    visibleGsSpreadsheetId,
+  ]);
+
   const connectGoogleSheetsOauth = useCallback(async () => {
     if (!activeLaunch) return;
 
