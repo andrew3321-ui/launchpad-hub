@@ -68,7 +68,7 @@ const launchProcessingContextCache = new Map<string, {
 
 export interface ProcessIncomingContactResult {
   status: "processed" | "rejected";
-  action?: "created" | "merged";
+  action?: "created" | "merged" | "updated";
   contactId?: string | null;
   eventId?: string;
   logsCreated?: number;
@@ -376,6 +376,23 @@ export async function processIncomingContactEvent(
   }
 
   const candidateIds = new Set<string>();
+  let knownIdentityContactId: string | null = null;
+
+  if (body.externalContactId) {
+    const { data: existingIdentity } = await supabase
+      .from("lead_contact_identities")
+      .select("contact_id")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
+      .eq("source", body.source)
+      .eq("external_contact_id", body.externalContactId)
+      .maybeSingle();
+
+    if (existingIdentity?.contact_id) {
+      knownIdentityContactId = existingIdentity.contact_id;
+      candidateIds.add(existingIdentity.contact_id);
+    }
+  }
 
   if (normalizedEmail && settings.merge_on_exact_email) {
     const { data: emailMatches } = await supabase
@@ -414,10 +431,15 @@ export async function processIncomingContactEvent(
     const { data: matchedContacts } = await supabase.from("lead_contacts").select("*").in("id", [...candidateIds]);
 
     if (matchedContacts && matchedContacts.length > 0) {
-      existingContact = [...matchedContacts].sort((left, right) => scoreRecord(right) - scoreRecord(left))[0] as Record<
-        string,
-        unknown
-      >;
+      const identityMatchedContact = knownIdentityContactId
+        ? matchedContacts.find((row: { id: string }) => row.id === knownIdentityContactId)
+        : null;
+      existingContact =
+        (identityMatchedContact as Record<string, unknown> | null) ||
+        ([...matchedContacts].sort((left, right) => scoreRecord(right) - scoreRecord(left))[0] as Record<
+          string,
+          unknown
+        >);
     }
   }
 
@@ -430,9 +452,12 @@ export async function processIncomingContactEvent(
   });
 
   let processedContactId: string | null = null;
-  let action: "created" | "merged" = "created";
+  let action: "created" | "merged" | "updated" = "created";
 
   if (existingContact && settings.auto_merge_duplicates) {
+    const isKnownIdentityUpdate = Boolean(
+      knownIdentityContactId && existingContact.id === knownIdentityContactId,
+    );
     const preferIncoming =
       settings.prefer_most_complete_record &&
       incomingScore >
@@ -483,7 +508,9 @@ export async function processIncomingContactEvent(
           preferIncoming,
         ),
         last_source: body.source,
-        merged_from_count: Number(existingContact.merged_from_count || 0) + 1,
+        merged_from_count: isKnownIdentityUpdate
+          ? Number(existingContact.merged_from_count || 0)
+          : Number(existingContact.merged_from_count || 0) + 1,
         data: mergedData,
       })
       .eq("id", existingContact.id as string)
@@ -495,25 +522,30 @@ export async function processIncomingContactEvent(
     }
 
     processedContactId = updatedContact.id;
-    action = "merged";
+    action = isKnownIdentityUpdate ? "updated" : "merged";
 
-    logs.push({
-      launch_id: launch.id,
-      event_id: eventId,
-      contact_id: processedContactId,
-      source: body.source,
-      level: "success",
-      code: "DUPLICATE_CONTACT",
-      title: "Contatos duplicados",
-      message: `O evento de ${body.source} encontrou um contato ja existente e mesclou automaticamente os dados.`,
-      details: {
-        mergeReason: {
-          emailMatched: Boolean(normalizedEmail && settings.merge_on_exact_email),
-          phoneMatched: Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
+    if (shouldPersistInboundEvent) {
+      logs.push({
+        launch_id: launch.id,
+        event_id: eventId,
+        contact_id: processedContactId,
+        source: body.source,
+        level: isKnownIdentityUpdate ? "info" : "success",
+        code: isKnownIdentityUpdate ? "CONTACT_IDENTITY_UPDATED" : "DUPLICATE_CONTACT",
+        title: isKnownIdentityUpdate ? "Contato atualizado" : "Contatos duplicados",
+        message: isKnownIdentityUpdate
+          ? `O evento de ${body.source} atualizou um contato ja vinculado a mesma identidade externa, sem contar como nova mescla.`
+          : `O evento de ${body.source} encontrou um contato ja existente e mesclou automaticamente os dados.`,
+        details: {
+          mergeReason: {
+            emailMatched: Boolean(normalizedEmail && settings.merge_on_exact_email),
+            phoneMatched: Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
+            knownIdentityMatched: isKnownIdentityUpdate,
+          },
+          externalContactId: body.externalContactId || null,
         },
-        externalContactId: body.externalContactId || null,
-      },
-    });
+      });
+    }
   } else {
     const { data: createdContact, error: createError } = await supabase
       .from("lead_contacts")
