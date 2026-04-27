@@ -353,6 +353,65 @@ export type Database = {
           },
         ]
       }
+      launch_webhook_jobs: {
+        Row: {
+          attempts: number
+          created_at: string
+          event_type: string | null
+          id: string
+          last_error: string | null
+          launch_id: string
+          next_attempt_at: string
+          payload: Json
+          processed_at: string | null
+          response_payload: Json | null
+          source: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          event_type?: string | null
+          id?: string
+          last_error?: string | null
+          launch_id: string
+          next_attempt_at?: string
+          payload?: Json
+          processed_at?: string | null
+          response_payload?: Json | null
+          source: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          event_type?: string | null
+          id?: string
+          last_error?: string | null
+          launch_id?: string
+          next_attempt_at?: string
+          payload?: Json
+          processed_at?: string | null
+          response_payload?: Json | null
+          source?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_webhook_jobs_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launches: {
         Row: {
           ac_api_key: string | null
@@ -795,6 +854,14 @@ export type Database = {
       }
       csv_escape: { Args: { value: string }; Returns: string }
       dispatch_activecampaign_sync_jobs: { Args: never; Returns: Json }
+      dispatch_launch_webhook_job: {
+        Args: { target_job_id: string }
+        Returns: boolean
+      }
+      dispatch_pending_launch_webhook_jobs: {
+        Args: { limit_count?: number }
+        Returns: Json
+      }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       get_launch_visible_leads: {
         Args: { limit_count?: number; target_launch_id: string }
