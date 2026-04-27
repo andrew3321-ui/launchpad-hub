@@ -17,11 +17,10 @@ Ao utilizar a plataforma, você declara que leu e compreendeu esta Política.
 - Controladora responsável: **Megafone Digital**
 - Plataforma: **Launch Hub**
 - Site/aplicação: **https://painel-de-controle-megafone.lovable.app**
-- Contato principal para assuntos de privacidade: **andrehugo@megafone.digital**
+- Contato para assuntos de privacidade: **victorbezerra@megafone.digital**
+- Contato para assuntos de privacidade: **fca@megafone.digital**
 
 O acesso ao Launch Hub é restrito a usuários previamente autorizados pela Megafone Digital.
-
-Se desejar, este e-mail pode ser substituído futuramente pelo canal oficial de suporte ou encarregado de dados da operação.
 
 ## 3. Dados que podemos tratar
 
@@ -207,4 +206,5 @@ A versão mais atual será disponibilizada no canal oficial em que este document
 
 Para dúvidas, solicitações ou assuntos relacionados a privacidade e proteção de dados no contexto do Launch Hub, entre em contato por:
 
-- **andrehugo@megafone.digital**
+- **victorbezerra@megafone.digital**
+- **fca@megafone.digital**
