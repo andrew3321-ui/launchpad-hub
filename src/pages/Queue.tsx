@@ -103,7 +103,7 @@ export default function Queue() {
           description:
             eventError?.message ||
             actionError?.message ||
-            "Nao foi possivel carregar a fila operacional.",
+            "Não foi possivel carregar a fila operacional.",
           variant: "destructive",
         });
       }
@@ -146,7 +146,7 @@ export default function Queue() {
           <CardHeader>
             <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um expert para acompanhar os webhooks recebidos e as acoes que o
+              Escolha um expert para acompanhar os webhooks recebidos e as ações que o
               Launch Hub esta disparando.
             </CardDescription>
           </CardHeader>
@@ -178,7 +178,7 @@ export default function Queue() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Acoes registradas</CardTitle>
+            <CardTitle className="text-base">Ações registradas</CardTitle>
           </CardHeader>
           <CardContent className="text-3xl font-semibold">{visibleActions.length}</CardContent>
         </Card>
@@ -200,7 +200,7 @@ export default function Queue() {
             <CardHeader>
               <CardTitle>Webhooks recentes</CardTitle>
               <CardDescription>
-                Cada evento recebido vira uma entrada na fila antes de passar pela base canonica.
+                Cada evento recebido vira uma entrada na fila antes de passar pela base canônica.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -224,7 +224,7 @@ export default function Queue() {
                       </p>
                     </div>
                     {event.processing_summary && (
-                      <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border bg-muted/20 p-3 text-xs">
+                      <pre className="mt-3 overflow-x-auto whitespace-pré-wrap rounded-lg border bg-muted/20 p-3 text-xs">
                         {JSON.stringify(event.processing_summary, null, 2)}
                       </pre>
                     )}
@@ -236,7 +236,7 @@ export default function Queue() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Acoes disparadas</CardTitle>
+              <CardTitle>Ações disparadas</CardTitle>
               <CardDescription>
                 Aqui ficam as saidas que o Launch Hub tentou mandar para ActiveCampaign e UChat.
               </CardDescription>
@@ -244,7 +244,7 @@ export default function Queue() {
             <CardContent className="space-y-4">
               {visibleActions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nenhuma acao de roteamento ainda para esse expert neste ciclo.
+                  Nenhuma ação de roteamento ainda para esse expert neste ciclo.
                 </p>
               ) : (
                 visibleActions.map((action) => (

@@ -55,7 +55,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                 <TableHead>Workspace ID</TableHead>
                 <TableHead>API Token</TableHead>
                 <TableHead>Subflow de boas-vindas</TableHead>
-                <TableHead>Tag padrao</TableHead>
+                <TableHead>Tag padrão</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -99,7 +99,7 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
                     <Input
                       value={workspace.default_tag_name}
                       onChange={(event) => update(index, "default_tag_name", event.target.value)}
-                      placeholder="tag padrao"
+                      placeholder="tag padrão"
                       className="min-w-[160px]"
                     />
                   </TableCell>
@@ -116,17 +116,17 @@ export function UChatWorkspacesEditor({ workspaces, onChange }: Props) {
       )}
 
       <p className="text-sm text-muted-foreground">
-        O Launch Hub usa o primeiro workspace valido como destino padrao para mandar de volta
-        o contato tratado ao UChat. Esse subflow entra em acao nas rotas
-        Sendflow -&gt; Launch Hub -&gt; UChat por padrao, e tambem pode ser acionado por
+        O Launch Hub usa o primeiro workspace válido como destino padrão para mandar de volta
+        o contato tratado ao UChat. Esse subflow entra em ação nas rotas
+        Sendflow -&gt; Launch Hub -&gt; UChat por padrão, e também pode ser acionado por
         ActiveCampaign quando o payload enviar um `subflow_ns` explicito. Quando o webhook
-        entra pelo proprio UChat, o sistema consulta o ActiveCampaign apenas para verificacao
-        de duplicidade e nao retorna ao subflow de boas-vindas. A tag padrao pode acompanhar
+        entra pelo proprio UChat, o sistema consulta o ActiveCampaign apenas para verificação
+        de duplicidade e não retorna ao subflow de boas-vindas. A tag padrão pode acompanhar
         apenas nas rotas de retorno externas.
       </p>
       <p className="text-xs text-muted-foreground/80">
         Para WhatsApp template sair pelo subflow, deixe o template como primeira mensagem do
-        subflow e confirme que a automacao nao esta pausada no UChat.
+        subflow e confirme que a automacao não esta pausada no UChat.
       </p>
 
       <Button type="button" variant="outline" size="sm" onClick={addWorkspace}>

@@ -114,7 +114,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
   const handleSave = async () => {
     if (!name.trim()) {
       toast({
-        title: "Nome obrigatorio",
+        title: "Nome obrigatório",
         description: "Informe o nome do expert para continuar.",
         variant: "destructive",
       });
@@ -123,8 +123,8 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
     if (!user) {
       toast({
-        title: "Sessao indisponivel",
-        description: "Sua sessao nao foi reconhecida. Atualize a pagina e entre novamente.",
+        title: "Sessão indisponivel",
+        description: "Sua sessão não foi reconhecida. Atualize a página e entre novamente.",
         variant: "destructive",
       });
       return;
@@ -137,8 +137,8 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
 
       if (!baseSlug) {
         toast({
-          title: "Slug invalido",
-          description: "Use um nome com letras ou numeros para gerar o identificador interno do expert.",
+          title: "Slug inválido",
+          description: "Use um nome com letras ou números para gerar o identificador interno do expert.",
           variant: "destructive",
         });
         setSaving(false);
@@ -161,7 +161,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
         if (error || !data) {
           toast({
             title: "Erro ao salvar",
-            description: error?.message || "O lancamento nao retornou confirmacao do backend.",
+            description: error?.message || "O lancamento não retornou confirmacao do backend.",
             variant: "destructive",
           });
           return;
@@ -196,7 +196,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           if (!isDuplicateSlugError(error)) {
             toast({
               title: "Erro ao criar",
-              description: error?.message || "O backend nao confirmou a criacao do expert.",
+              description: error?.message || "O backend não confirmou a criação do expert.",
               variant: "destructive",
             });
             return;
@@ -206,7 +206,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
         if (!created) {
           toast({
             title: "Slug em uso",
-            description: "Nao conseguimos reservar um identificador unico para esse expert. Tente outro nome ou slug.",
+            description: "Não conseguimos reservar um identificador único para esse expert. Tente outro nome ou slug.",
             variant: "destructive",
           });
           return;
@@ -217,7 +217,7 @@ export function LaunchDialog({ open, onOpenChange, launchId, onSaved }: Props) {
           setSlugManual(true);
           toast({
             title: "Slug ajustado automaticamente",
-            description: `Ja existia um expert com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
+            description: `Já existia um expert com esse identificador. Usamos "${createdSlug}" para evitar conflito.`,
           });
         }
       }

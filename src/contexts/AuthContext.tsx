@@ -175,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     withTimeout(
       supabase.auth.getSession(),
       5000,
-      "A sessao demorou demais para carregar.",
+      "A sessão demorou demais para carregar.",
     )
       .then(({ data: { session: nextSession }, error }) => {
         if (!mounted) return;
@@ -284,7 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error: authError } = await withTimeout(
         supabase.auth.updateUser({ password: newPassword }),
         8000,
-        "A atualizacao da senha demorou demais para responder.",
+        "A atualização da senha demorou demais para responder.",
       );
 
       if (authError) {

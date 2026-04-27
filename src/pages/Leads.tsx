@@ -89,7 +89,7 @@ export default function Leads() {
           <CardHeader>
             <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um expert na barra lateral para visualizar a base canonica tratada
+              Escolha um expert na barra lateral para visualizar a base canônica tratada
               pelo Launch Hub.
             </CardDescription>
           </CardHeader>
@@ -117,8 +117,8 @@ export default function Leads() {
         <CardHeader>
           <CardTitle className="text-xl">Contatos tratados</CardTitle>
           <CardDescription>
-            Cada linha representa um contato final depois da normalizacao, deduplicacao e
-            verificacao de estado. Apenas os contatos recebidos pelos webhooks deste ciclo aparecem aqui.
+            Cada linha representa um contato final depois da normalização, deduplicação e
+            verificação de estado. Apenas os contatos recebidos pelos webhooks deste ciclo aparecem aqui.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -139,7 +139,7 @@ export default function Leads() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Telefone</TableHead>
-                    <TableHead>Ultima fonte</TableHead>
+                    <TableHead>Última fonte</TableHead>
                     <TableHead>Mesclas</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Atualizado</TableHead>

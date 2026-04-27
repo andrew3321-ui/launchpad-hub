@@ -272,7 +272,7 @@ async function ensureGoogleIdentityScript() {
         existingScript.addEventListener("load", () => resolve(), { once: true });
         existingScript.addEventListener(
           "error",
-          () => reject(new Error("Nao foi possivel carregar o login do Google.")),
+          () => reject(new Error("Não foi possivel carregar o login do Google.")),
           { once: true },
         );
         return;
@@ -283,7 +283,7 @@ async function ensureGoogleIdentityScript() {
       script.async = true;
       script.defer = true;
       script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Nao foi possivel carregar o login do Google."));
+      script.onerror = () => reject(new Error("Não foi possivel carregar o login do Google."));
       document.head.appendChild(script);
     });
   }
@@ -356,9 +356,9 @@ function isActiveCampaignSyncPendingContinuationStale(
 function buildInterruptedSyncMessage(run: ActiveCampaignSyncRunSummary | null, fallback?: string) {
   if (run?.last_error?.trim()) return run.last_error;
   if (hasActiveCampaignPendingContinuation(run)) {
-    return fallback || "A continuacao automatica da sincronizacao foi interrompida antes do proximo lote.";
+    return fallback || "A continuacao automática da sincronização foi interrompida antes do próximo lote.";
   }
-  return fallback || "A sincronizacao anterior foi interrompida antes da finalizacao.";
+  return fallback || "A sincronização anterior foi interrompida antes da finalizacao.";
 }
 
 function resolveAliasTagIds(
@@ -474,7 +474,7 @@ async function extractFunctionInvokeErrorMessage(error: unknown, fallback: strin
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
     <Badge variant={connected ? "default" : "secondary"}>
-      {connected ? "Configurado" : "Nao configurado"}
+      {connected ? "Configurado" : "Não configurado"}
     </Badge>
   );
 }
@@ -627,7 +627,7 @@ export default function Sources() {
         if (error || !typedData?.tags) {
           throw new Error(
             error?.message ||
-              "Nao foi possivel consultar as tags da conta com essas credenciais.",
+              "Não foi possivel consultar as tags da conta com essas credenciais.",
           );
         }
 
@@ -647,13 +647,13 @@ export default function Sources() {
         if (!options?.silent) {
           toast({
             title: "Tags carregadas",
-            description: `${typedData.tags.length} tag(s) do ActiveCampaign disponiveis para mapeamento.`,
+            description: `${typedData.tags.length} tag(s) do ActiveCampaign disponíveis para mapeamento.`,
           });
         }
       } catch (error) {
         const description = await extractFunctionInvokeErrorMessage(
           error,
-          "Nao foi possivel consultar as tags da conta agora.",
+          "Não foi possivel consultar as tags da conta agora.",
         );
 
         if (!options?.silent) {
@@ -709,7 +709,7 @@ export default function Sources() {
       if (error) {
         if (!options?.silent) {
           toast({
-            title: "Erro ao finalizar a sincronizacao interrompida",
+            title: "Erro ao finalizar a sincronização interrompida",
             description: error.message,
             variant: "destructive",
           });
@@ -765,7 +765,7 @@ export default function Sources() {
       if (error) {
         if (!options?.silent) {
           toast({
-            title: "Erro ao verificar a ultima sincronizacao",
+            title: "Erro ao verificar a última sincronização",
             description: error.message,
             variant: "destructive",
           });
@@ -799,7 +799,7 @@ export default function Sources() {
       if (error) {
         if (!options?.silent) {
           toast({
-            title: "Erro ao carregar o status da sincronizacao",
+            title: "Erro ao carregar o status da sincronização",
             description: error.message,
             variant: "destructive",
           });
@@ -897,11 +897,11 @@ export default function Sources() {
 
     if (activeCampaignSyncIsRunning) {
       return activeCampaignSyncCursor.hasMore
-        ? `Sincronizando contatos no backend... ${activeCampaignSyncCounters.processedCount} contato(s) tratados ate agora. A fila continua mesmo se voce trocar de tela ou fechar a aba.`
-        : "Sincronizacao em andamento no backend.";
+        ? `Sincronizando contatos no backend... ${activeCampaignSyncCounters.processedCount} contato(s) tratados até agora. A fila continua mesmo se você trocar de tela ou fechar a aba.`
+        : "Sincronização em andamento no backend.";
     }
 
-    return "A ultima sincronizacao da conta ja foi registrada no backend.";
+    return "A última sincronização da conta já foi registrada no backend.";
   }, [
     activeCampaignSyncCounters.processedCount,
     activeCampaignSyncCursor.hasMore,
@@ -997,7 +997,7 @@ export default function Sources() {
           title: "Erro ao carregar as fontes",
           description:
             sourcesError?.message ||
-            "Nao foi possivel carregar as configuracoes do expert.",
+            "Não foi possivel carregar as configurações do expert.",
           variant: "destructive",
         });
         setLoading(false);
@@ -1225,7 +1225,7 @@ export default function Sources() {
         if (!options?.silent) {
           toast({
             title: "Conecte sua conta Google",
-            description: "Entre com o Google antes de listar as planilhas disponiveis.",
+            description: "Entre com o Google antes de listar as planilhas disponíveis.",
             variant: "destructive",
           });
         }
@@ -1254,7 +1254,7 @@ export default function Sources() {
 
         const typedData = (data as GoogleSheetsCatalogResponse | null) ?? null;
         if (error || !typedData) {
-          throw new Error(error?.message || "Nao foi possivel carregar as abas da planilha.");
+          throw new Error(error?.message || "Não foi possivel carregar as abas da planilha.");
         }
 
         setGsAuthMode(typedData.authMode ?? authMode);
@@ -1294,7 +1294,7 @@ export default function Sources() {
       } catch (error) {
         const description = await extractFunctionInvokeErrorMessage(
           error,
-          "Nao foi possivel validar a planilha informada.",
+          "Não foi possivel validar a planilha informada.",
         );
 
         if (!options?.silent) {
@@ -1438,7 +1438,7 @@ export default function Sources() {
 
       const oauthApi = window.google?.accounts?.oauth2;
       if (!oauthApi?.initCodeClient) {
-        throw new Error("O login do Google nao ficou disponivel neste navegador.");
+        throw new Error("O login do Google não ficou disponível neste navegador.");
       }
 
       const exchangeResponse = await new Promise<GoogleOauthExchangeResponse>((resolve, reject) => {
@@ -1453,7 +1453,7 @@ export default function Sources() {
           include_granted_scopes: true,
           callback: async (response: { code?: string; error?: string }) => {
             if (!response?.code) {
-              reject(new Error(response?.error || "O Google nao retornou o codigo de autorizacao."));
+              reject(new Error(response?.error || "O Google não retornou o codigo de autorizacao."));
               return;
             }
 
@@ -1471,7 +1471,7 @@ export default function Sources() {
 
               const typedData = (data as GoogleOauthExchangeResponse | null) ?? null;
               if (error || !typedData?.launch) {
-                throw error ?? new Error("Nao foi possivel concluir a conexao com o Google.");
+                throw error ?? new Error("Não foi possivel concluir a conexão com o Google.");
               }
 
               resolve(typedData);
@@ -1484,7 +1484,7 @@ export default function Sources() {
               new Error(
                 response?.type === "popup_closed"
                   ? "A janela de login do Google foi fechada antes da autorizacao."
-                  : "O login do Google nao foi concluido.",
+                  : "O login do Google não foi concluído.",
               ),
             );
           },
@@ -1502,7 +1502,7 @@ export default function Sources() {
       toast({
         title: "Conta Google conectada",
         description: exchangeResponse.email
-          ? `A conta ${exchangeResponse.email} ja pode listar as planilhas disponiveis.`
+          ? `A conta ${exchangeResponse.email} já pode listar as planilhas disponíveis.`
           : "A conta Google foi conectada com sucesso.",
       });
 
@@ -1516,7 +1516,7 @@ export default function Sources() {
     } catch (error) {
       const description = await extractFunctionInvokeErrorMessage(
         error,
-        error instanceof Error ? error.message : "Nao foi possivel conectar a conta Google.",
+        error instanceof Error ? error.message : "Não foi possivel conectar a conta Google.",
       );
 
       toast({
@@ -1543,7 +1543,7 @@ export default function Sources() {
 
       const launch = (data as { launch?: LaunchSettingsRow } | null)?.launch ?? null;
       if (error || !launch) {
-        throw error ?? new Error("Nao foi possivel desconectar a conta Google.");
+        throw error ?? new Error("Não foi possivel desconectar a conta Google.");
       }
 
       setLaunchSettings(launch);
@@ -1559,12 +1559,12 @@ export default function Sources() {
 
       toast({
         title: "Conta Google desconectada",
-        description: "A integracao do Google Sheets foi desligada para este expert.",
+        description: "A integração do Google Sheets foi desligada para este expert.",
       });
     } catch (error) {
       const description = await extractFunctionInvokeErrorMessage(
         error,
-        "Nao foi possivel desconectar a conta Google.",
+        "Não foi possivel desconectar a conta Google.",
       );
 
       toast({
@@ -1601,7 +1601,7 @@ export default function Sources() {
         const typedData = (data as SyncPlatformContactsResponse | null) ?? null;
 
         if (error || !typedData) {
-          throw new Error(error?.message || "O backend nao conseguiu iniciar a sincronizacao.");
+          throw new Error(error?.message || "O backend não conseguiu iniciar a sincronização.");
         }
 
         const latestRun =
@@ -1611,15 +1611,15 @@ export default function Sources() {
 
         setActiveCampaignSyncMessage(
           latestCursor.hasMore
-            ? `Sincronizando contatos no backend... ${latestCounters.processedCount} contato(s) tratados ate agora. A fila continuara automaticamente mesmo se voce fechar a aba.`
+            ? `Sincronizando contatos no backend... ${latestCounters.processedCount} contato(s) tratados até agora. A fila continuara automaticamente mesmo se você fechar a aba.`
             : `Base sincronizada: ${latestCounters.processedCount} contato(s) tratados no backend.`,
         );
 
         if (latestCursor.hasMore) {
           toast({
-            title: "Sincronizacao iniciada",
+            title: "Sincronização iniciada",
             description:
-              "Os proximos lotes continuarao automaticamente no backend, mesmo se voce trocar de tela ou fechar a aba.",
+              "Os próximos lotes continuarao automaticamente no backend, mesmo se você trocar de tela ou fechar a aba.",
           });
           return;
         }
@@ -1631,7 +1631,7 @@ export default function Sources() {
       } catch (error) {
         const description = await extractFunctionInvokeErrorMessage(
           error,
-          "Nao foi possivel concluir a sincronizacao.",
+          "Não foi possivel concluir a sincronização.",
         );
 
         await markLatestActiveCampaignSyncRunAsFailed(launchId, description, { silent: true });
@@ -1674,7 +1674,7 @@ export default function Sources() {
     if (error || !data) {
       toast({
         title: "Erro ao salvar ActiveCampaign",
-        description: error?.message || "O backend nao confirmou a atualizacao.",
+        description: error?.message || "O backend não confirmou a atualização.",
         variant: "destructive",
       });
       return;
@@ -1704,7 +1704,7 @@ export default function Sources() {
     if (gsEnabled) {
       if (gsAuthMode === "oauth" && (!gsOauthConnected || !gsSpreadsheetId.trim() || !gsSheetName.trim())) {
         toast({
-          title: "Finalize a conexao do Google Sheets",
+          title: "Finalize a conexão do Google Sheets",
           description:
             "Conecte sua conta Google e escolha a planilha e a aba antes de ativar a captura.",
           variant: "destructive",
@@ -1720,7 +1720,7 @@ export default function Sources() {
           !gsSheetName.trim())
       ) {
         toast({
-          title: "Preencha a conexao do Google Sheets",
+          title: "Preencha a conexão do Google Sheets",
           description:
             "Ative o Google Sheets apenas depois de informar a service account, a chave privada, o ID da planilha e a aba de destino.",
           variant: "destructive",
@@ -1746,7 +1746,7 @@ export default function Sources() {
     if (error || !data) {
       toast({
         title: "Erro ao salvar Google Sheets",
-        description: error?.message || "O backend nao confirmou a atualizacao da planilha.",
+        description: error?.message || "O backend não confirmou a atualização da planilha.",
         variant: "destructive",
       });
       return;
@@ -1832,7 +1832,7 @@ export default function Sources() {
     setHydratedLaunchId(activeLaunch.id);
     toast({
       title: "UChat salvo",
-      description: "Os workspaces e as acoes de retorno do UChat foram atualizados.",
+      description: "Os workspaces e as ações de retorno do UChat foram atualizados.",
     });
   };
 
@@ -1840,7 +1840,7 @@ export default function Sources() {
     if (!value) {
       toast({
         title: "Nada para copiar",
-        description: `O ${label.toLowerCase()} ainda nao esta disponivel.`,
+        description: `O ${label.toLowerCase()} ainda não esta disponível.`,
         variant: "destructive",
       });
       return;
@@ -1853,7 +1853,7 @@ export default function Sources() {
       toast({
         title: "Falha ao copiar",
         description:
-          error instanceof Error ? error.message : "Nao foi possivel copiar agora.",
+          error instanceof Error ? error.message : "Não foi possivel copiar agora.",
         variant: "destructive",
       });
     }
@@ -1948,7 +1948,7 @@ export default function Sources() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="ac-list-id">Lista padrao</Label>
+                <Label htmlFor="ac-list-id">Lista padrão</Label>
                 <Input
                   id="ac-list-id"
                   value={visibleAcListId}
@@ -1961,7 +1961,7 @@ export default function Sources() {
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">Ciclo operacional</p>
                     <p className="text-sm text-muted-foreground">
-                      O ActiveCampaign nao sincroniza mais a base inteira. Este expert trabalha apenas com contatos que entrarem pelos webhooks.
+                      O ActiveCampaign não sincroniza mais a base inteira. Este expert trabalha apenas com contatos que entrarem pelos webhooks.
                     </p>
                   </div>
                   <Badge variant="secondary">Webhook-only</Badge>
@@ -1984,8 +1984,8 @@ export default function Sources() {
                       </span>
                     </p>
                     <p>
-                      Quando voce usar <span className="font-medium text-foreground">Mudar ciclo</span> em Experts,
-                      os leads atuais serao arquivados em CSV e o proximo webhook abrira uma nova base canonica.
+                      Quando você usar <span className="font-medium text-foreground">Mudar ciclo</span> em Experts,
+                      os leads atuais serao arquivados em CSV e o próximo webhook abrira uma nova base canônica.
                     </p>
                   </div>
                 </div>
@@ -2034,7 +2034,7 @@ export default function Sources() {
                   <p className="text-sm font-medium text-foreground">Mapeamentos avancados</p>
                   <p className="text-sm text-muted-foreground">
                     Use esta area para aliases extras, estados personalizados ou qualquer regra que
-                    nao seja o roteamento padrao de Typebot, ManyChat, Tally e Sendflow.
+                    não seja o roteamento padrão de Typebot, ManyChat, Tally e Sendflow.
                   </p>
                   <NamedTagsEditor
                     tags={advancedNamedTags}
@@ -2066,14 +2066,14 @@ export default function Sources() {
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">Ativar captura em planilha</p>
                   <p className="text-sm text-muted-foreground">
-                    Quando ligado, cada webhook do ActiveCampaign tambem grava nome, email, telefone, tags e payload na planilha escolhida.
+                    Quando ligado, cada webhook do ActiveCampaign também grava nome, email, telefone, tags e payload na planilha escolhida.
                   </p>
                 </div>
                 <Switch checked={visibleGsEnabled} onCheckedChange={setGsEnabled} />
               </div>
 
               <div className="space-y-2">
-                <Label>Modo de conexao</Label>
+                <Label>Modo de conexão</Label>
                 <Select
                   value={visibleGsAuthMode}
                   onValueChange={(value) =>
@@ -2096,7 +2096,7 @@ export default function Sources() {
                     <div className="space-y-1">
                       <p className="font-medium text-foreground">Conta Google conectada</p>
                       <p className="text-sm text-muted-foreground">
-                        Entre com a conta Google do expert para listar todas as planilhas disponiveis e escolher a aba de destino.
+                        Entre com a conta Google do expert para listar todas as planilhas disponíveis e escolher a aba de destino.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2168,7 +2168,7 @@ export default function Sources() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">
-                      {visibleGsAuthMode === "oauth" ? "Planilhas e abas" : "Abas disponiveis"}
+                      {visibleGsAuthMode === "oauth" ? "Planilhas e abas" : "Abas disponíveis"}
                     </p>
                     <p className="text-sm text-muted-foreground">
                       {visibleGsAuthMode === "oauth"
@@ -2252,7 +2252,7 @@ export default function Sources() {
                       </SelectTrigger>
                       <SelectContent>
                         {gsAvailableSheets.map((sheet) => (
-                          <SelectItem key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`} value={sheet.title || `sheet-${sheet.id ?? 0}`}>
+                          <SelectItem key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-título"}`} value={sheet.title || `sheet-${sheet.id ?? 0}`}>
                             {sheet.title || `Aba ${sheet.id ?? ""}`}
                           </SelectItem>
                         ))}
@@ -2309,7 +2309,7 @@ export default function Sources() {
             <CardHeader>
               <CardTitle className="text-xl">Webhooks do expert</CardTitle>
               <CardDescription>
-                Use estas URLs para ligar os sinais externos ao Launch Hub. Cada webhook ja sai
+                Use estas URLs para ligar os sinais externos ao Launch Hub. Cada webhook já sai
                 protegido pelo segredo do expert.
               </CardDescription>
             </CardHeader>
