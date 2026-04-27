@@ -144,6 +144,14 @@ export default function Login() {
                     Criar conta
                   </Link>
                 </p>
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-slate-500">
+                  <Link to="/privacy" className="hover:text-[#8feeff]">
+                    Política de Privacidade
+                  </Link>
+                  <Link to="/terms" className="hover:text-[#8feeff]">
+                    Termos de Serviço
+                  </Link>
+                </div>
               </CardFooter>
             </form>
           </Card>
