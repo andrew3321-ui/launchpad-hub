@@ -74,6 +74,26 @@ const clearStoredSupabaseSessions = () => {
   keysToRemove.forEach((key) => localStorage.removeItem(key));
 };
 
+const getUserUiSignature = (currentUser: User | null) => {
+  if (!currentUser) return "anonymous";
+
+  const metadata = currentUser.user_metadata as Record<string, unknown> | undefined;
+  const metadataName =
+    (typeof metadata?.full_name === "string" && metadata.full_name.trim()) ||
+    (typeof metadata?.name === "string" && metadata.name.trim()) ||
+    "";
+
+  return `${currentUser.id}|${currentUser.email ?? ""}|${metadataName}`;
+};
+
+const sameSessionIdentity = (currentSession: Session | null, nextSession: Session | null) => {
+  if (!currentSession || !nextSession) return currentSession === nextSession;
+  return getUserUiSignature(currentSession.user) === getUserUiSignature(nextSession.user);
+};
+
+const sameUserIdentity = (currentUser: User | null, nextUser: User | null) =>
+  getUserUiSignature(currentUser) === getUserUiSignature(nextUser);
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -205,8 +225,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
+      const nextUser = nextSession?.user ?? null;
+
+      setSession((currentSession) =>
+        sameSessionIdentity(currentSession, nextSession) ? currentSession : nextSession,
+      );
+      setUser((currentUser) =>
+        sameUserIdentity(currentUser, nextUser) ? currentUser : nextUser,
+      );
+
       if (!nextSession?.user) {
         setProfile(null);
         setProfileReady(true);

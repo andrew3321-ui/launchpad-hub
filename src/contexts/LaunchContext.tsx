@@ -33,12 +33,36 @@ export const useLaunch = () => useContext(LaunchContext);
 
 const ACTIVE_LAUNCH_STORAGE_KEY = "megafone-active-launch-id";
 
+const sameLaunch = (currentLaunch: Launch | null, nextLaunch: Launch | null) => {
+  if (!currentLaunch || !nextLaunch) return currentLaunch === nextLaunch;
+
+  return (
+    currentLaunch.id === nextLaunch.id &&
+    currentLaunch.name === nextLaunch.name &&
+    currentLaunch.slug === nextLaunch.slug &&
+    currentLaunch.status === nextLaunch.status &&
+    currentLaunch.created_at === nextLaunch.created_at &&
+    currentLaunch.current_cycle_number === nextLaunch.current_cycle_number &&
+    currentLaunch.current_cycle_started_at === nextLaunch.current_cycle_started_at
+  );
+};
+
+const sameLaunchList = (currentLaunches: Launch[], nextLaunches: Launch[]) => {
+  if (currentLaunches.length !== nextLaunches.length) return false;
+
+  return currentLaunches.every((currentLaunch, index) =>
+    sameLaunch(currentLaunch, nextLaunches[index]),
+  );
+};
+
 export function LaunchProvider({ children }: { children: ReactNode }) {
   const { user, session, loading: authLoading, profileReady } = useAuth();
   const { toast } = useToast();
   const [launches, setLaunches] = useState<Launch[]>([]);
   const [activeLaunch, setActiveLaunchState] = useState<Launch | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasSession = Boolean(session);
+  const authenticatedUserId = session && user ? user.id : null;
 
   const setActiveLaunch = useCallback((launch: Launch | null) => {
     setActiveLaunchState(launch);
@@ -52,12 +76,11 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchLaunches = useCallback(async () => {
-    if (authLoading || (session && !profileReady)) {
-      setLoading(true);
+    if (authLoading || (hasSession && !profileReady)) {
       return;
     }
 
-    if (!session || !user) {
+    if (!authenticatedUserId) {
       setLaunches([]);
       setActiveLaunchState(null);
       localStorage.removeItem(ACTIVE_LAUNCH_STORAGE_KEY);
@@ -81,23 +104,23 @@ export function LaunchProvider({ children }: { children: ReactNode }) {
     }
 
     if (data) {
-      setLaunches(data);
+      setLaunches((currentLaunches) =>
+        sameLaunchList(currentLaunches, data) ? currentLaunches : data,
+      );
       const storedLaunchId = localStorage.getItem(ACTIVE_LAUNCH_STORAGE_KEY);
 
       setActiveLaunchState((prev) => {
         const preferredId = prev?.id || storedLaunchId;
+        const nextLaunch = preferredId
+          ? data.find((launch) => launch.id === preferredId) ?? null
+          : data[0] ?? null;
 
-        if (preferredId) {
-          const matchingLaunch = data.find((launch) => launch.id === preferredId);
-          if (matchingLaunch) return matchingLaunch;
-        }
-
-        return data.length > 0 ? data[0] : null;
+        return sameLaunch(prev, nextLaunch) ? prev : nextLaunch;
       });
     }
 
     setLoading(false);
-  }, [authLoading, profileReady, session, toast, user]);
+  }, [authLoading, authenticatedUserId, hasSession, profileReady, toast]);
 
   useEffect(() => {
     void fetchLaunches();
