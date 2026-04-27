@@ -2545,12 +2545,19 @@ async function resolveExplicitUchatRecipient(
 ) {
   const payloadUserNs = extractUchatUserNs(payload);
   if (payloadUserNs) {
-    return {
-      userNs: payloadUserNs,
-      userId: extractUchatUserId(payload) || extractKnownUchatUserId(payload),
-      snapshot: isRecord(payload) ? payload : null,
-      resolutionSource: "payload_user_ns",
-    } satisfies ResolvedUchatRecipient;
+    const subscriberByUserNs = await fetchUchatSubscriberByQuery(workspace, { user_ns: payloadUserNs });
+    const verifiedUserNs = nonEmptyString(subscriberByUserNs?.user_ns);
+    if (subscriberByUserNs && verifiedUserNs && normalizeKey(verifiedUserNs) === normalizeKey(payloadUserNs)) {
+      return {
+        userNs: verifiedUserNs,
+        userId:
+          extractKnownUchatUserId(subscriberByUserNs) ||
+          extractUchatUserId(payload) ||
+          extractKnownUchatUserId(payload),
+        snapshot: subscriberByUserNs,
+        resolutionSource: "payload_user_ns_verified",
+      } satisfies ResolvedUchatRecipient;
+    }
   }
 
   const payloadUserId = extractUchatUserId(payload);
