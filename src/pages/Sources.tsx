@@ -153,6 +153,7 @@ interface GoogleSheetsCatalogResponse {
     title: string | null;
     index: number | null;
   }>;
+  catalogWarning?: string | null;
 }
 
 interface GoogleOauthExchangeResponse {
@@ -1198,6 +1199,7 @@ export default function Sources() {
       serviceAccountEmail?: string;
       privateKey?: string;
       spreadsheetId?: string;
+      listOnly?: boolean;
       silent?: boolean;
     }) => {
       const requestLaunchId = options?.launchId ?? activeLaunchId;
@@ -1206,6 +1208,7 @@ export default function Sources() {
       const serviceAccountEmail = (options?.serviceAccountEmail ?? gsServiceAccountEmail).trim();
       const privateKey = (options?.privateKey ?? gsPrivateKey).trim();
       const spreadsheetId = (options?.spreadsheetId ?? gsSpreadsheetId).trim();
+      const listOnly = Boolean(options?.listOnly);
 
       if (!requestLaunchId) return;
 
@@ -1246,6 +1249,7 @@ export default function Sources() {
                   }
                 : {}),
               ...(spreadsheetId ? { spreadsheetId } : {}),
+              ...(listOnly ? { listOnly: true } : {}),
             },
           }),
           15000,
@@ -1261,12 +1265,25 @@ export default function Sources() {
         setGsOauthEmail(typedData.connectionEmail ?? "");
         setGsOauthConnected(Boolean(typedData.authMode === "oauth" && typedData.connectionEmail));
         setGsAvailableSpreadsheets(typedData.spreadsheets ?? []);
-        setGsSpreadsheetTitle((currentTitle) =>
-          typedData.selectedSpreadsheetTitle ?? currentTitle,
-        );
-        setGsSpreadsheetId((currentSpreadsheetId) =>
-          typedData.selectedSpreadsheetId ?? currentSpreadsheetId,
-        );
+        if (listOnly) {
+          const availableSpreadsheetIds = new Set(
+            (typedData.spreadsheets ?? []).map((spreadsheet) => spreadsheet.id),
+          );
+          if (gsSpreadsheetId.trim() && !availableSpreadsheetIds.has(gsSpreadsheetId.trim())) {
+            setGsSpreadsheetId("");
+            setGsSpreadsheetTitle("");
+            setGsSheetName("");
+            setGsAvailableSheets([]);
+          }
+        }
+        if (!listOnly) {
+          setGsSpreadsheetTitle((currentTitle) =>
+            typedData.selectedSpreadsheetTitle ?? currentTitle,
+          );
+          setGsSpreadsheetId((currentSpreadsheetId) =>
+            typedData.selectedSpreadsheetId ?? currentSpreadsheetId,
+          );
+        }
         setGsAvailableSheets(
           typedData.sheets.map((sheet) => ({
             id: sheet.id,
@@ -1274,21 +1291,25 @@ export default function Sources() {
           })),
         );
 
-        const firstSheetName =
-          typedData.sheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
-            ?.title ?? "";
+        if (!listOnly) {
+          const firstSheetName =
+            typedData.sheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
+              ?.title ?? "";
 
-        setGsSheetName((currentSheetName) =>
-          currentSheetName.trim() ? currentSheetName : firstSheetName,
-        );
+          setGsSheetName((currentSheetName) =>
+            currentSheetName.trim() ? currentSheetName : firstSheetName,
+          );
+        }
 
         if (!options?.silent) {
           toast({
             title: "Google Sheets conectado",
             description:
-              typedData.selectedSpreadsheetTitle
-                ? `Planilha "${typedData.selectedSpreadsheetTitle}" pronta com ${typedData.sheets.length} aba(s).`
-                : `${typedData.spreadsheets.length} planilha(s) carregada(s) da conta Google.`,
+              listOnly
+                ? `${typedData.spreadsheets.length} planilha(s) carregada(s) da conta Google.`
+                : typedData.selectedSpreadsheetTitle
+                  ? `Planilha "${typedData.selectedSpreadsheetTitle}" pronta com ${typedData.sheets.length} aba(s).`
+                  : `${typedData.spreadsheets.length} planilha(s) carregada(s) da conta Google.`,
           });
         }
       } catch (error) {
@@ -1341,25 +1362,10 @@ export default function Sources() {
         launchId: activeLaunchId,
         authMode: "oauth",
         oauthConnected: true,
-        spreadsheetId: visibleGsSpreadsheetId,
+        spreadsheetId: "",
+        listOnly: true,
         silent: true,
       });
-      return;
-    }
-
-    if (
-      visibleGsAuthMode === "oauth" &&
-      visibleGsOauthConnected &&
-      !visibleGsSpreadsheetId.trim() &&
-      gsAvailableSpreadsheets.length > 0
-    ) {
-      const firstSpreadsheet = gsAvailableSpreadsheets[0] ?? null;
-      if (firstSpreadsheet?.id) {
-        setGsSpreadsheetId(firstSpreadsheet.id);
-        setGsSpreadsheetTitle(firstSpreadsheet.title ?? "");
-        setGsSheetName("");
-        setGsAvailableSheets([]);
-      }
       return;
     }
 
@@ -1498,6 +1504,11 @@ export default function Sources() {
       setGsAuthMode("oauth");
       setGsOauthEmail(exchangeResponse.email ?? "");
       setGsOauthConnected(Boolean(exchangeResponse.connected));
+      setGsSpreadsheetId("");
+      setGsSpreadsheetTitle("");
+      setGsSheetName("");
+      setGsAvailableSpreadsheets([]);
+      setGsAvailableSheets([]);
 
       toast({
         title: "Conta Google conectada",
@@ -1510,7 +1521,8 @@ export default function Sources() {
         launchId: activeLaunch.id,
         authMode: "oauth",
         oauthConnected: true,
-        spreadsheetId: gsSpreadsheetId,
+        spreadsheetId: "",
+        listOnly: true,
         silent: true,
       });
     } catch (error) {
@@ -2183,6 +2195,9 @@ export default function Sources() {
                     onClick={() =>
                       void loadGoogleSheetsCatalog({
                         authMode: visibleGsAuthMode,
+                        ...(visibleGsAuthMode === "oauth"
+                          ? { spreadsheetId: "", listOnly: true }
+                          : {}),
                       })
                     }
                     disabled={saving !== null || loadingGoogleSheetsCatalog}

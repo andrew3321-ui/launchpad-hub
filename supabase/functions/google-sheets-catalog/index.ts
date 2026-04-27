@@ -119,6 +119,7 @@ function buildCatalogConfig(
     serviceAccountEmail?: string | null;
     privateKey?: string | null;
     spreadsheetId?: string | null;
+    listOnly?: boolean | null;
   },
 ): GoogleSheetsConfigInput {
   const bodyServiceAccountEmail = normalizeString(body.serviceAccountEmail);
@@ -126,6 +127,7 @@ function buildCatalogConfig(
     ? body.privateKey
     : null;
   const bodySpreadsheetId = normalizeString(body.spreadsheetId);
+  const listOnly = Boolean(body.listOnly);
 
   if (bodyServiceAccountEmail || bodyPrivateKey) {
     return {
@@ -133,7 +135,7 @@ function buildCatalogConfig(
       authMode: "service_account",
       serviceAccountEmail: bodyServiceAccountEmail,
       privateKey: bodyPrivateKey,
-      spreadsheetId: bodySpreadsheetId,
+      spreadsheetId: listOnly ? null : bodySpreadsheetId,
       sheetName: launch.gs_sheet_name,
     };
   }
@@ -144,7 +146,7 @@ function buildCatalogConfig(
     serviceAccountEmail: launch.gs_service_account_email,
     privateKey: launch.gs_private_key,
     oauthRefreshToken: launch.gs_oauth_refresh_token,
-    spreadsheetId: bodySpreadsheetId ?? launch.gs_spreadsheet_id,
+    spreadsheetId: listOnly ? null : (bodySpreadsheetId ?? launch.gs_spreadsheet_id),
     sheetName: launch.gs_sheet_name,
   };
 }
@@ -171,6 +173,7 @@ Deno.serve(async (request) => {
       serviceAccountEmail?: string | null;
       privateKey?: string | null;
       spreadsheetId?: string | null;
+      listOnly?: boolean | null;
     };
     const launchId = normalizeString(body.launchId);
     const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -180,15 +183,16 @@ Deno.serve(async (request) => {
 
     const launch = await fetchLaunchGoogleSheetsConfig(supabase, launchId as string);
     const config = buildCatalogConfig(launch, body);
-    const selectedSpreadsheetId = normalizeString(body.spreadsheetId) ?? launch.gs_spreadsheet_id;
+    const requestedSpreadsheetId = normalizeString(body.spreadsheetId);
+    const listOnly = Boolean(body.listOnly);
 
     const spreadsheets =
       config.authMode === "oauth"
         ? await listGoogleSpreadsheets(config)
-        : selectedSpreadsheetId
+        : requestedSpreadsheetId
           ? [
               {
-                id: selectedSpreadsheetId,
+                id: requestedSpreadsheetId,
                 title: launch.gs_spreadsheet_title,
                 modifiedTime: null,
                 ownerEmail: null,
@@ -197,20 +201,45 @@ Deno.serve(async (request) => {
             ]
           : [];
 
-    const catalog = selectedSpreadsheetId
-      ? await fetchGoogleSpreadsheetCatalog({
+    let selectedSpreadsheetId = listOnly
+      ? null
+      : requestedSpreadsheetId ?? launch.gs_spreadsheet_id;
+    let selectedSpreadsheetTitle = launch.gs_spreadsheet_title ?? null;
+    let catalog = null;
+    let catalogWarning: string | null = null;
+
+    if (selectedSpreadsheetId) {
+      try {
+        catalog = await fetchGoogleSpreadsheetCatalog({
           ...config,
           spreadsheetId: selectedSpreadsheetId,
-        })
-      : null;
+        });
+        selectedSpreadsheetTitle = catalog?.title ?? selectedSpreadsheetTitle;
+      } catch (error) {
+        if (config.authMode === "service_account") {
+          throw error;
+        }
+
+        const existsInList = spreadsheets.some((spreadsheet) => spreadsheet.id === selectedSpreadsheetId);
+        if (!existsInList) {
+          selectedSpreadsheetId = null;
+          selectedSpreadsheetTitle = null;
+        }
+
+        catalogWarning = error instanceof Error
+          ? error.message
+          : "The selected spreadsheet could not be loaded.";
+      }
+    }
 
     return jsonResponse({
       authMode: config.authMode,
       connectionEmail: config.authMode === "oauth" ? launch.gs_oauth_email : launch.gs_service_account_email,
       spreadsheets,
       selectedSpreadsheetId: selectedSpreadsheetId,
-      selectedSpreadsheetTitle: catalog?.title ?? launch.gs_spreadsheet_title ?? null,
+      selectedSpreadsheetTitle: selectedSpreadsheetTitle,
       sheets: catalog?.sheets ?? [],
+      catalogWarning,
     });
   } catch (error) {
     if (error instanceof ProcessContactError) {
