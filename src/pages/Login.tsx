@@ -111,7 +111,7 @@ export default function Login() {
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    placeholder="voce@megafone.digital"
+                    placeholder="você@megafone.digital"
                     className="h-12 rounded-2xl border-white/10 bg-white/5 text-slate-50 placeholder:text-slate-500"
                   />
                 </div>

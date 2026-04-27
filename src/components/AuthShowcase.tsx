@@ -11,24 +11,24 @@ const highlights = [
   {
     icon: RadioTower,
     title: "Bases conectadas",
-    description: "Centralize ActiveCampaign, UChat e os principais webhooks em um unico cockpit.",
+    description: "Centralize ActiveCampaign, UChat e os principais webhooks em um único cockpit.",
   },
   {
     icon: Workflow,
-    title: "Tratamento automatico",
+    title: "Tratamento automático",
     description: "Padronize telefones, mescle duplicados e acompanhe tudo em logs claros.",
   },
   {
     icon: Bot,
     title: "Ciclos por expert",
-    description: "Transforme a operacao de cada expert em um processo repetivel e escalavel.",
+    description: "Transforme a operação de cada expert em um processo repetível e escalável.",
   },
 ];
 
 export function AuthShowcase({
   eyebrow = "Megafone Digital",
-  title = "Quem tem um Megafone nao precisa gritar.",
-  description = "Um painel feito para amplificar sua operacao, organizar experts e tratar contatos com a mesma energia visual da marca.",
+  title = "Quem tem um Megafone não precisa gritar.",
+  description = "Um painel feito para amplificar sua operação, organizar experts e tratar contatos com a mesma energia visual da marca.",
 }: AuthShowcaseProps) {
   return (
     <section className="brand-card brand-panel relative overflow-hidden p-6 sm:p-8">
@@ -44,7 +44,7 @@ export function AuthShowcase({
                 <>
                   Quem tem um <span className="text-[#a9f0ff]">Megafone</span>
                   <br />
-                  nao precisa gritar.
+                  não precisa gritar.
                 </>
               ) : (
                 title

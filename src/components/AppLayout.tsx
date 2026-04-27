@@ -9,10 +9,10 @@ import { AppSidebar } from "./AppSidebar";
 import { AdminApprovalsBell } from "./AdminApprovalsBell";
 
 const pageTitles: Record<string, string> = {
-  "/": "Dashboard de operacao",
+  "/": "Dashboard de operação",
   "/launches": "Arquitetura de experts",
   "/experts": "Arquitetura de experts",
-  "/sources": "Conexao de fontes",
+  "/sources": "Conexão de fontes",
   "/rules": "Regras de tratamento",
   "/leads": "Base tratada de contatos",
   "/queue": "Fila operacional",

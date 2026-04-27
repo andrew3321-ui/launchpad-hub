@@ -145,7 +145,7 @@ export default function Rules() {
     if (error) {
       toast({ title: "Erro ao salvar regras", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Regras de deduplicacao atualizadas" });
+      toast({ title: "Regras de deduplicação atualizadas" });
     }
     setSaving(false);
   };
@@ -161,7 +161,7 @@ export default function Rules() {
           <CardHeader>
             <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um expert na barra lateral para definir as regras de deduplicacao e merge.
+              Escolha um expert na barra lateral para definir as regras de deduplicação e merge.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -191,7 +191,7 @@ export default function Rules() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Normalizacao de telefone</CardTitle>
+                <CardTitle className="text-xl">Normalização de telefone</CardTitle>
                 <CardDescription>
                   Ajusta formatos diferentes antes de comparar contatos vindos de bases distintas.
                 </CardDescription>
@@ -207,14 +207,14 @@ export default function Rules() {
                 />
                 <RuleRow
                   title="Adicionar +55 automaticamente"
-                  description="Tenta casar numeros com e sem codigo do pais brasileiro."
+                  description="Tenta casar números com e sem codigo do pais brasileiro."
                   checked={visibleSettings.autoAddCountryCode}
                   onCheckedChange={(checked) =>
                     setSettings((current) => ({ ...current, autoAddCountryCode: checked }))
                   }
                 />
                 <div className="space-y-2">
-                  <Label htmlFor="country-code">Codigo do pais padrao</Label>
+                  <Label htmlFor="country-code">Codigo do pais padrão</Label>
                   <Input
                     id="country-code"
                     value={visibleSettings.defaultCountryCode}
@@ -249,7 +249,7 @@ export default function Rules() {
               <CardContent className="space-y-4">
                 <RuleRow
                   title="Detectar duplicata por telefone normalizado"
-                  description="Marca como mesmo contato quando os numeros baterem apos os tratamentos acima."
+                  description="Marca como mesmo contato quando os números baterem após os tratamentos acima."
                   checked={visibleSettings.mergeOnExactPhone}
                   onCheckedChange={(checked) =>
                     setSettings((current) => ({ ...current, mergeOnExactPhone: checked }))
@@ -273,7 +273,7 @@ export default function Rules() {
                 />
                 <RuleRow
                   title="Priorizar o cadastro mais completo"
-                  description="Prefere o registro com mais campos preenchidos ao escolher qual versao vira a principal."
+                  description="Prefere o registro com mais campos preenchidos ao escolher qual versão vira a principal."
                   checked={visibleSettings.preferMostCompleteRecord}
                   onCheckedChange={(checked) =>
                     setSettings((current) => ({ ...current, preferMostCompleteRecord: checked }))
@@ -297,10 +297,10 @@ export default function Rules() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <Sparkles className="h-5 w-5 text-primary" />
-                  Preview de deduplicacao
+                  Preview de deduplicação
                 </CardTitle>
                 <CardDescription>
-                  Teste um numero real e veja quais variacoes vao entrar no comparador antes do merge.
+                  Teste um número real e veja quais variacoes vao entrar no comparador antes do merge.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -344,10 +344,10 @@ export default function Rules() {
                   Se dois contatos tiverem o mesmo email ou telefone normalizado, o sistema pode trata-los como a mesma pessoa.
                 </p>
                 <p>
-                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro unico.
+                  Quando houver campos faltando em uma base e presentes em outra, o merge tende a consolidar tudo em um cadastro único.
                 </p>
                 <p>
-                  Com estas regras salvas, o proximo passo natural e aplicar esse criterio dentro dos webhooks e da fila de processamento.
+                  Com estas regras salvas, o próximo passo natural e aplicar esse criterio dentro dos webhooks e da fila de processamento.
                 </p>
               </CardContent>
             </Card>

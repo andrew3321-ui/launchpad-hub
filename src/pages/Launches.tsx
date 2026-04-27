@@ -69,7 +69,7 @@ export default function Launches() {
     if (error || !data) {
       toast({
         title: "Erro ao mudar ciclo",
-        description: error?.message || "O backend nao confirmou a virada de ciclo do expert.",
+        description: error?.message || "O backend não confirmou a virada de ciclo do expert.",
         variant: "destructive",
       });
       return;
@@ -105,7 +105,7 @@ export default function Launches() {
           <div>
             <h1 className="text-2xl font-bold">Experts</h1>
             <p className="text-sm text-muted-foreground">
-              Cadastre os experts da operacao e vire o ciclo mensal quando precisar arquivar os leads antigos em CSV.
+              Cadastre os experts da operação e vire o ciclo mensal quando precisar arquivar os leads antigos em CSV.
             </p>
           </div>
         </div>
@@ -129,7 +129,7 @@ export default function Launches() {
               <TableHead>Iniciado em</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Criado em</TableHead>
-              <TableHead className="w-[260px]">Acoes</TableHead>
+              <TableHead className="w-[260px]">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

@@ -168,7 +168,7 @@ export default function Logs() {
           <CardHeader>
             <CardTitle>Selecione um expert</CardTitle>
             <CardDescription>
-              Escolha um expert na barra lateral para acompanhar os eventos processados e os erros de integracao.
+              Escolha um expert na barra lateral para acompanhar os eventos processados e os erros de integração.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -194,7 +194,7 @@ export default function Logs() {
         <CardHeader>
           <CardTitle className="text-xl">Painel operacional</CardTitle>
           <CardDescription>
-            Filtre por fonte, severidade e texto para encontrar rapidamente erros como numero invalido ou merge de duplicatas.
+            Filtre por fonte, severidade e texto para encontrar rapidamente erros como número inválido ou merge de duplicatas.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -204,12 +204,12 @@ export default function Logs() {
               id="search-log"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder='Ex: "Numero invalido" ou "duplicado"'
+              placeholder='Ex: "Número inválido" ou "duplicado"'
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Nivel</Label>
+            <Label>Nível</Label>
             <Select value={levelFilter} onValueChange={setLevelFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Todos" />
@@ -252,7 +252,7 @@ export default function Logs() {
       ) : filteredRows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-sm text-muted-foreground">
-            Nenhum log encontrado para os filtros atuais. Quando o backend comecar a ingerir contatos, eventos como numero invalido, merge de duplicata e importacao aparecerao aqui.
+            Nenhum log encontrado para os filtros atuais. Quando o backend comecar a ingerir contatos, eventos como número inválido, merge de duplicata e importacao aparecerao aqui.
           </CardContent>
         </Card>
       ) : (
@@ -280,7 +280,7 @@ export default function Logs() {
 
                 {row.details && Object.keys(row.details).length > 0 && (
                   <div className="rounded-lg border bg-muted/30 p-3">
-                    <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
+                    <pre className="overflow-x-auto whitespace-pré-wrap text-xs">
                       {JSON.stringify(row.details, null, 2)}
                     </pre>
                   </div>
