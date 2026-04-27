@@ -270,6 +270,116 @@ function findStringDeep(node: unknown, keys: string[]): string | null {
   return walk(node);
 }
 
+function readNestedBracketValue(source: unknown, key: string) {
+  if (!isRecord(source)) return null;
+
+  const tokens = key
+    .replace(/\]/g, "")
+    .split(/\[|\./)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  let current: unknown = source;
+  for (const token of tokens) {
+    if (!isRecord(current)) return null;
+    current = current[token];
+  }
+
+  return current;
+}
+
+function getActiveCampaignBodyValue(payload: JsonRecord, key: string) {
+  const body = isRecord(payload.body) ? payload.body : payload;
+  const directValue =
+    body[key] ??
+    payload[key] ??
+    readNestedBracketValue(body, key) ??
+    readNestedBracketValue(payload, key);
+
+  if (typeof directValue === "string" || typeof directValue === "number" || typeof directValue === "boolean") {
+    const normalized = String(directValue).trim();
+    return normalized || null;
+  }
+
+  return null;
+}
+
+function getActiveCampaignContactField(payload: JsonRecord, fieldName: string) {
+  return (
+    getActiveCampaignBodyValue(payload, `contact[fields][${fieldName}]`) ||
+    findStringDeep(payload, [fieldName])
+  );
+}
+
+function formatGoogleSheetsPhone(contact: LeadContactRow, payload: JsonRecord) {
+  const rawPhone =
+    getActiveCampaignBodyValue(payload, "contact[phone]") ||
+    contact.primary_phone ||
+    contact.normalized_phone ||
+    "";
+  const digits = rawPhone.replace(/\D/g, "");
+
+  if (!digits) return rawPhone || null;
+  if (digits.startsWith("55")) return digits;
+  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
+
+  return digits;
+}
+
+function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow, payload: JsonRecord) {
+  const firstName = getActiveCampaignBodyValue(payload, "contact[first_name]");
+  const lastName = getActiveCampaignBodyValue(payload, "contact[last_name]");
+  const name = uniqueStrings([
+    [firstName, lastName].filter(Boolean).join(" "),
+    contact.primary_name,
+  ])[0] || null;
+
+  return {
+    header: [
+      "Data",
+      "Nome",
+      "Email",
+      "Telefone",
+      "Tipo de Lead",
+      "Produto",
+      "UTM SOURCE",
+      "UTM CAMPAIGN",
+      "UTM MEDIUM",
+      "UTM CONTENT",
+      "UTM TERM",
+      "UTM SITE",
+      "Data do Cadastro",
+      "Vlr Dash",
+      "HOTLEAD",
+      "vk_source",
+      "vk_ad_id",
+    ],
+    row: [
+      getActiveCampaignContactField(payload, "data_evento"),
+      name,
+      getActiveCampaignBodyValue(payload, "contact[email]") || contact.primary_email,
+      formatGoogleSheetsPhone(contact, payload),
+      getActiveCampaignContactField(payload, "tipo_de_lead"),
+      getActiveCampaignContactField(payload, "produto"),
+      getActiveCampaignContactField(payload, "utm_source"),
+      getActiveCampaignContactField(payload, "utm_campaign"),
+      getActiveCampaignContactField(payload, "utm_medium"),
+      getActiveCampaignContactField(payload, "utm_content"),
+      getActiveCampaignContactField(payload, "utm_term"),
+      getActiveCampaignContactField(payload, "utm_site"),
+      getActiveCampaignContactField(payload, "data_de_cadastro"),
+      getActiveCampaignContactField(payload, "dashboard_value") || "1",
+      getActiveCampaignContactField(payload, "hotlead"),
+      getActiveCampaignContactField(payload, "vk_source"),
+      getActiveCampaignContactField(payload, "vk_ad_id"),
+    ],
+    metadata: {
+      expert: launch.name,
+      cycle: launch.current_cycle_number,
+    },
+  };
+}
+
 function collectStringListDeep(node: unknown, keys: string[]) {
   const normalizedKeys = new Set(keys.map(normalizeKey));
   const values: string[] = [];
@@ -1058,41 +1168,7 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     return { skipped: true, reason: "google_sheets_not_configured" } as const;
   }
 
-  const observed = extractObservedJourneyTags("activecampaign", payload);
-  const activeContactId =
-    findStringDeep(payload, ["contact_id", "contact[id]", "id"]) || null;
-  const header = [
-    "Registrado em",
-    "Expert",
-    "Ciclo",
-    "Fonte",
-    "Evento",
-    "Event ID",
-    "Lead ID",
-    "Contato ActiveCampaign",
-    "Nome",
-    "Email",
-    "Telefone",
-    "Tags",
-    "Aliases",
-    "Payload JSON",
-  ];
-  const row = [
-    new Date().toISOString(),
-    launch.name,
-    launch.current_cycle_number,
-    "activecampaign",
-    findStringDeep(payload, ["event_type", "event", "type", "trigger_name"]) || "webhook_received",
-    eventId,
-    contact.id,
-    activeContactId,
-    contact.primary_name,
-    contact.primary_email,
-    contact.primary_phone,
-    observed.tags.join(" | "),
-    observed.aliases.join(" | "),
-    JSON.stringify(payload),
-  ];
+  const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
 
   const result = await appendGoogleSheetsRow(config, header, row);
 
@@ -1113,6 +1189,8 @@ async function appendActiveCampaignWebhookToGoogleSheets(
       : {
           spreadsheetId: result.spreadsheetId,
           sheetName: result.sheetName,
+          columns: header,
+          ...metadata,
         },
   );
 
