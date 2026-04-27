@@ -2672,11 +2672,14 @@ async function findOrCreateUchatUser(
   }
 
   const { firstName, lastName } = splitName(contact.primary_name);
+  const normalizedCreatePhone = contact.primary_phone
+    ? pickPreferredUchatCreatePhone(contact.primary_phone) || contact.primary_phone
+    : null;
   const created = await uchatRequest(workspace.api_token, "/subscriber/create", "POST", {
     first_name: firstName || undefined,
     last_name: lastName || undefined,
     name: contact.primary_name || undefined,
-    phone: contact.primary_phone || undefined,
+    phone: normalizedCreatePhone || undefined,
     email: contact.primary_email || undefined,
   });
 
