@@ -104,6 +104,7 @@ interface LaunchWebhookJobRow {
   launch_id: string;
   source: WebhookSource;
   event_type: string | null;
+  dedupe_key?: string | null;
   payload: JsonRecord;
   status: "pending" | "running" | "success" | "failed";
   attempts: number;
@@ -144,6 +145,9 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
 } as const;
 const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow"] as const;
 const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v1";
+const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
+const ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX = "active-sheets:v1";
+const ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX = "active-job:v1";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -172,6 +176,14 @@ function isLikelyUchatUserNs(value: unknown) {
 
 function normalizeKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeDedupeKeyPart(value: unknown, fallback = "none") {
+  const text = typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+  const normalized = text ? normalizeKey(text) : "";
+  return normalized || fallback;
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -1641,6 +1653,79 @@ function buildSendflowWelcomeSubflowActionKey(
   ].join(":");
 }
 
+function buildActiveCampaignSubflowActionKey(
+  launch: LaunchRow,
+  workspace: UChatWorkspaceRow,
+  subflowNs: string,
+  recipientKey: string,
+) {
+  return [
+    ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX,
+    `cycle:${launch.current_cycle_number || 1}`,
+    `workspace:${workspace.id}`,
+    `subflow:${subflowNs}`,
+    `recipient:${normalizeDedupeKeyPart(recipientKey)}`,
+  ].join(":");
+}
+
+function buildActiveCampaignSheetsActionKey(
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+) {
+  const activeContactId =
+    getActiveCampaignBodyValue(payload, "contact[id]") ||
+    getActiveCampaignBodyValue(payload, "contactid") ||
+    findStringDeep(payload, ["contact_id", "contactid", "id"]);
+  const phoneKey =
+    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
+    contact.normalized_phone ||
+    contact.primary_phone;
+  const recipientKey =
+    activeContactId ||
+    contact.primary_email ||
+    phoneKey ||
+    contact.id;
+
+  return [
+    ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX,
+    `cycle:${launch.current_cycle_number || 1}`,
+    `recipient:${normalizeDedupeKeyPart(recipientKey)}`,
+  ].join(":");
+}
+
+function buildActiveCampaignWebhookJobDedupeKey(
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+) {
+  const phoneKey =
+    pickPreferredUchatCreatePhone(normalizedEvent.contact.phone) ||
+    digitsOnly(normalizedEvent.contact.phone) ||
+    normalizedEvent.contact.phone;
+  const recipientKey =
+    normalizedEvent.externalContactId ||
+    normalizedEvent.contact.email ||
+    phoneKey;
+
+  if (!recipientKey) return null;
+
+  const subflowNs = findStringDeep(normalizedEvent.payload, [
+    "subflow_ns",
+    "subflow",
+    "welcome_subflow_ns",
+  ]);
+  const tagName = findStringDeep(normalizedEvent.payload, ["tag_name", "uchat_tag"]);
+
+  return [
+    ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX,
+    `cycle:${launch.current_cycle_number || 1}`,
+    `event:${normalizeDedupeKeyPart(normalizedEvent.eventType)}`,
+    `recipient:${normalizeDedupeKeyPart(recipientKey)}`,
+    `subflow:${normalizeDedupeKeyPart(subflowNs)}`,
+    `tag:${normalizeDedupeKeyPart(tagName)}`,
+  ].join(":");
+}
+
 async function findRecentUchatSubflowActionByPayload(
   supabase: AnySupabaseClient,
   launchId: string,
@@ -2820,16 +2905,19 @@ async function routeToUchat(
       subflowNs === workspaceDefaultSubflowNs &&
       !explicitSubflowNs;
     const usesSendflowWelcomeLock = source === "sendflow" && isWorkspaceDefaultSubflow;
+    const usesActiveCampaignSubflowLock = source === "activecampaign" && Boolean(explicitSubflowNs);
     const phoneRecipientKey =
       pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
       contact.normalized_phone ||
       contact.primary_phone;
-    const recipientKey = usesSendflowWelcomeLock
+    const recipientKey = usesSendflowWelcomeLock || usesActiveCampaignSubflowLock
       ? phoneRecipientKey || targetUserId || userNs || contact.primary_email || contact.id
       : userNs || targetUserId || phoneRecipientKey || contact.primary_email || contact.id;
     const actionKey = usesSendflowWelcomeLock
       ? buildSendflowWelcomeSubflowActionKey(launch, workspace, subflowNs, recipientKey)
-      : `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
+      : usesActiveCampaignSubflowLock
+        ? buildActiveCampaignSubflowActionKey(launch, workspace, subflowNs, recipientKey)
+        : `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
     const requestPayload = {
       workspaceId: workspace.workspace_id,
       userNs,
@@ -2839,6 +2927,13 @@ async function routeToUchat(
             dedupeScope: "sendflow_welcome_subflow",
             cycle: launch.current_cycle_number || 1,
             recipientKey: normalizeKey(recipientKey),
+          }
+        : {}),
+      ...(usesActiveCampaignSubflowLock
+        ? {
+            dedupeScope: "activecampaign_explicit_subflow",
+            cycle: launch.current_cycle_number || 1,
+            recipientKey: normalizeDedupeKeyPart(recipientKey),
           }
         : {}),
     };
@@ -2915,6 +3010,25 @@ async function routeToUchat(
             deliveryKey,
             legacyDuplicateActionId: legacyDuplicate?.id ?? null,
             legacyDuplicateCreatedAt: legacyDuplicate?.created_at ?? null,
+          },
+        );
+      } else if (usesActiveCampaignSubflowLock) {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          source,
+          "info",
+          "ACTIVE_SUBFLOW_DEDUPED",
+          "Subflow do ActiveCampaign ja enviado",
+          "O Launch Hub bloqueou um novo disparo do mesmo subflow para o mesmo contato e ciclo.",
+          {
+            workspaceId: workspace.workspace_id,
+            userNs,
+            subflowNs,
+            actionKey,
+            deliveryKey,
           },
         );
       }
@@ -3519,17 +3633,57 @@ async function appendActiveCampaignWebhookToGoogleSheetsJob(
     typeof contactOrContactId === "string"
       ? await fetchLeadContact(supabase, contactOrContactId)
       : contactOrContactId;
+  const actionKey = buildActiveCampaignSheetsActionKey(launch, contact, normalizedEvent.payload);
+  const actionId = await claimRoutingAction(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    normalizedEvent.source,
+    "google_sheets",
+    "append-row",
+    actionKey,
+    {
+      spreadsheetId: launch.gs_spreadsheet_id,
+      sheetName: launch.gs_sheet_name,
+      actionKey,
+    },
+  );
+
+  if (!actionId) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Registro duplicado na planilha bloqueado",
+      "O Launch Hub ignorou uma nova tentativa de anexar o mesmo contato do ActiveCampaign na planilha deste ciclo.",
+      { actionKey },
+    );
+    return;
+  }
 
   try {
-    await appendActiveCampaignWebhookToGoogleSheets(
+    const result = await appendActiveCampaignWebhookToGoogleSheets(
       supabase,
       launch,
       contact,
       normalizedEvent.payload,
       eventId,
     );
+    await updateRoutingAction(
+      supabase,
+      actionId,
+      result.skipped ? "skipped" : "success",
+      result as unknown as JsonRecord,
+      result.skipped ? result.reason : null,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await updateRoutingAction(supabase, actionId, "failed", {}, message);
     await insertProcessingLog(
       supabase,
       launch.id,
@@ -3547,20 +3701,69 @@ async function appendActiveCampaignWebhookToGoogleSheetsJob(
 
 async function enqueueLaunchWebhookJob(
   supabase: AnySupabaseClient,
-  launchId: string,
+  launch: LaunchRow,
   normalizedEvent: NormalizedWebhookEvent,
 ) {
+  const dedupeKey = normalizedEvent.source === "activecampaign"
+    ? buildActiveCampaignWebhookJobDedupeKey(launch, normalizedEvent)
+    : null;
+
+  if (dedupeKey) {
+    const { data: existingJob } = await supabase
+      .from("launch_webhook_jobs")
+      .select("id, status")
+      .eq("launch_id", launch.id)
+      .eq("source", normalizedEvent.source)
+      .eq("dedupe_key", dedupeKey)
+      .in("status", ["pending", "running", "success"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingJob?.id) {
+      return {
+        id: existingJob.id as string,
+        duplicate: true,
+        status: typeof existingJob.status === "string" ? existingJob.status : null,
+        dedupeKey,
+      };
+    }
+  }
+
   const { data, error } = await supabase
     .from("launch_webhook_jobs")
     .insert({
-      launch_id: launchId,
+      launch_id: launch.id,
       source: normalizedEvent.source,
       event_type: normalizedEvent.eventType,
+      dedupe_key: dedupeKey,
       payload: normalizedEvent.payload,
       status: "pending",
     } as Record<string, unknown>)
     .select("id")
     .single();
+
+  if (error?.code === "23505" && dedupeKey) {
+    const { data: existingJob } = await supabase
+      .from("launch_webhook_jobs")
+      .select("id, status")
+      .eq("launch_id", launch.id)
+      .eq("source", normalizedEvent.source)
+      .eq("dedupe_key", dedupeKey)
+      .in("status", ["pending", "running", "success"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingJob?.id) {
+      return {
+        id: existingJob.id as string,
+        duplicate: true,
+        status: typeof existingJob.status === "string" ? existingJob.status : null,
+        dedupeKey,
+      };
+    }
+  }
 
   if (error || !data?.id) {
     throw new ProcessContactError(
@@ -3570,7 +3773,12 @@ async function enqueueLaunchWebhookJob(
     );
   }
 
-  return data.id as string;
+  return {
+    id: data.id as string,
+    duplicate: false,
+    status: "pending",
+    dedupeKey,
+  };
 }
 
 function isFreshRunningWebhookJob(job: LaunchWebhookJobRow) {
@@ -3786,14 +3994,17 @@ Deno.serve(async (request) => {
     const normalizedEvent = normalizeIncomingWebhook(source, payload);
 
     if (normalizedEvent.source === "activecampaign") {
-      const jobId = await enqueueLaunchWebhookJob(supabase, launch.id, normalizedEvent);
+      const queuedJob = await enqueueLaunchWebhookJob(supabase, launch, normalizedEvent);
 
       return jsonResponse({
         accepted: true,
         queued: true,
-        jobId,
+        duplicate: queuedJob.duplicate,
+        jobId: queuedJob.id,
         routing: {
           queued: true,
+          duplicate: queuedJob.duplicate,
+          currentStatus: queuedJob.status,
           reason: "activecampaign_webhook_queued_for_async_processing",
         },
       });
