@@ -238,6 +238,45 @@ function phonesLookEquivalent(left: unknown, right: unknown) {
   );
 }
 
+function buildBrazilianLocalPhoneVariants(rawDigits: string) {
+  const trimmedDigits = rawDigits.replace(/^0+/, "");
+  const localDigits = trimmedDigits.startsWith("55") && trimmedDigits.length > 11
+    ? trimmedDigits.slice(2)
+    : trimmedDigits;
+
+  return addBrazilianPhoneNinthDigitVariants(localDigits)
+    .filter((value) => /^[1-9]{2}9?\d{8}$/.test(value))
+    .sort((left, right) => right.length - left.length);
+}
+
+function buildUchatPhoneCandidates(value: unknown) {
+  const raw = nonEmptyString(value);
+  const digits = digitsOnly(raw);
+
+  if (!digits) return [] as string[];
+
+  const candidates = new Set<string>();
+  for (const localVariant of buildBrazilianLocalPhoneVariants(digits)) {
+    candidates.add(`+55${localVariant}`);
+    candidates.add(`55${localVariant}`);
+  }
+
+  if (/^\+[1-9]\d{7,14}$/.test(raw || "")) {
+    candidates.add(raw as string);
+  }
+
+  if (/^[1-9]\d{7,14}$/.test(digits)) {
+    candidates.add(`+${digits}`);
+    candidates.add(digits);
+  }
+
+  return uniqueStrings([...candidates]).slice(0, 12);
+}
+
+function pickPreferredUchatCreatePhone(value: unknown) {
+  return buildUchatPhoneCandidates(value).find((candidate) => /^\+[1-9]\d{7,14}$/.test(candidate)) || null;
+}
+
 function splitName(fullName?: string | null) {
   const value = nonEmptyString(fullName);
   if (!value) return { firstName: null, lastName: null };
@@ -2230,12 +2269,14 @@ async function fetchUchatSubscriberByUserId(
 async function createUchatSubscriberFromExplicitPayload(
   workspace: UChatWorkspaceRow,
   payload: JsonRecord,
+  phoneOverride?: string | null,
 ) {
   const explicitContact = extractGenericContact(payload);
+  const normalizedPhone = phoneOverride || pickPreferredUchatCreatePhone(explicitContact.phone);
 
-  if (!explicitContact.phone && !explicitContact.email) {
+  if (!normalizedPhone && !explicitContact.email) {
     throw new ProcessContactError(
-      "Relay webhook requires explicit phone or email to create the UChat subscriber precisely",
+      "Relay webhook requires explicit valid phone or email to create the UChat subscriber precisely",
       400,
     );
   }
@@ -2245,7 +2286,7 @@ async function createUchatSubscriberFromExplicitPayload(
     first_name: firstName || undefined,
     last_name: lastName || undefined,
     name: explicitContact.name || undefined,
-    phone: explicitContact.phone || undefined,
+    phone: normalizedPhone || undefined,
     email: explicitContact.email || undefined,
   });
 
@@ -2303,17 +2344,21 @@ async function resolveExplicitUchatRecipient(
   const explicitContact = extractGenericContact(payload);
 
   if (explicitContact.phone) {
-    const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
-      phone: explicitContact.phone,
-    });
-    const userNs = nonEmptyString(phoneMatch?.user_ns);
-    if (phoneMatch && userNs) {
-      return {
-        userNs,
-        userId: extractKnownUchatUserId(phoneMatch),
-        snapshot: phoneMatch,
-        resolutionSource: "payload_phone",
-      } satisfies ResolvedUchatRecipient;
+    const phoneCandidates = buildUchatPhoneCandidates(explicitContact.phone);
+
+    for (const phoneCandidate of phoneCandidates) {
+      const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
+        phone: phoneCandidate,
+      });
+      const userNs = nonEmptyString(phoneMatch?.user_ns);
+      if (phoneMatch && userNs) {
+        return {
+          userNs,
+          userId: extractKnownUchatUserId(phoneMatch),
+          snapshot: phoneMatch,
+          resolutionSource: "payload_phone",
+        } satisfies ResolvedUchatRecipient;
+      }
     }
   }
 
@@ -2332,8 +2377,9 @@ async function resolveExplicitUchatRecipient(
     }
   }
 
-  if (explicitContact.phone || explicitContact.email) {
-    return await createUchatSubscriberFromExplicitPayload(workspace, payload);
+  const createPhone = pickPreferredUchatCreatePhone(explicitContact.phone);
+  if (createPhone || explicitContact.email) {
+    return await createUchatSubscriberFromExplicitPayload(workspace, payload, createPhone);
   }
 
   throw new ProcessContactError(
