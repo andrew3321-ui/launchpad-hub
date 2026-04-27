@@ -126,7 +126,6 @@ const corsHeaders = {
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
 const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
-const DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS = ["1050", "1055"] as const;
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
   utm_source: "21",
   utm_medium: "22",
@@ -135,7 +134,6 @@ const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
   utm_term: "24",
   utm_site: "60",
 } as const;
-const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_TAG_IDS = ["1050", "1053"] as const;
 const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "21": "ORG-IG-AUT",
   "22": "LANC-26-03",
@@ -143,6 +141,7 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "24": "INT-GERAL",
   "60": "AUT",
 } as const;
+const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow"] as const;
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -739,6 +738,20 @@ function normalizeWebhookSource(value: string | null) {
   return null;
 }
 
+function isActiveCampaignTaggedSource(source: WebhookSource) {
+  return (ACTIVE_CAMPAIGN_TAGGED_SOURCES as readonly string[]).includes(source);
+}
+
+function formatWebhookSourceLabel(source: WebhookSource) {
+  if (source === "manychat") return "ManyChat";
+  if (source === "typebot") return "Typebot";
+  if (source === "tally") return "Tally";
+  if (source === "sendflow") return "Sendflow";
+  if (source === "activecampaign") return "ActiveCampaign";
+  if (source === "uchat") return "UChat";
+  return source;
+}
+
 function normalizeIncomingWebhook(
   source: WebhookSource,
   payload: JsonRecord,
@@ -1169,16 +1182,8 @@ function resolveActiveCampaignTags(
   const mappedTags = namedTags
     .filter((item) => aliases.includes(normalizeKey(item.alias)))
     .map((item) => item.tag);
-  const fallbackTags =
-    directTags.length === 0 && mappedTags.length === 0
-      ? source === "typebot"
-        ? [...DEFAULT_TYPEBOT_ACTIVECAMPAIGN_TAG_IDS]
-        : source === "manychat"
-          ? [...DEFAULT_MANYCHAT_ACTIVECAMPAIGN_TAG_IDS]
-          : []
-      : [];
 
-  return uniqueStrings([...directTags, ...mappedTags, ...fallbackTags]);
+  return uniqueStrings([...directTags, ...mappedTags]);
 }
 
 function extractObservedJourneyTags(source: WebhookSource, payload: JsonRecord) {
@@ -2879,7 +2884,10 @@ async function routeToActiveCampaign(
   const tagNames = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
   const fieldValues = extractActiveCampaignFieldValues(source, payload);
 
-  if (source === "sendflow" && tagNames.length === 0) {
+  if (isActiveCampaignTaggedSource(source) && tagNames.length === 0) {
+    const sourceLabel = formatWebhookSourceLabel(source);
+    const inboundAliases = extractTagAliases(payload, source);
+    const inboundTags = extractTagNames(payload);
     await insertProcessingLog(
       supabase,
       launch.id,
@@ -2887,14 +2895,22 @@ async function routeToActiveCampaign(
       eventId,
       source,
       "warning",
-      "SENDFLOW_ACTIVE_TAG_NOT_CONFIGURED",
-      "Sendflow sem tag do ActiveCampaign",
-      "O contato do Sendflow sera pesquisado/enviado ao ActiveCampaign pelo telefone, mas nenhuma tag foi resolvida para aplicar. Configure uma tag no bloco Sendflow em Fontes.",
+      `${source.toUpperCase()}_ACTIVE_TAG_NOT_CONFIGURED`,
+      `${sourceLabel} sem tag do ActiveCampaign`,
+      `O contato do ${sourceLabel} foi tratado, mas nenhuma tag foi resolvida para aplicar no ActiveCampaign. Configure uma tag no bloco ${sourceLabel} em Fontes.`,
       {
-        inboundAliases: extractTagAliases(payload, source),
-        inboundTags: extractTagNames(payload),
+        inboundAliases,
+        inboundTags,
       },
     );
+
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "activecampaign_tag_not_configured",
+      inboundAliases,
+      inboundTags,
+    };
   }
 
   if (source === "uchat" && tagNames.length === 0) {
@@ -2997,6 +3013,7 @@ async function routeToActiveCampaign(
     return {
       target: "activecampaign",
       contactId: response.activeContactId,
+      appliedTags: response.appliedTags,
       fieldValuesApplied: response.appliedFieldValues,
       tagsApplied: response.appliedTags,
       matchedBy: response.matchedBy,
@@ -3168,14 +3185,21 @@ async function dispatchRoutes(
 
       activeCampaignRoute = routed as unknown as JsonRecord;
 
-      if ("appliedTags" in routed && Array.isArray(routed.appliedTags)) {
+      const appliedActiveCampaignTags =
+        "appliedTags" in routed && Array.isArray(routed.appliedTags)
+          ? routed.appliedTags
+          : "tagsApplied" in routed && Array.isArray(routed.tagsApplied)
+            ? routed.tagsApplied
+            : [];
+
+      if (appliedActiveCampaignTags.length > 0) {
         await updateLeadJourneyData(
           supabase,
           contact,
           normalizedEvent.source,
           routingPayload,
           {
-            tags: routed.appliedTags as string[],
+            tags: appliedActiveCampaignTags as string[],
           },
         );
       }
