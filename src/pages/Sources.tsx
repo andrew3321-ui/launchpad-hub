@@ -190,6 +190,7 @@ const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 const ACTIVE_CAMPAIGN_STALE_SYNC_MS = 90_000;
 const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_OAUTH_CLIENT_ID = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+const DEFAULT_GOOGLE_SHEET_NAME = "Página1";
 const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.metadata.readonly",
@@ -576,6 +577,15 @@ export default function Sources() {
       ...gsAvailableSpreadsheets,
     ];
   }, [gsAvailableSpreadsheets, visibleGsSpreadsheetId, visibleGsSpreadsheetTitle]);
+  const visibleGsAvailableSheets = useMemo(() => {
+    if (gsAvailableSheets.length > 0) return gsAvailableSheets;
+
+    const fallbackSheetName =
+      visibleGsSheetName.trim() ||
+      (visibleGsSpreadsheetId.trim() ? DEFAULT_GOOGLE_SHEET_NAME : "");
+
+    return fallbackSheetName ? [{ id: null, title: fallbackSheetName }] : [];
+  }, [gsAvailableSheets, visibleGsSheetName, visibleGsSpreadsheetId]);
 
   const managedAliasKeys = useMemo(
     () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
@@ -1302,21 +1312,39 @@ export default function Sources() {
             typedData.selectedSpreadsheetId ?? currentSpreadsheetId,
           );
         }
-        setGsAvailableSheets(
-          typedData.sheets.map((sheet) => ({
-            id: sheet.id,
-            title: sheet.title,
-          })),
-        );
+        const returnedSheets = typedData.sheets.map((sheet) => ({
+          id: sheet.id,
+          title: sheet.title,
+        }));
+        const fallbackSheets =
+          !listOnly && spreadsheetId && returnedSheets.length === 0
+            ? [
+                {
+                  id: null,
+                  title: gsSheetName.trim() || DEFAULT_GOOGLE_SHEET_NAME,
+                },
+              ]
+            : [];
+        const nextSheets = returnedSheets.length > 0 ? returnedSheets : fallbackSheets;
+
+        setGsAvailableSheets(nextSheets);
 
         if (!listOnly) {
           const firstSheetName =
-            typedData.sheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
+            nextSheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
               ?.title ?? "";
 
           setGsSheetName((currentSheetName) =>
             currentSheetName.trim() ? currentSheetName : firstSheetName,
           );
+        }
+
+        if (!listOnly && typedData.catalogWarning && !options?.silent) {
+          toast({
+            title: "Aba não listada pelo Google",
+            description:
+              "A planilha foi selecionada, mas o Google não devolveu as abas. Usei a aba padrão Página1 para permitir salvar.",
+          });
         }
 
         if (!options?.silent) {
@@ -1440,7 +1468,13 @@ export default function Sources() {
 
   useEffect(() => {
     googleSheetsAutoRequestKeysRef.current = new Set();
-  }, [activeLaunchId, hydratedLaunchId, visibleGsAuthMode, visibleGsOauthConnected]);
+  }, [
+    activeLaunchId,
+    hydratedLaunchId,
+    visibleGsAuthMode,
+    visibleGsOauthConnected,
+    visibleGsSpreadsheetId,
+  ]);
 
   const connectGoogleSheetsOauth = useCallback(async () => {
     if (!activeLaunch) return;
@@ -2226,7 +2260,10 @@ export default function Sources() {
                       void loadGoogleSheetsCatalog({
                         authMode: visibleGsAuthMode,
                         ...(visibleGsAuthMode === "oauth"
-                          ? { spreadsheetId: "", listOnly: true }
+                          ? {
+                              spreadsheetId: visibleGsSpreadsheetId.trim(),
+                              listOnly: !visibleGsSpreadsheetId.trim(),
+                            }
                           : {}),
                       })
                     }
@@ -2260,7 +2297,7 @@ export default function Sources() {
                           authMode: "oauth",
                           oauthConnected: true,
                           spreadsheetId: value,
-                          silent: true,
+                          silent: false,
                         });
                       }}
                     >
@@ -2296,19 +2333,21 @@ export default function Sources() {
                     <Select
                       value={visibleGsSheetName || undefined}
                       onValueChange={setGsSheetName}
-                      disabled={gsAvailableSheets.length === 0}
+                      disabled={!visibleGsSpreadsheetId.trim() && visibleGsAvailableSheets.length === 0}
                     >
                       <SelectTrigger>
                         <SelectValue
                           placeholder={
-                            gsAvailableSheets.length > 0
+                            loadingGoogleSheetsCatalog
+                              ? "Carregando abas"
+                              : visibleGsSpreadsheetId.trim() || visibleGsAvailableSheets.length > 0
                               ? "Escolher aba"
                               : "Escolha uma planilha primeiro"
                           }
                         />
                       </SelectTrigger>
                       <SelectContent>
-                        {gsAvailableSheets.map((sheet) => (
+                        {visibleGsAvailableSheets.map((sheet) => (
                           <SelectItem
                             key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`}
                             value={sheet.title || `sheet-${sheet.id ?? 0}`}
