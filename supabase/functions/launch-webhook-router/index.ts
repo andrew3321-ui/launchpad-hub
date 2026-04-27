@@ -99,6 +99,17 @@ interface NormalizedWebhookEvent {
   payload: JsonRecord;
 }
 
+interface LaunchWebhookJobRow {
+  id: string;
+  launch_id: string;
+  source: WebhookSource;
+  event_type: string | null;
+  payload: JsonRecord;
+  status: "pending" | "running" | "success" | "failed";
+  attempts: number;
+  updated_at?: string | null;
+}
+
 interface RouteToUchatOptions {
   allowSubflow?: boolean;
   allowWorkspaceDefaultSubflow?: boolean;
@@ -141,25 +152,6 @@ function jsonResponse(body: unknown, status = 200) {
       ...corsHeaders,
     },
   });
-}
-
-function runAfterResponse(task: Promise<unknown>, label: string) {
-  const guardedTask = task.catch((error) => {
-    console.error(`${label} failed`, error);
-  });
-  const edgeRuntime = (globalThis as {
-    EdgeRuntime?: {
-      waitUntil?: (task: Promise<unknown>) => void;
-    };
-  }).EdgeRuntime;
-
-  if (edgeRuntime?.waitUntil) {
-    edgeRuntime.waitUntil(guardedTask);
-    return "wait_until";
-  }
-
-  void guardedTask;
-  return "fire_and_forget";
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -3128,6 +3120,14 @@ async function runAcceptedContactJobs(
       normalizedEvent.payload,
     );
 
+    const routingResult = await dispatchRoutes(
+      supabase,
+      launch,
+      normalizedEvent,
+      contact.id,
+      eventId,
+    );
+
     if (includeGoogleSheets && normalizedEvent.source === "activecampaign") {
       await appendActiveCampaignWebhookToGoogleSheetsJob(
         supabase,
@@ -3138,13 +3138,7 @@ async function runAcceptedContactJobs(
       );
     }
 
-    return await dispatchRoutes(
-      supabase,
-      launch,
-      normalizedEvent,
-      contact.id,
-      eventId,
-    );
+    return routingResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -3204,6 +3198,170 @@ async function appendActiveCampaignWebhookToGoogleSheetsJob(
   }
 }
 
+async function enqueueLaunchWebhookJob(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  normalizedEvent: NormalizedWebhookEvent,
+) {
+  const { data, error } = await supabase
+    .from("launch_webhook_jobs")
+    .insert({
+      launch_id: launchId,
+      source: normalizedEvent.source,
+      event_type: normalizedEvent.eventType,
+      payload: normalizedEvent.payload,
+      status: "pending",
+    } as Record<string, unknown>)
+    .select("id")
+    .single();
+
+  if (error || !data?.id) {
+    throw new ProcessContactError(
+      "Failed to queue ActiveCampaign webhook job",
+      500,
+      error?.message,
+    );
+  }
+
+  return data.id as string;
+}
+
+function isFreshRunningWebhookJob(job: LaunchWebhookJobRow) {
+  if (job.status !== "running" || !job.updated_at) return false;
+
+  const updatedAtMs = Date.parse(job.updated_at);
+  if (!Number.isFinite(updatedAtMs)) return false;
+
+  return Date.now() - updatedAtMs < 2 * 60 * 1000;
+}
+
+async function updateLaunchWebhookJob(
+  supabase: AnySupabaseClient,
+  jobId: string,
+  values: Record<string, unknown>,
+) {
+  await supabase
+    .from("launch_webhook_jobs")
+    .update(values)
+    .eq("id", jobId);
+}
+
+async function processQueuedLaunchWebhookJob(
+  supabase: AnySupabaseClient,
+  jobId: string,
+) {
+  const { data, error } = await supabase
+    .from("launch_webhook_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) {
+    throw new ProcessContactError("Failed to load webhook job", 500, error.message);
+  }
+
+  if (!data) {
+    throw new ProcessContactError("Webhook job not found", 404);
+  }
+
+  const job = data as LaunchWebhookJobRow;
+
+  if (job.status === "success") {
+    return {
+      accepted: true,
+      skipped: true,
+      reason: "job_already_processed",
+      jobId,
+    };
+  }
+
+  if (isFreshRunningWebhookJob(job)) {
+    return {
+      accepted: true,
+      skipped: true,
+      reason: "job_already_running",
+      jobId,
+    };
+  }
+
+  const nextAttempts = (job.attempts || 0) + 1;
+  await updateLaunchWebhookJob(supabase, jobId, {
+    status: "running",
+    attempts: nextAttempts,
+    started_at: new Date().toISOString(),
+    last_error: null,
+  });
+
+  try {
+    const launch = await fetchLaunch(supabase, job.launch_id, null);
+    const normalizedEvent = normalizeIncomingWebhook(job.source, job.payload);
+    const processingResult = await processIncomingContactEvent(supabase, {
+      launchId: launch.id,
+      source: normalizedEvent.source,
+      eventType: normalizedEvent.eventType,
+      externalContactId: normalizedEvent.externalContactId,
+      contact: normalizedEvent.contact,
+      payload: normalizedEvent.payload,
+    } as IncomingEventBody);
+
+    if (processingResult.status === "rejected" || !processingResult.contactId || !processingResult.eventId) {
+      await updateLaunchWebhookJob(supabase, jobId, {
+        status: "success",
+        processed_at: new Date().toISOString(),
+        response_payload: {
+          accepted: false,
+          processing: processingResult,
+        },
+      });
+
+      return {
+        accepted: false,
+        jobId,
+        processing: processingResult,
+      };
+    }
+
+    const routingResult = await runAcceptedContactJobs(
+      supabase,
+      launch,
+      normalizedEvent,
+      processingResult.contactId,
+      processingResult.eventId,
+      { includeGoogleSheets: true },
+    );
+
+    const responsePayload = {
+      accepted: true,
+      processing: processingResult,
+      routing: routingResult,
+    };
+
+    await updateLaunchWebhookJob(supabase, jobId, {
+      status: "success",
+      processed_at: new Date().toISOString(),
+      response_payload: responsePayload,
+    });
+
+    return {
+      jobId,
+      ...responsePayload,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const shouldRetry = nextAttempts < 5;
+
+    await updateLaunchWebhookJob(supabase, jobId, {
+      status: shouldRetry ? "pending" : "failed",
+      last_error: message,
+      next_attempt_at: shouldRetry
+        ? new Date(Date.now() + Math.min(nextAttempts * 30_000, 5 * 60_000)).toISOString()
+        : null,
+    });
+
+    throw error;
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -3221,6 +3379,37 @@ Deno.serve(async (request) => {
   }
 
   const url = new URL(request.url);
+  const workerJobId = nonEmptyString(url.searchParams.get("workerJobId"));
+  if (workerJobId) {
+    const expectedSecret =
+      Deno.env.get("LAUNCHHUB_WEBHOOK_WORKER_SECRET") ||
+      Deno.env.get("LAUNCHHUB_SYNC_CRON_SECRET");
+    const providedSecret = nonEmptyString(request.headers.get("x-launchhub-worker-secret"));
+
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      return jsonResponse({ error: "Invalid webhook worker secret" }, 403);
+    }
+
+    try {
+      const supabase = createClient(supabaseUrl, serviceRoleKey);
+      const result = await processQueuedLaunchWebhookJob(supabase, workerJobId);
+      return jsonResponse(result);
+    } catch (error) {
+      if (error instanceof ProcessContactError) {
+        return jsonResponse(
+          {
+            error: error.message,
+            details: error.details ?? null,
+          },
+          error.statusCode,
+        );
+      }
+
+      console.error("launch-webhook-router worker failed", error);
+      return jsonResponse({ error: "Unexpected webhook worker error" }, 500);
+    }
+  }
+
   const source = normalizeWebhookSource(url.searchParams.get("source"));
   const launchId =
     nonEmptyString(url.searchParams.get("expertId")) ||
@@ -3249,6 +3438,20 @@ Deno.serve(async (request) => {
 
     const normalizedEvent = normalizeIncomingWebhook(source, payload);
 
+    if (normalizedEvent.source === "activecampaign") {
+      const jobId = await enqueueLaunchWebhookJob(supabase, launch.id, normalizedEvent);
+
+      return jsonResponse({
+        accepted: true,
+        queued: true,
+        jobId,
+        routing: {
+          queued: true,
+          reason: "activecampaign_webhook_queued_for_async_processing",
+        },
+      });
+    }
+
     const processingResult = await processIncomingContactEvent(supabase, {
       launchId: launch.id,
       source: normalizedEvent.source,
@@ -3262,38 +3465,6 @@ Deno.serve(async (request) => {
       return jsonResponse({
         accepted: false,
         processing: processingResult,
-      });
-    }
-
-    if (normalizedEvent.source === "activecampaign") {
-      const routingResult = await runAcceptedContactJobs(
-        supabase,
-        launch,
-        normalizedEvent,
-        processingResult.contactId,
-        processingResult.eventId,
-        { includeGoogleSheets: false },
-      );
-      const googleSheetsMode = runAfterResponse(
-        appendActiveCampaignWebhookToGoogleSheetsJob(
-          supabase,
-          launch,
-          normalizedEvent,
-          processingResult.contactId,
-          processingResult.eventId,
-        ),
-        "activecampaign_webhook_background_jobs",
-      );
-
-      return jsonResponse({
-        accepted: true,
-        processing: processingResult,
-        routing: routingResult,
-        googleSheets: {
-          queued: true,
-          mode: googleSheetsMode,
-          reason: "activecampaign_webhook_acknowledged_after_explicit_routing",
-        },
       });
     }
 
