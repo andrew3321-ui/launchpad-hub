@@ -1693,6 +1693,15 @@ async function syncContactToActiveCampaign(
     knownContactId,
     { phoneOnly, phoneSearchValue: overridePhone },
   );
+  if (!existingContact && phoneOnly && !contact.primary_email) {
+    // Sendflow phone-only path: only update/merge an EXISTING ActiveCampaign contact.
+    // We never create a new contact from a Sendflow webhook that carries no email.
+    throw new ProcessContactError(
+      "ActiveCampaign contact not found by phone for Sendflow webhook",
+      404,
+    );
+  }
+
   const payload = existingContact
     ? await activeCampaignRequest(
         launch.ac_api_url,
