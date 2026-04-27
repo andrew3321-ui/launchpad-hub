@@ -613,6 +613,76 @@ function extractGenericContact(payload: JsonRecord) {
   };
 }
 
+function extractActiveCampaignContactId(payload: JsonRecord) {
+  return (
+    getActiveCampaignBodyValue(payload, "contact[id]") ||
+    getActiveCampaignBodyValue(payload, "contactid") ||
+    findStringDeep(payload, ["contact_id", "contactid"])
+  );
+}
+
+function buildRoutingFailureContext(
+  contact: LeadContactRow | null,
+  payload: JsonRecord,
+  normalizedEvent?: NormalizedWebhookEvent,
+) {
+  const genericContact = extractGenericContact(payload);
+  const activeCampaignContact = {
+    id: extractActiveCampaignContactId(payload),
+    email:
+      getActiveCampaignBodyValue(payload, "contact[email]") ||
+      getActiveCampaignBodyValue(payload, "email") ||
+      genericContact.email,
+    phone:
+      getActiveCampaignBodyValue(payload, "contact[phone]") ||
+      getActiveCampaignBodyValue(payload, "phone") ||
+      genericContact.phone,
+  };
+  const preferredUchatPhone = pickPreferredUchatCreatePhone(
+    contact?.normalized_phone ||
+      contact?.primary_phone ||
+      activeCampaignContact.phone ||
+      genericContact.phone,
+  );
+  const phoneCandidates = uniqueStrings([
+    contact?.primary_phone,
+    contact?.normalized_phone,
+    activeCampaignContact.phone,
+    genericContact.phone,
+    preferredUchatPhone,
+  ]).slice(0, 8);
+
+  return {
+    source: normalizedEvent?.source || null,
+    eventType: normalizedEvent?.eventType || null,
+    externalContactId: normalizedEvent?.externalContactId || activeCampaignContact.id || null,
+    contactSnapshot: {
+      leadContactId: contact?.id || null,
+      name: contact?.primary_name || genericContact.name || null,
+      email: contact?.primary_email || genericContact.email || activeCampaignContact.email || null,
+      phone: contact?.primary_phone || genericContact.phone || activeCampaignContact.phone || null,
+      normalizedPhone: contact?.normalized_phone || null,
+      preferredUchatPhone,
+      phoneCandidates,
+    },
+    payloadContact: {
+      name: genericContact.name,
+      email: genericContact.email,
+      phone: genericContact.phone,
+    },
+    activeCampaignContact,
+    uchatRecipientHint: {
+      userNs: extractUchatUserNs(payload),
+      userId: extractUchatUserId(payload),
+    },
+  } satisfies JsonRecord;
+}
+
+function isUchatSubscriberNotFoundError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /subscriber\s+not\s+found/i.test(message);
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2901,8 +2971,19 @@ async function routeToUchat(
   const responses: JsonRecord[] = [];
   const executedActions: string[] = [];
   const skippedActions: string[] = [];
-  let subflowDeliveryMethod: "user_ns" | "user_id" | null = null;
+  let subflowDeliveryMethod: "user_ns" | "user_id" | "user_id_then_user_ns" | null = null;
   const deliveryKey = resolveInboundDeliveryKey(source, payload, eventId);
+  const failureContext = buildRoutingFailureContext(contact, payload, {
+    source,
+    eventType: findStringDeep(payload, ["event", "event_type", "type", "action"]) || source,
+    externalContactId: null,
+    contact: {
+      name: contact.primary_name,
+      email: contact.primary_email,
+      phone: contact.primary_phone,
+    },
+    payload,
+  });
 
   if (subflowNs) {
     const isWorkspaceDefaultSubflow =
@@ -2966,29 +3047,74 @@ async function routeToUchat(
     );
 
     if (actionId) {
+      const attemptedDeliveryMethods: string[] = [];
       try {
-        const response = (await uchatRequest(
-          workspace.api_token,
-          targetUserId ? "/subscriber/send-sub-flow-by-user-id" : "/subscriber/send-sub-flow",
-          "POST",
-          targetUserId
-            ? {
+        let response: JsonRecord;
+
+        if (targetUserId) {
+          attemptedDeliveryMethods.push("user_id");
+          try {
+            response = (await uchatRequest(
+              workspace.api_token,
+              "/subscriber/send-sub-flow-by-user-id",
+              "POST",
+              {
                 user_id: targetUserId,
                 sub_flow_ns: subflowNs,
-              }
-            : {
+              },
+            )) as JsonRecord;
+            subflowDeliveryMethod = "user_id";
+          } catch (error) {
+            if (!isUchatSubscriberNotFoundError(error)) {
+              throw error;
+            }
+
+            attemptedDeliveryMethods.push("user_ns");
+            response = (await uchatRequest(
+              workspace.api_token,
+              "/subscriber/send-sub-flow",
+              "POST",
+              {
+                user_ns: userNs,
+                sub_flow_ns: subflowNs,
+              },
+            )) as JsonRecord;
+            subflowDeliveryMethod = "user_id_then_user_ns";
+          }
+        } else {
+          attemptedDeliveryMethods.push("user_ns");
+          response = (await uchatRequest(
+            workspace.api_token,
+            "/subscriber/send-sub-flow",
+            "POST",
+            {
               user_ns: userNs,
               sub_flow_ns: subflowNs,
             },
-        )) as JsonRecord;
+          )) as JsonRecord;
+          subflowDeliveryMethod = "user_ns";
+        }
 
         await updateRoutingAction(supabase, actionId, "success", response);
         responses.push({ action: "send-sub-flow", response });
         executedActions.push("send-sub-flow");
-        subflowDeliveryMethod = targetUserId ? "user_id" : "user_ns";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await updateRoutingAction(supabase, actionId, "failed", {}, message);
+        await updateRoutingAction(
+          supabase,
+          actionId,
+          "failed",
+          {
+            error: message,
+            workspaceId: workspace.workspace_id,
+            userNs,
+            payloadUserId: targetUserId,
+            subflowNs,
+            attemptedDeliveryMethods,
+            ...failureContext,
+          },
+          message,
+        );
         throw error;
       }
     } else {
@@ -3062,7 +3188,19 @@ async function routeToUchat(
         executedActions.push("add-tag");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await updateRoutingAction(supabase, actionId, "failed", {}, message);
+        await updateRoutingAction(
+          supabase,
+          actionId,
+          "failed",
+          {
+            error: message,
+            workspaceId: workspace.workspace_id,
+            userNs,
+            tagName,
+            ...failureContext,
+          },
+          message,
+        );
         throw error;
       }
     } else {
@@ -3544,6 +3682,7 @@ async function dispatchRoutes(
         "O contato entrou no Launch Hub e foi tratado, mas a etapa de retorno ao UChat falhou durante o disparo da acao configurada.",
         {
           error: message,
+          ...buildRoutingFailureContext(contact, normalizedEvent.payload, normalizedEvent),
           configuredSubflowNs:
             findStringDeep(normalizedEvent.payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) || null,
           workspaceHint:
@@ -3615,7 +3754,10 @@ async function runAcceptedContactJobs(
         "BACKGROUND_ROUTING_FAILED",
         "Falha no processamento apos aceite do webhook",
         "O Launch Hub aceitou o webhook rapidamente, mas uma etapa posterior de roteamento falhou.",
-        { error: message },
+        {
+          error: message,
+          ...buildRoutingFailureContext(contact, normalizedEvent.payload, normalizedEvent),
+        },
       );
     }
 
