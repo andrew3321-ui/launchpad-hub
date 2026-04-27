@@ -1665,6 +1665,7 @@ async function syncContactToActiveCampaign(
   tagNames: string[],
   fieldValues: ActiveCampaignFieldValueInput[],
   knownContactId?: string | null,
+  options?: { phoneOnlyMatch?: boolean; phoneSearchValue?: string | null },
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) {
     throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
@@ -1674,14 +1675,24 @@ async function syncContactToActiveCampaign(
     throw new ProcessContactError("The contact does not have email or phone to send to ActiveCampaign", 400);
   }
 
+  const phoneOnly = options?.phoneOnlyMatch === true;
+  const overridePhone = nonEmptyString(options?.phoneSearchValue) || null;
+
   const { firstName, lastName } = splitName(contact.primary_name);
+  // For Sendflow (phoneOnly), never overwrite the email of the existing AC contact;
+  // we only want to merge/update by phone and apply the configured tag.
   const contactPayload = {
-    email: contact.primary_email || undefined,
-    phone: contact.primary_phone || undefined,
+    email: phoneOnly ? undefined : (contact.primary_email || undefined),
+    phone: overridePhone || contact.primary_phone || undefined,
     firstName: firstName || undefined,
     lastName: lastName || undefined,
   };
-  const existingContact = await findExistingActiveCampaignContact(launch, contact, knownContactId);
+  const existingContact = await findExistingActiveCampaignContact(
+    launch,
+    contact,
+    knownContactId,
+    { phoneOnly, phoneSearchValue: overridePhone },
+  );
   const payload = existingContact
     ? await activeCampaignRequest(
         launch.ac_api_url,
