@@ -124,6 +124,7 @@ const corsHeaders = {
 };
 
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const SENDFLOW_WELCOME_LEGACY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
 const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
@@ -142,6 +143,7 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "60": "AUT",
 } as const;
 const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow"] as const;
+const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v1";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -1575,6 +1577,7 @@ async function claimRoutingAction(
   actionType: string,
   actionKey: string | null,
   requestPayload: JsonRecord,
+  options: { releaseStalePending?: boolean } = {},
 ) {
   if (actionKey) {
     const existingAction = await findBlockingRoutingAction(
@@ -1592,7 +1595,8 @@ async function claimRoutingAction(
     }
 
     if (existingAction?.status === "pending") {
-      if (isFreshPendingRoutingAction(existingAction)) {
+      const releaseStalePending = options.releaseStalePending !== false;
+      if (!releaseStalePending || isFreshPendingRoutingAction(existingAction)) {
         return null;
       }
 
@@ -1620,6 +1624,53 @@ async function claimRoutingAction(
     actionKey,
     requestPayload,
   );
+}
+
+function buildSendflowWelcomeSubflowActionKey(
+  launch: LaunchRow,
+  workspace: UChatWorkspaceRow,
+  subflowNs: string,
+  recipientKey: string,
+) {
+  return [
+    SENDFLOW_WELCOME_ACTION_PREFIX,
+    `cycle:${launch.current_cycle_number || 1}`,
+    `workspace:${workspace.id}`,
+    `subflow:${subflowNs}`,
+    `recipient:${normalizeKey(recipientKey)}`,
+  ].join(":");
+}
+
+async function findRecentUchatSubflowActionByPayload(
+  supabase: AnySupabaseClient,
+  launchId: string,
+  source: WebhookSource,
+  workspaceId: string | null,
+  userNs: string,
+  subflowNs: string,
+  cooldownMs: number,
+) {
+  const since = new Date(Date.now() - cooldownMs).toISOString();
+
+  const { data } = await supabase
+    .from("contact_routing_actions")
+    .select("id, status, created_at")
+    .eq("launch_id", launchId)
+    .eq("source", source)
+    .eq("target", "uchat")
+    .eq("action_type", "send-sub-flow")
+    .in("status", ["pending", "success"])
+    .gte("created_at", since)
+    .contains("request_payload", {
+      workspaceId,
+      userNs,
+      subflowNs,
+    })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return data ? (data as RoutingActionRow) : null;
 }
 
 async function loadAllActiveCampaignTags(apiUrl: string, apiKey: string) {
@@ -2764,18 +2815,58 @@ async function routeToUchat(
   const deliveryKey = resolveInboundDeliveryKey(source, payload, eventId);
 
   if (subflowNs) {
-    const actionKey = `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
-    const actionId = await claimRoutingAction(
-      supabase,
-      launch.id,
-      contact.id,
-      eventId,
-      source,
-      "uchat",
-      "send-sub-flow",
-      actionKey,
-      { workspaceId: workspace.workspace_id, userNs, subflowNs },
-    );
+    const isWorkspaceDefaultSubflow =
+      Boolean(workspaceDefaultSubflowNs) &&
+      subflowNs === workspaceDefaultSubflowNs &&
+      !explicitSubflowNs;
+    const usesSendflowWelcomeLock = source === "sendflow" && isWorkspaceDefaultSubflow;
+    const phoneRecipientKey =
+      pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
+      contact.normalized_phone ||
+      contact.primary_phone;
+    const recipientKey = usesSendflowWelcomeLock
+      ? phoneRecipientKey || targetUserId || userNs || contact.primary_email || contact.id
+      : userNs || targetUserId || phoneRecipientKey || contact.primary_email || contact.id;
+    const actionKey = usesSendflowWelcomeLock
+      ? buildSendflowWelcomeSubflowActionKey(launch, workspace, subflowNs, recipientKey)
+      : `${workspace.id}:subflow:${subflowNs}:event:${deliveryKey}`;
+    const requestPayload = {
+      workspaceId: workspace.workspace_id,
+      userNs,
+      subflowNs,
+      ...(usesSendflowWelcomeLock
+        ? {
+            dedupeScope: "sendflow_welcome_subflow",
+            cycle: launch.current_cycle_number || 1,
+            recipientKey: normalizeKey(recipientKey),
+          }
+        : {}),
+    };
+    const legacyDuplicate = usesSendflowWelcomeLock
+      ? await findRecentUchatSubflowActionByPayload(
+          supabase,
+          launch.id,
+          source,
+          workspace.workspace_id,
+          userNs,
+          subflowNs,
+          SENDFLOW_WELCOME_LEGACY_COOLDOWN_MS,
+        )
+      : null;
+    const actionId = legacyDuplicate
+      ? null
+      : await claimRoutingAction(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          source,
+          "uchat",
+          "send-sub-flow",
+          actionKey,
+          requestPayload,
+          { releaseStalePending: !usesSendflowWelcomeLock },
+        );
 
     if (actionId) {
       try {
@@ -2805,6 +2896,28 @@ async function routeToUchat(
       }
     } else {
       skippedActions.push("send-sub-flow");
+      if (usesSendflowWelcomeLock) {
+        await insertProcessingLog(
+          supabase,
+          launch.id,
+          contact.id,
+          eventId,
+          source,
+          "info",
+          "SENDFLOW_WELCOME_SUBFLOW_DEDUPED",
+          "Boas-vindas do Sendflow ja enviadas",
+          "O Launch Hub bloqueou um novo disparo do subflow de boas-vindas para o mesmo contato, workspace e ciclo.",
+          {
+            workspaceId: workspace.workspace_id,
+            userNs,
+            subflowNs,
+            actionKey,
+            deliveryKey,
+            legacyDuplicateActionId: legacyDuplicate?.id ?? null,
+            legacyDuplicateCreatedAt: legacyDuplicate?.created_at ?? null,
+          },
+        );
+      }
     }
   }
 
