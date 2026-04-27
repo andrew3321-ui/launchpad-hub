@@ -401,6 +401,26 @@ function replaceAliasTags(tags: NamedTagDraft[], alias: string, nextTagIds: stri
   ];
 }
 
+function normalizeNamedTagsForCompare(tags: NamedTagDraft[]) {
+  return tags
+    .map((tag) => ({
+      alias: tag.alias.trim(),
+      tag: tag.tag.trim(),
+    }))
+    .filter((tag) => tag.alias && tag.tag)
+    .sort((left, right) => {
+      const aliasCompare = left.alias.localeCompare(right.alias);
+      return aliasCompare || left.tag.localeCompare(right.tag);
+    });
+}
+
+function namedTagsAreEqual(left: NamedTagDraft[], right: NamedTagDraft[]) {
+  return (
+    JSON.stringify(normalizeNamedTagsForCompare(left)) ===
+    JSON.stringify(normalizeNamedTagsForCompare(right))
+  );
+}
+
 async function withTimeout<T,>(promise: PromiseLike<T>, timeoutMs: number, message: string) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -491,6 +511,7 @@ export default function Sources() {
   const latestLaunchIdRef = useRef<string | null>(null);
   const catalogRequestRef = useRef(0);
   const googleSheetsAutoRequestKeysRef = useRef<Set<string>>(new Set());
+  const acNamedTagsRef = useRef<NamedTagDraft[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<"active" | "uchat" | "gsheets" | null>(null);
@@ -501,6 +522,8 @@ export default function Sources() {
   const [acApiKey, setAcApiKey] = useState("");
   const [acListId, setAcListId] = useState("");
   const [acNamedTags, setAcNamedTags] = useState<NamedTagDraft[]>([]);
+  const [tagBindingsDirty, setTagBindingsDirty] = useState(false);
+  const [savingTagBindings, setSavingTagBindings] = useState(false);
   const [uchatWorkspaces, setUchatWorkspaces] = useState<UChatWorkspaceDraft[]>([]);
   const [gsEnabled, setGsEnabled] = useState(false);
   const [gsAuthMode, setGsAuthMode] = useState<GoogleSheetsAuthMode>("oauth");
@@ -537,6 +560,10 @@ export default function Sources() {
   useEffect(() => {
     latestLaunchIdRef.current = activeLaunchId;
   }, [activeLaunchId]);
+
+  useEffect(() => {
+    acNamedTagsRef.current = acNamedTags;
+  }, [acNamedTags]);
 
   const visibleLaunchSettings = isHydratedActiveLaunch ? launchSettings : null;
   const visibleAcApiUrl = isHydratedActiveLaunch ? acApiUrl : "";
@@ -954,6 +981,8 @@ export default function Sources() {
         setAcApiKey("");
         setAcListId("");
         setAcNamedTags([]);
+        setTagBindingsDirty(false);
+        setSavingTagBindings(false);
         setUchatWorkspaces([]);
         setGsEnabled(false);
         setGsAuthMode("oauth");
@@ -985,6 +1014,8 @@ export default function Sources() {
       const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(launchId)));
       catalogRequestRef.current += 1;
       setLaunchSettings(null);
+      setTagBindingsDirty(false);
+      setSavingTagBindings(false);
       setAcApiUrl(draft?.acApiUrl ?? "");
       setAcApiKey(draft?.acApiKey ?? "");
       setAcListId(draft?.acListId ?? "");
@@ -1056,15 +1087,15 @@ export default function Sources() {
         }),
       );
       setLaunchSettings(typedLaunch);
+      const remoteNamedTags = Array.isArray(typedLaunch.ac_named_tags)
+        ? (typedLaunch.ac_named_tags as NamedTagDraft[])
+        : [];
+      const nextNamedTags = draft?.acNamedTags ?? remoteNamedTags;
       setAcApiUrl(draft?.acApiUrl ?? typedLaunch.ac_api_url ?? "");
       setAcApiKey(draft?.acApiKey ?? typedLaunch.ac_api_key ?? "");
       setAcListId(draft?.acListId ?? typedLaunch.ac_default_list_id ?? "");
-      setAcNamedTags(
-        draft?.acNamedTags ??
-          (Array.isArray(typedLaunch.ac_named_tags)
-            ? (typedLaunch.ac_named_tags as NamedTagDraft[])
-            : []),
-      );
+      setAcNamedTags(nextNamedTags);
+      setTagBindingsDirty(Boolean(draft?.acNamedTags && !namedTagsAreEqual(draft.acNamedTags, remoteNamedTags)));
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
       setGsEnabled(draft?.gsEnabled ?? typedLaunch.gs_enabled ?? false);
       setGsAuthMode(
@@ -1177,6 +1208,81 @@ export default function Sources() {
     gsSheetName,
   ]);
 
+  useEffect(() => {
+    if (
+      !tagBindingsDirty ||
+      !activeLaunchId ||
+      loading ||
+      hydratedLaunchId !== activeLaunchId ||
+      savingTagBindings
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const launchId = activeLaunchId;
+      const tagsSnapshot = acNamedTagsRef.current;
+      const serializedSnapshot = JSON.stringify(normalizeNamedTagsForCompare(tagsSnapshot));
+
+      const saveTagBindings = async () => {
+        setSavingTagBindings(true);
+
+        const { error, data } = await supabase.rpc("update_launch_activecampaign_settings", {
+          target_launch_id: launchId,
+          next_api_url: acApiUrl || null,
+          next_api_key: acApiKey || null,
+          next_default_list_id: acListId || null,
+          next_named_tags: tagsSnapshot as unknown as Json,
+        });
+
+        if (latestLaunchIdRef.current !== launchId) {
+          return;
+        }
+
+        if (error || !data) {
+          setTagBindingsDirty(false);
+          toast({
+            title: "Erro ao salvar tags do ActiveCampaign",
+            description:
+              error?.message ||
+              "O backend nao confirmou a atualizacao automatica das tags.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        setLaunchSettings(data as unknown as LaunchSettingsRow);
+        setHydratedLaunchId(launchId);
+
+        const currentSerialized = JSON.stringify(
+          normalizeNamedTagsForCompare(acNamedTagsRef.current),
+        );
+
+        if (currentSerialized === serializedSnapshot) {
+          setTagBindingsDirty(false);
+        }
+      };
+
+      void saveTagBindings().finally(() => {
+        if (latestLaunchIdRef.current === launchId) {
+          setSavingTagBindings(false);
+        }
+      });
+    }, 700);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    acApiKey,
+    acApiUrl,
+    acListId,
+    activeLaunchId,
+    hydratedLaunchId,
+    loading,
+    savingTagBindings,
+    tagBindingsDirty,
+    toast,
+  ]);
+
   const uchatConnected = useMemo(
     () =>
       visibleUchatWorkspaces.some(
@@ -1216,6 +1322,7 @@ export default function Sources() {
 
       return replaceAliasTags(currentTags, alias, nextTagIds);
     });
+    setTagBindingsDirty(true);
   };
 
   const updateAdvancedNamedTags = (nextAdvancedTags: NamedTagDraft[]) => {
@@ -1225,6 +1332,7 @@ export default function Sources() {
       );
       return [...managedTags, ...nextAdvancedTags];
     });
+    setTagBindingsDirty(true);
   };
 
   const loadGoogleSheetsCatalog = useCallback(
@@ -1746,6 +1854,7 @@ export default function Sources() {
 
     setLaunchSettings(data as unknown as LaunchSettingsRow);
     setHydratedLaunchId(activeLaunch.id);
+    setTagBindingsDirty(false);
     void loadActiveCampaignCatalog({
       apiUrl: acApiUrl,
       apiKey: acApiKey,
@@ -2095,6 +2204,12 @@ export default function Sources() {
                     <p className="text-xs text-muted-foreground">
                       {visibleActiveCampaignTags.length} tag(s) carregada(s) em{" "}
                       {new Date(visibleActiveCampaignTagsLoadedAt).toLocaleString("pt-BR")}.
+                    </p>
+                  )}
+
+                  {savingTagBindings && (
+                    <p className="text-xs text-muted-foreground">
+                      Salvando selecao de tags para os webhooks...
                     </p>
                   )}
 
