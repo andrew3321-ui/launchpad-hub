@@ -83,6 +83,8 @@ interface SourcesDraft {
   uchatWorkspaces: UChatWorkspaceDraft[];
   gsEnabled: boolean;
   gsAuthMode: GoogleSheetsAuthMode;
+  gsOauthEmail: string;
+  gsOauthConnected: boolean;
   gsServiceAccountEmail: string;
   gsPrivateKey: string;
   gsSpreadsheetId: string;
@@ -219,6 +221,8 @@ function parseSourcesDraft(raw: string | null): SourcesDraft | null {
         : [],
       gsEnabled: typeof parsed.gsEnabled === "boolean" ? parsed.gsEnabled : false,
       gsAuthMode: parsed.gsAuthMode === "oauth" ? "oauth" : "service_account",
+      gsOauthEmail: typeof parsed.gsOauthEmail === "string" ? parsed.gsOauthEmail : "",
+      gsOauthConnected: typeof parsed.gsOauthConnected === "boolean" ? parsed.gsOauthConnected : false,
       gsServiceAccountEmail:
         typeof parsed.gsServiceAccountEmail === "string" ? parsed.gsServiceAccountEmail : "",
       gsPrivateKey: typeof parsed.gsPrivateKey === "string" ? parsed.gsPrivateKey : "",
@@ -553,6 +557,7 @@ export default function Sources() {
     ? activeCampaignTagsLoadedAt
     : null;
   const visibleActiveCampaignSyncRun = isHydratedActiveLaunch ? activeCampaignSyncRun : null;
+  const showInitialSourcesLoader = loading && !isHydratedActiveLaunch;
 
   const managedAliasKeys = useMemo(
     () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
@@ -949,22 +954,23 @@ export default function Sources() {
       }
 
       const launchId = activeLaunchId;
+      const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(launchId)));
       catalogRequestRef.current += 1;
       setLaunchSettings(null);
-      setAcApiUrl("");
-      setAcApiKey("");
-      setAcListId("");
-      setAcNamedTags([]);
-      setUchatWorkspaces([]);
-      setGsEnabled(false);
-      setGsAuthMode("oauth");
-      setGsOauthEmail("");
-      setGsOauthConnected(false);
-      setGsServiceAccountEmail("");
-      setGsPrivateKey("");
-      setGsSpreadsheetId("");
-      setGsSpreadsheetTitle("");
-      setGsSheetName("");
+      setAcApiUrl(draft?.acApiUrl ?? "");
+      setAcApiKey(draft?.acApiKey ?? "");
+      setAcListId(draft?.acListId ?? "");
+      setAcNamedTags(draft?.acNamedTags ?? []);
+      setUchatWorkspaces(draft?.uchatWorkspaces ?? []);
+      setGsEnabled(draft?.gsEnabled ?? false);
+      setGsAuthMode(normalizeGoogleSheetsAuthMode(draft?.gsAuthMode ?? "oauth"));
+      setGsOauthEmail(draft?.gsOauthEmail ?? "");
+      setGsOauthConnected(draft?.gsOauthConnected ?? false);
+      setGsServiceAccountEmail(draft?.gsServiceAccountEmail ?? "");
+      setGsPrivateKey(draft?.gsPrivateKey ?? "");
+      setGsSpreadsheetId(draft?.gsSpreadsheetId ?? "");
+      setGsSpreadsheetTitle(draft?.gsSpreadsheetTitle ?? "");
+      setGsSheetName(draft?.gsSheetName ?? "");
       setGsAvailableSpreadsheets([]);
       setGsAvailableSheets([]);
       setLoadingGoogleSheetsCatalog(false);
@@ -978,7 +984,7 @@ export default function Sources() {
       setActiveCampaignSyncMessage(null);
       setLoadingActiveCampaignTags(false);
       setLoading(true);
-      setHydratedLaunchId(null);
+      setHydratedLaunchId(draft ? launchId : null);
 
       const { data: sourcesPayload, error: sourcesError } = await supabase.rpc(
         "get_launch_sources",
@@ -1021,8 +1027,6 @@ export default function Sources() {
             typeof workspace.default_tag_name === "string" ? workspace.default_tag_name : "",
         }),
       );
-      const draft = parseSourcesDraft(localStorage.getItem(buildSourcesDraftKey(launchId)));
-
       setLaunchSettings(typedLaunch);
       setAcApiUrl(draft?.acApiUrl ?? typedLaunch.ac_api_url ?? "");
       setAcApiKey(draft?.acApiKey ?? typedLaunch.ac_api_key ?? "");
@@ -1116,6 +1120,8 @@ export default function Sources() {
         uchatWorkspaces,
         gsEnabled,
         gsAuthMode,
+        gsOauthEmail,
+        gsOauthConnected,
         gsServiceAccountEmail,
         gsPrivateKey,
         gsSpreadsheetId,
@@ -1134,6 +1140,8 @@ export default function Sources() {
     uchatWorkspaces,
     gsEnabled,
     gsAuthMode,
+    gsOauthEmail,
+    gsOauthConnected,
     gsServiceAccountEmail,
     gsPrivateKey,
     gsSpreadsheetId,
@@ -1923,7 +1931,7 @@ export default function Sources() {
         </CardContent>
       </Card>
 
-      {loading ? (
+      {showInitialSourcesLoader ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
@@ -2258,7 +2266,36 @@ export default function Sources() {
                   </div>
                 )}
 
-                {gsAvailableSheets.length > 0 ? (
+                {visibleGsAuthMode === "oauth" ? (
+                  <div className="space-y-2">
+                    <Label>Aba de destino</Label>
+                    <Select
+                      value={visibleGsSheetName || undefined}
+                      onValueChange={setGsSheetName}
+                      disabled={gsAvailableSheets.length === 0}
+                    >
+                      <SelectTrigger>
+                        <SelectValue
+                          placeholder={
+                            gsAvailableSheets.length > 0
+                              ? "Escolher aba"
+                              : "Escolha uma planilha primeiro"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {gsAvailableSheets.map((sheet) => (
+                          <SelectItem
+                            key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`}
+                            value={sheet.title || `sheet-${sheet.id ?? 0}`}
+                          >
+                            {sheet.title || `Aba ${sheet.id ?? ""}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : gsAvailableSheets.length > 0 ? (
                   <div className="space-y-2">
                     <Label>Aba de destino</Label>
                     <Select value={visibleGsSheetName || undefined} onValueChange={setGsSheetName}>
