@@ -3111,7 +3111,11 @@ async function runAcceptedContactJobs(
   normalizedEvent: NormalizedWebhookEvent,
   processedContactId: string,
   eventId: string,
+  options: {
+    includeGoogleSheets?: boolean;
+  } = {},
 ) {
+  const { includeGoogleSheets = true } = options;
   let contact: LeadContactRow | null = null;
 
   try {
@@ -3124,30 +3128,14 @@ async function runAcceptedContactJobs(
       normalizedEvent.payload,
     );
 
-    if (normalizedEvent.source === "activecampaign") {
-      try {
-        await appendActiveCampaignWebhookToGoogleSheets(
-          supabase,
-          launch,
-          contact,
-          normalizedEvent.payload,
-          eventId,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await insertProcessingLog(
-          supabase,
-          launch.id,
-          contact.id,
-          eventId,
-          normalizedEvent.source,
-          "warning",
-          "GOOGLE_SHEETS_APPEND_FAILED",
-          "Falha ao registrar no Google Sheets",
-          "O webhook do ActiveCampaign foi tratado, mas o espelhamento para a planilha configurada falhou.",
-          { error: message },
-        );
-      }
+    if (includeGoogleSheets && normalizedEvent.source === "activecampaign") {
+      await appendActiveCampaignWebhookToGoogleSheetsJob(
+        supabase,
+        launch,
+        normalizedEvent,
+        contact,
+        eventId,
+      );
     }
 
     return await dispatchRoutes(
@@ -3176,6 +3164,43 @@ async function runAcceptedContactJobs(
     }
 
     throw error;
+  }
+}
+
+async function appendActiveCampaignWebhookToGoogleSheetsJob(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+  contactOrContactId: LeadContactRow | string,
+  eventId: string,
+) {
+  const contact =
+    typeof contactOrContactId === "string"
+      ? await fetchLeadContact(supabase, contactOrContactId)
+      : contactOrContactId;
+
+  try {
+    await appendActiveCampaignWebhookToGoogleSheets(
+      supabase,
+      launch,
+      contact,
+      normalizedEvent.payload,
+      eventId,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "warning",
+      "GOOGLE_SHEETS_APPEND_FAILED",
+      "Falha ao registrar no Google Sheets",
+      "O webhook do ActiveCampaign foi tratado, mas o espelhamento para a planilha configurada falhou.",
+      { error: message },
+    );
   }
 }
 
@@ -3241,8 +3266,16 @@ Deno.serve(async (request) => {
     }
 
     if (normalizedEvent.source === "activecampaign") {
-      const backgroundMode = runAfterResponse(
-        runAcceptedContactJobs(
+      const routingResult = await runAcceptedContactJobs(
+        supabase,
+        launch,
+        normalizedEvent,
+        processingResult.contactId,
+        processingResult.eventId,
+        { includeGoogleSheets: false },
+      );
+      const googleSheetsMode = runAfterResponse(
+        appendActiveCampaignWebhookToGoogleSheetsJob(
           supabase,
           launch,
           normalizedEvent,
@@ -3255,10 +3288,11 @@ Deno.serve(async (request) => {
       return jsonResponse({
         accepted: true,
         processing: processingResult,
-        routing: {
+        routing: routingResult,
+        googleSheets: {
           queued: true,
-          mode: backgroundMode,
-          reason: "activecampaign_webhook_acknowledged_before_external_routing",
+          mode: googleSheetsMode,
+          reason: "activecampaign_webhook_acknowledged_after_explicit_routing",
         },
       });
     }
