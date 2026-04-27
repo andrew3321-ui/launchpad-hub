@@ -1,8 +1,25 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ProcessContactError } from "../_shared/contact-processing.ts";
-import { fetchGoogleSpreadsheetCatalog } from "../_shared/google-sheets.ts";
+import {
+  fetchGoogleSpreadsheetCatalog,
+  listGoogleSpreadsheets,
+  type GoogleSheetsAuthMode,
+  type GoogleSheetsConfigInput,
+} from "../_shared/google-sheets.ts";
 
 type AnySupabaseClient = any;
+
+interface LaunchGoogleSheetsRow {
+  gs_auth_mode: GoogleSheetsAuthMode | null;
+  gs_enabled: boolean;
+  gs_oauth_email: string | null;
+  gs_oauth_refresh_token: string | null;
+  gs_private_key: string | null;
+  gs_service_account_email: string | null;
+  gs_sheet_name: string | null;
+  gs_spreadsheet_id: string | null;
+  gs_spreadsheet_title: string | null;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,6 +35,10 @@ function jsonResponse(body: unknown, status = 200) {
       ...corsHeaders,
     },
   });
+}
+
+function normalizeString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
@@ -75,6 +96,59 @@ async function assertLaunchAccess(
   }
 }
 
+async function fetchLaunchGoogleSheetsConfig(
+  supabase: AnySupabaseClient,
+  launchId: string,
+) {
+  const { data, error } = await supabase
+    .from("launches")
+    .select("gs_auth_mode, gs_enabled, gs_oauth_email, gs_oauth_refresh_token, gs_private_key, gs_service_account_email, gs_sheet_name, gs_spreadsheet_id, gs_spreadsheet_title")
+    .eq("id", launchId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new ProcessContactError("Expert Google Sheets settings not found", 404, error?.message);
+  }
+
+  return data as LaunchGoogleSheetsRow;
+}
+
+function buildCatalogConfig(
+  launch: LaunchGoogleSheetsRow,
+  body: {
+    serviceAccountEmail?: string | null;
+    privateKey?: string | null;
+    spreadsheetId?: string | null;
+  },
+): GoogleSheetsConfigInput {
+  const bodyServiceAccountEmail = normalizeString(body.serviceAccountEmail);
+  const bodyPrivateKey = typeof body.privateKey === "string" && body.privateKey.trim()
+    ? body.privateKey
+    : null;
+  const bodySpreadsheetId = normalizeString(body.spreadsheetId);
+
+  if (bodyServiceAccountEmail || bodyPrivateKey) {
+    return {
+      enabled: true,
+      authMode: "service_account",
+      serviceAccountEmail: bodyServiceAccountEmail,
+      privateKey: bodyPrivateKey,
+      spreadsheetId: bodySpreadsheetId,
+      sheetName: launch.gs_sheet_name,
+    };
+  }
+
+  return {
+    enabled: true,
+    authMode: launch.gs_auth_mode ?? "service_account",
+    serviceAccountEmail: launch.gs_service_account_email,
+    privateKey: launch.gs_private_key,
+    oauthRefreshToken: launch.gs_oauth_refresh_token,
+    spreadsheetId: bodySpreadsheetId ?? launch.gs_spreadsheet_id,
+    sheetName: launch.gs_sheet_name,
+  };
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -98,24 +172,46 @@ Deno.serve(async (request) => {
       privateKey?: string | null;
       spreadsheetId?: string | null;
     };
+    const launchId = normalizeString(body.launchId);
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const authenticatedUser = await requireAuthenticatedUser(request, supabaseUrl, serviceRoleKey);
 
-    await assertLaunchAccess(
-      supabase,
-      authenticatedUser.id,
-      typeof body.launchId === "string" ? body.launchId : null,
-    );
+    await assertLaunchAccess(supabase, authenticatedUser.id, launchId);
 
-    const catalog = await fetchGoogleSpreadsheetCatalog({
-      enabled: true,
-      serviceAccountEmail: body.serviceAccountEmail,
-      privateKey: body.privateKey,
-      spreadsheetId: body.spreadsheetId,
-      sheetName: "tmp",
+    const launch = await fetchLaunchGoogleSheetsConfig(supabase, launchId as string);
+    const config = buildCatalogConfig(launch, body);
+    const selectedSpreadsheetId = normalizeString(body.spreadsheetId) ?? launch.gs_spreadsheet_id;
+
+    const spreadsheets =
+      config.authMode === "oauth"
+        ? await listGoogleSpreadsheets(config)
+        : selectedSpreadsheetId
+          ? [
+              {
+                id: selectedSpreadsheetId,
+                title: launch.gs_spreadsheet_title,
+                modifiedTime: null,
+                ownerEmail: null,
+                ownerName: null,
+              },
+            ]
+          : [];
+
+    const catalog = selectedSpreadsheetId
+      ? await fetchGoogleSpreadsheetCatalog({
+          ...config,
+          spreadsheetId: selectedSpreadsheetId,
+        })
+      : null;
+
+    return jsonResponse({
+      authMode: config.authMode,
+      connectionEmail: config.authMode === "oauth" ? launch.gs_oauth_email : launch.gs_service_account_email,
+      spreadsheets,
+      selectedSpreadsheetId: selectedSpreadsheetId,
+      selectedSpreadsheetTitle: catalog?.title ?? launch.gs_spreadsheet_title ?? null,
+      sheets: catalog?.sheets ?? [],
     });
-
-    return jsonResponse(catalog);
   } catch (error) {
     if (error instanceof ProcessContactError) {
       return jsonResponse({ error: error.message, details: error.details ?? null }, error.statusCode);

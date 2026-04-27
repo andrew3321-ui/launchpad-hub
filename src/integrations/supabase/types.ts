@@ -365,11 +365,15 @@ export type Database = {
           current_cycle_number: number
           current_cycle_started_at: string
           custom_states: Json
+          gs_auth_mode: string
           gs_enabled: boolean
+          gs_oauth_email: string | null
+          gs_oauth_refresh_token: string | null
           gs_private_key: string | null
           gs_service_account_email: string | null
           gs_sheet_name: string | null
           gs_spreadsheet_id: string | null
+          gs_spreadsheet_title: string | null
           id: string
           manychat_account_id: string | null
           manychat_api_key: string | null
@@ -392,11 +396,15 @@ export type Database = {
           current_cycle_number?: number
           current_cycle_started_at?: string
           custom_states?: Json
+          gs_auth_mode?: string
           gs_enabled?: boolean
+          gs_oauth_email?: string | null
+          gs_oauth_refresh_token?: string | null
           gs_private_key?: string | null
           gs_service_account_email?: string | null
           gs_sheet_name?: string | null
           gs_spreadsheet_id?: string | null
+          gs_spreadsheet_title?: string | null
           id?: string
           manychat_account_id?: string | null
           manychat_api_key?: string | null
@@ -419,11 +427,15 @@ export type Database = {
           current_cycle_number?: number
           current_cycle_started_at?: string
           custom_states?: Json
+          gs_auth_mode?: string
           gs_enabled?: boolean
+          gs_oauth_email?: string | null
+          gs_oauth_refresh_token?: string | null
           gs_private_key?: string | null
           gs_service_account_email?: string | null
           gs_sheet_name?: string | null
           gs_spreadsheet_id?: string | null
+          gs_spreadsheet_title?: string | null
           id?: string
           manychat_account_id?: string | null
           manychat_api_key?: string | null
@@ -848,11 +860,13 @@ export type Database = {
       }
       update_launch_google_sheets_settings: {
         Args: {
+          next_auth_mode?: string
           next_enabled?: boolean
           next_private_key?: string
           next_service_account_email?: string
           next_sheet_name?: string
           next_spreadsheet_id?: string
+          next_spreadsheet_title?: string
           target_launch_id: string
         }
         Returns: Json

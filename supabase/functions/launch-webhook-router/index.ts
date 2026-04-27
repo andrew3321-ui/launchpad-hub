@@ -28,9 +28,13 @@ interface LaunchRow {
   ac_named_tags: unknown;
   current_cycle_number: number;
   gs_enabled: boolean;
+  gs_auth_mode: "service_account" | "oauth" | null;
+  gs_oauth_email: string | null;
+  gs_oauth_refresh_token: string | null;
   gs_service_account_email: string | null;
   gs_private_key: string | null;
   gs_spreadsheet_id: string | null;
+  gs_spreadsheet_title: string | null;
   gs_sheet_name: string | null;
 }
 
@@ -1042,8 +1046,10 @@ async function appendActiveCampaignWebhookToGoogleSheets(
 ) {
   const config = parseGoogleSheetsConfig({
     enabled: launch.gs_enabled,
+    authMode: launch.gs_auth_mode,
     serviceAccountEmail: launch.gs_service_account_email,
     privateKey: launch.gs_private_key,
+    oauthRefreshToken: launch.gs_oauth_refresh_token,
     spreadsheetId: launch.gs_spreadsheet_id,
     sheetName: launch.gs_sheet_name,
   });
@@ -1121,11 +1127,11 @@ async function fetchLaunch(
   const query = launchId
     ? supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_sheet_name")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name")
         .eq("id", launchId)
     : supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_sheet_name")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name")
         .eq("slug", launchSlug as string);
 
   const { data, error } = await query.maybeSingle();

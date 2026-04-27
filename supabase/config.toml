@@ -15,5 +15,11 @@ verify_jwt = false
 [functions.google-sheets-catalog]
 verify_jwt = true
 
+[functions.google-oauth-exchange]
+verify_jwt = true
+
+[functions.google-oauth-disconnect]
+verify_jwt = true
+
 [functions.launch-webhook-router]
 verify_jwt = false

@@ -36,6 +36,22 @@ import {
   type UChatWorkspaceDraft,
 } from "@/components/launches/UChatWorkspacesEditor";
 
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        oauth2?: {
+          initCodeClient: (config: Record<string, unknown>) => {
+            requestCode: () => void;
+          };
+        };
+      };
+    };
+  }
+}
+
+type GoogleSheetsAuthMode = "service_account" | "oauth";
+
 interface LaunchSettingsRow {
   id: string;
   name: string;
@@ -49,9 +65,13 @@ interface LaunchSettingsRow {
   current_cycle_number: number;
   current_cycle_started_at: string | null;
   gs_enabled: boolean;
+  gs_auth_mode: GoogleSheetsAuthMode;
+  gs_oauth_email: string | null;
+  gs_oauth_connected: boolean;
   gs_service_account_email: string | null;
   gs_private_key: string | null;
   gs_spreadsheet_id: string | null;
+  gs_spreadsheet_title: string | null;
   gs_sheet_name: string | null;
 }
 
@@ -62,9 +82,11 @@ interface SourcesDraft {
   acNamedTags: NamedTagDraft[];
   uchatWorkspaces: UChatWorkspaceDraft[];
   gsEnabled: boolean;
+  gsAuthMode: GoogleSheetsAuthMode;
   gsServiceAccountEmail: string;
   gsPrivateKey: string;
   gsSpreadsheetId: string;
+  gsSpreadsheetTitle: string;
   gsSheetName: string;
 }
 
@@ -115,13 +137,28 @@ interface SyncPlatformContactsResponse {
 }
 
 interface GoogleSheetsCatalogResponse {
-  spreadsheetId: string;
-  title: string | null;
+  authMode: GoogleSheetsAuthMode;
+  connectionEmail: string | null;
+  spreadsheets: Array<{
+    id: string;
+    title: string | null;
+    modifiedTime: string | null;
+    ownerEmail: string | null;
+    ownerName: string | null;
+  }>;
+  selectedSpreadsheetId: string | null;
+  selectedSpreadsheetTitle: string | null;
   sheets: Array<{
     id: number | null;
     title: string | null;
     index: number | null;
   }>;
+}
+
+interface GoogleOauthExchangeResponse {
+  connected: boolean;
+  email: string | null;
+  launch: LaunchSettingsRow;
 }
 
 const MANAGED_SOURCE_ALIASES = [
@@ -148,6 +185,15 @@ const MANAGED_SOURCE_ALIASES = [
 ] as const;
 const ACTIVECAMPAIGN_CATALOG_TIMEOUT_MS = 15000;
 const ACTIVE_CAMPAIGN_STALE_SYNC_MS = 90_000;
+const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
+const GOOGLE_OAUTH_CLIENT_ID = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+const GOOGLE_OAUTH_SCOPES = [
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.metadata.readonly",
+  "openid",
+  "email",
+  "profile",
+].join(" ");
 
 function buildCatalogScopeKey(launchId: string, apiUrl: string, apiKey: string) {
   return [launchId, apiUrl.trim(), apiKey.trim()].join("::");
@@ -171,10 +217,13 @@ function parseSourcesDraft(raw: string | null): SourcesDraft | null {
         ? (parsed.uchatWorkspaces as UChatWorkspaceDraft[])
         : [],
       gsEnabled: typeof parsed.gsEnabled === "boolean" ? parsed.gsEnabled : false,
+      gsAuthMode: parsed.gsAuthMode === "oauth" ? "oauth" : "service_account",
       gsServiceAccountEmail:
         typeof parsed.gsServiceAccountEmail === "string" ? parsed.gsServiceAccountEmail : "",
       gsPrivateKey: typeof parsed.gsPrivateKey === "string" ? parsed.gsPrivateKey : "",
       gsSpreadsheetId: typeof parsed.gsSpreadsheetId === "string" ? parsed.gsSpreadsheetId : "",
+      gsSpreadsheetTitle:
+        typeof parsed.gsSpreadsheetTitle === "string" ? parsed.gsSpreadsheetTitle : "",
       gsSheetName: typeof parsed.gsSheetName === "string" ? parsed.gsSheetName : "",
     };
   } catch {
@@ -200,6 +249,46 @@ function ensureSyncNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeGoogleSheetsAuthMode(value: unknown): GoogleSheetsAuthMode {
+  return value === "oauth" ? "oauth" : "service_account";
+}
+
+let googleIdentityScriptPromise: Promise<void> | null = null;
+
+async function ensureGoogleIdentityScript() {
+  if (window.google?.accounts?.oauth2?.initCodeClient) {
+    return;
+  }
+
+  if (!googleIdentityScriptPromise) {
+    googleIdentityScriptPromise = new Promise<void>((resolve, reject) => {
+      const existingScript = document.querySelector<HTMLScriptElement>(
+        `script[src="${GOOGLE_IDENTITY_SCRIPT_SRC}"]`,
+      );
+
+      if (existingScript) {
+        existingScript.addEventListener("load", () => resolve(), { once: true });
+        existingScript.addEventListener(
+          "error",
+          () => reject(new Error("Nao foi possivel carregar o login do Google.")),
+          { once: true },
+        );
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = GOOGLE_IDENTITY_SCRIPT_SRC;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Nao foi possivel carregar o login do Google."));
+      document.head.appendChild(script);
+    });
+  }
+
+  return googleIdentityScriptPromise;
 }
 
 function parseActiveCampaignSyncCursor(metadata: Json | null | undefined): ActiveCampaignSyncCursor {
@@ -407,13 +496,27 @@ export default function Sources() {
   const [acNamedTags, setAcNamedTags] = useState<NamedTagDraft[]>([]);
   const [uchatWorkspaces, setUchatWorkspaces] = useState<UChatWorkspaceDraft[]>([]);
   const [gsEnabled, setGsEnabled] = useState(false);
+  const [gsAuthMode, setGsAuthMode] = useState<GoogleSheetsAuthMode>("oauth");
+  const [gsOauthEmail, setGsOauthEmail] = useState("");
+  const [gsOauthConnected, setGsOauthConnected] = useState(false);
   const [gsServiceAccountEmail, setGsServiceAccountEmail] = useState("");
   const [gsPrivateKey, setGsPrivateKey] = useState("");
   const [gsSpreadsheetId, setGsSpreadsheetId] = useState("");
+  const [gsSpreadsheetTitle, setGsSpreadsheetTitle] = useState("");
   const [gsSheetName, setGsSheetName] = useState("");
-  const [gsSpreadsheetTitle, setGsSpreadsheetTitle] = useState<string | null>(null);
+  const [gsAvailableSpreadsheets, setGsAvailableSpreadsheets] = useState<
+    Array<{
+      id: string;
+      title: string | null;
+      modifiedTime: string | null;
+      ownerEmail: string | null;
+      ownerName: string | null;
+    }>
+  >([]);
   const [gsAvailableSheets, setGsAvailableSheets] = useState<Array<{ id: number | null; title: string | null }>>([]);
   const [loadingGoogleSheetsCatalog, setLoadingGoogleSheetsCatalog] = useState(false);
+  const [connectingGoogleOauth, setConnectingGoogleOauth] = useState(false);
+  const [disconnectingGoogleOauth, setDisconnectingGoogleOauth] = useState(false);
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
@@ -435,9 +538,13 @@ export default function Sources() {
   const visibleAcNamedTags = isHydratedActiveLaunch ? acNamedTags : [];
   const visibleUchatWorkspaces = isHydratedActiveLaunch ? uchatWorkspaces : [];
   const visibleGsEnabled = isHydratedActiveLaunch ? gsEnabled : false;
+  const visibleGsAuthMode = isHydratedActiveLaunch ? gsAuthMode : "oauth";
+  const visibleGsOauthEmail = isHydratedActiveLaunch ? gsOauthEmail : "";
+  const visibleGsOauthConnected = isHydratedActiveLaunch ? gsOauthConnected : false;
   const visibleGsServiceAccountEmail = isHydratedActiveLaunch ? gsServiceAccountEmail : "";
   const visibleGsPrivateKey = isHydratedActiveLaunch ? gsPrivateKey : "";
   const visibleGsSpreadsheetId = isHydratedActiveLaunch ? gsSpreadsheetId : "";
+  const visibleGsSpreadsheetTitle = isHydratedActiveLaunch ? gsSpreadsheetTitle : "";
   const visibleGsSheetName = isHydratedActiveLaunch ? gsSheetName : "";
   const visibleActiveCampaignTags = isHydratedActiveLaunch ? activeCampaignTags : [];
   const visibleActiveCampaignTagsLoadedAt = isHydratedActiveLaunch
@@ -814,13 +921,19 @@ export default function Sources() {
         setAcNamedTags([]);
         setUchatWorkspaces([]);
         setGsEnabled(false);
+        setGsAuthMode("oauth");
+        setGsOauthEmail("");
+        setGsOauthConnected(false);
         setGsServiceAccountEmail("");
         setGsPrivateKey("");
         setGsSpreadsheetId("");
+        setGsSpreadsheetTitle("");
         setGsSheetName("");
-        setGsSpreadsheetTitle(null);
+        setGsAvailableSpreadsheets([]);
         setGsAvailableSheets([]);
         setLoadingGoogleSheetsCatalog(false);
+        setConnectingGoogleOauth(false);
+        setDisconnectingGoogleOauth(false);
         setActiveCampaignTags([]);
         setActiveCampaignTagsLoadedAt(null);
         setActiveCampaignTagsScopeKey(null);
@@ -842,13 +955,19 @@ export default function Sources() {
       setAcNamedTags([]);
       setUchatWorkspaces([]);
       setGsEnabled(false);
+      setGsAuthMode("oauth");
+      setGsOauthEmail("");
+      setGsOauthConnected(false);
       setGsServiceAccountEmail("");
       setGsPrivateKey("");
       setGsSpreadsheetId("");
+      setGsSpreadsheetTitle("");
       setGsSheetName("");
-      setGsSpreadsheetTitle(null);
+      setGsAvailableSpreadsheets([]);
       setGsAvailableSheets([]);
       setLoadingGoogleSheetsCatalog(false);
+      setConnectingGoogleOauth(false);
+      setDisconnectingGoogleOauth(false);
       setActiveCampaignTags([]);
       setActiveCampaignTagsLoadedAt(null);
       setActiveCampaignTagsScopeKey(null);
@@ -914,11 +1033,19 @@ export default function Sources() {
       );
       setUchatWorkspaces(draft?.uchatWorkspaces ?? remoteUchatWorkspaces);
       setGsEnabled(draft?.gsEnabled ?? typedLaunch.gs_enabled ?? false);
+      setGsAuthMode(
+        normalizeGoogleSheetsAuthMode(draft?.gsAuthMode ?? typedLaunch.gs_auth_mode ?? "oauth"),
+      );
+      setGsOauthEmail(typedLaunch.gs_oauth_email ?? "");
+      setGsOauthConnected(Boolean(typedLaunch.gs_oauth_connected));
       setGsServiceAccountEmail(
         draft?.gsServiceAccountEmail ?? typedLaunch.gs_service_account_email ?? "",
       );
       setGsPrivateKey(draft?.gsPrivateKey ?? typedLaunch.gs_private_key ?? "");
       setGsSpreadsheetId(draft?.gsSpreadsheetId ?? typedLaunch.gs_spreadsheet_id ?? "");
+      setGsSpreadsheetTitle(
+        draft?.gsSpreadsheetTitle ?? typedLaunch.gs_spreadsheet_title ?? "",
+      );
       setGsSheetName(draft?.gsSheetName ?? typedLaunch.gs_sheet_name ?? "");
       setHydratedLaunchId(launchId);
       setLoading(false);
@@ -986,9 +1113,11 @@ export default function Sources() {
         acNamedTags,
         uchatWorkspaces,
         gsEnabled,
+        gsAuthMode,
         gsServiceAccountEmail,
         gsPrivateKey,
         gsSpreadsheetId,
+        gsSpreadsheetTitle,
         gsSheetName,
       } satisfies SourcesDraft),
     );
@@ -1002,10 +1131,61 @@ export default function Sources() {
     acNamedTags,
     uchatWorkspaces,
     gsEnabled,
+    gsAuthMode,
     gsServiceAccountEmail,
     gsPrivateKey,
     gsSpreadsheetId,
+    gsSpreadsheetTitle,
     gsSheetName,
+  ]);
+
+  useEffect(() => {
+    if (!activeLaunchId || loading || hydratedLaunchId !== activeLaunchId) return;
+    if (loadingGoogleSheetsCatalog) return;
+
+    if (
+      visibleGsAuthMode === "oauth" &&
+      visibleGsOauthConnected &&
+      gsAvailableSpreadsheets.length === 0
+    ) {
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunchId,
+        authMode: "oauth",
+        spreadsheetId: visibleGsSpreadsheetId,
+        silent: true,
+      });
+      return;
+    }
+
+    if (
+      visibleGsAuthMode === "service_account" &&
+      visibleGsServiceAccountEmail.trim() &&
+      visibleGsPrivateKey.trim() &&
+      visibleGsSpreadsheetId.trim() &&
+      gsAvailableSheets.length === 0
+    ) {
+      void loadGoogleSheetsCatalog({
+        launchId: activeLaunchId,
+        authMode: "service_account",
+        serviceAccountEmail: visibleGsServiceAccountEmail,
+        privateKey: visibleGsPrivateKey,
+        spreadsheetId: visibleGsSpreadsheetId,
+        silent: true,
+      });
+    }
+  }, [
+    activeLaunchId,
+    gsAvailableSheets.length,
+    gsAvailableSpreadsheets.length,
+    hydratedLaunchId,
+    loadGoogleSheetsCatalog,
+    loading,
+    loadingGoogleSheetsCatalog,
+    visibleGsAuthMode,
+    visibleGsOauthConnected,
+    visibleGsPrivateKey,
+    visibleGsServiceAccountEmail,
+    visibleGsSpreadsheetId,
   ]);
 
   const uchatConnected = useMemo(
@@ -1016,18 +1196,21 @@ export default function Sources() {
     [visibleUchatWorkspaces],
   );
   const googleSheetsConnected = useMemo(
-    () =>
-      Boolean(
-        visibleGsEnabled &&
-          visibleGsServiceAccountEmail.trim() &&
-          visibleGsSpreadsheetId.trim() &&
-          visibleGsSheetName.trim(),
-      ),
+    () => {
+      if (visibleGsAuthMode === "oauth") {
+        return Boolean(visibleGsOauthConnected);
+      }
+
+      return Boolean(
+        visibleGsServiceAccountEmail.trim() &&
+          visibleGsPrivateKey.trim(),
+      );
+    },
     [
-      visibleGsEnabled,
+      visibleGsAuthMode,
+      visibleGsOauthConnected,
+      visibleGsPrivateKey,
       visibleGsServiceAccountEmail,
-      visibleGsSheetName,
-      visibleGsSpreadsheetId,
     ],
   );
 
@@ -1058,24 +1241,37 @@ export default function Sources() {
   const loadGoogleSheetsCatalog = useCallback(
     async (options?: {
       launchId?: string | null;
+      authMode?: GoogleSheetsAuthMode;
       serviceAccountEmail?: string;
       privateKey?: string;
       spreadsheetId?: string;
       silent?: boolean;
     }) => {
       const requestLaunchId = options?.launchId ?? activeLaunchId;
+      const authMode = normalizeGoogleSheetsAuthMode(options?.authMode ?? gsAuthMode);
       const serviceAccountEmail = (options?.serviceAccountEmail ?? gsServiceAccountEmail).trim();
       const privateKey = (options?.privateKey ?? gsPrivateKey).trim();
       const spreadsheetId = (options?.spreadsheetId ?? gsSpreadsheetId).trim();
 
       if (!requestLaunchId) return;
 
-      if (!serviceAccountEmail || !privateKey || !spreadsheetId) {
+      if (authMode === "service_account" && (!serviceAccountEmail || !privateKey)) {
         if (!options?.silent) {
           toast({
             title: "Preencha a conexão do Google Sheets",
             description:
               "Informe o e-mail da service account, a chave privada e o ID da planilha para carregar as abas.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      if (authMode === "oauth" && !gsOauthConnected) {
+        if (!options?.silent) {
+          toast({
+            title: "Conecte sua conta Google",
+            description: "Entre com o Google antes de listar as planilhas disponiveis.",
             variant: "destructive",
           });
         }
@@ -1089,9 +1285,13 @@ export default function Sources() {
           supabase.functions.invoke("google-sheets-catalog", {
             body: {
               launchId: requestLaunchId,
-              serviceAccountEmail,
-              privateKey,
-              spreadsheetId,
+              ...(authMode === "service_account"
+                ? {
+                    serviceAccountEmail,
+                    privateKey,
+                  }
+                : {}),
+              ...(spreadsheetId ? { spreadsheetId } : {}),
             },
           }),
           15000,
@@ -1103,7 +1303,14 @@ export default function Sources() {
           throw new Error(error?.message || "Nao foi possivel carregar as abas da planilha.");
         }
 
-        setGsSpreadsheetTitle(typedData.title ?? null);
+        setGsAuthMode(typedData.authMode ?? authMode);
+        setGsOauthEmail(typedData.connectionEmail ?? "");
+        setGsOauthConnected(Boolean(typedData.authMode === "oauth" && typedData.connectionEmail));
+        setGsAvailableSpreadsheets(typedData.spreadsheets ?? []);
+        setGsSpreadsheetTitle(typedData.selectedSpreadsheetTitle ?? "");
+        if (typedData.selectedSpreadsheetId) {
+          setGsSpreadsheetId(typedData.selectedSpreadsheetId);
+        }
         setGsAvailableSheets(
           typedData.sheets.map((sheet) => ({
             id: sheet.id,
@@ -1123,9 +1330,9 @@ export default function Sources() {
           toast({
             title: "Google Sheets conectado",
             description:
-              typedData.title
-                ? `Planilha "${typedData.title}" carregada com ${typedData.sheets.length} aba(s).`
-                : `${typedData.sheets.length} aba(s) carregada(s).`,
+              typedData.selectedSpreadsheetTitle
+                ? `Planilha "${typedData.selectedSpreadsheetTitle}" pronta com ${typedData.sheets.length} aba(s).`
+                : `${typedData.spreadsheets.length} planilha(s) carregada(s) da conta Google.`,
           });
         }
       } catch (error) {
@@ -1145,8 +1352,174 @@ export default function Sources() {
         setLoadingGoogleSheetsCatalog(false);
       }
     },
-    [activeLaunchId, gsPrivateKey, gsServiceAccountEmail, gsSheetName, gsSpreadsheetId, toast],
+    [
+      activeLaunchId,
+      gsAuthMode,
+      gsOauthConnected,
+      gsPrivateKey,
+      gsServiceAccountEmail,
+      gsSheetName,
+      gsSpreadsheetId,
+      toast,
+    ],
   );
+
+  const connectGoogleSheetsOauth = useCallback(async () => {
+    if (!activeLaunch) return;
+
+    if (!GOOGLE_OAUTH_CLIENT_ID) {
+      toast({
+        title: "Client ID do Google ausente",
+        description:
+          "Configure VITE_GOOGLE_OAUTH_CLIENT_ID no frontend antes de conectar a conta Google.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConnectingGoogleOauth(true);
+
+    try {
+      await ensureGoogleIdentityScript();
+
+      const oauthApi = window.google?.accounts?.oauth2;
+      if (!oauthApi?.initCodeClient) {
+        throw new Error("O login do Google nao ficou disponivel neste navegador.");
+      }
+
+      const exchangeResponse = await new Promise<GoogleOauthExchangeResponse>((resolve, reject) => {
+        const client = oauthApi.initCodeClient({
+          client_id: GOOGLE_OAUTH_CLIENT_ID,
+          scope: GOOGLE_OAUTH_SCOPES,
+          ux_mode: "popup",
+          redirect_uri: window.location.origin,
+          select_account: true,
+          prompt: "consent",
+          include_granted_scopes: true,
+          callback: async (response: { code?: string; error?: string }) => {
+            if (!response?.code) {
+              reject(new Error(response?.error || "O Google nao retornou o codigo de autorizacao."));
+              return;
+            }
+
+            try {
+              const { data, error } = await supabase.functions.invoke("google-oauth-exchange", {
+                body: {
+                  launchId: activeLaunch.id,
+                  code: response.code,
+                  redirectUri: window.location.origin,
+                },
+                headers: {
+                  "x-requested-with": "XMLHttpRequest",
+                },
+              });
+
+              const typedData = (data as GoogleOauthExchangeResponse | null) ?? null;
+              if (error || !typedData?.launch) {
+                throw error ?? new Error("Nao foi possivel concluir a conexao com o Google.");
+              }
+
+              resolve(typedData);
+            } catch (error) {
+              reject(error);
+            }
+          },
+          error_callback: (response: { type?: string }) => {
+            reject(
+              new Error(
+                response?.type === "popup_closed"
+                  ? "A janela de login do Google foi fechada antes da autorizacao."
+                  : "O login do Google nao foi concluido.",
+              ),
+            );
+          },
+        });
+
+        client.requestCode();
+      });
+
+      setLaunchSettings(exchangeResponse.launch);
+      setHydratedLaunchId(activeLaunch.id);
+      setGsAuthMode("oauth");
+      setGsOauthEmail(exchangeResponse.email ?? "");
+      setGsOauthConnected(Boolean(exchangeResponse.connected));
+
+      toast({
+        title: "Conta Google conectada",
+        description: exchangeResponse.email
+          ? `A conta ${exchangeResponse.email} ja pode listar as planilhas disponiveis.`
+          : "A conta Google foi conectada com sucesso.",
+      });
+
+      await loadGoogleSheetsCatalog({
+        launchId: activeLaunch.id,
+        authMode: "oauth",
+        spreadsheetId: gsSpreadsheetId,
+        silent: true,
+      });
+    } catch (error) {
+      const description = await extractFunctionInvokeErrorMessage(
+        error,
+        error instanceof Error ? error.message : "Nao foi possivel conectar a conta Google.",
+      );
+
+      toast({
+        title: "Erro ao conectar com Google",
+        description,
+        variant: "destructive",
+      });
+    } finally {
+      setConnectingGoogleOauth(false);
+    }
+  }, [activeLaunch, gsSpreadsheetId, loadGoogleSheetsCatalog, toast]);
+
+  const disconnectGoogleSheetsOauth = useCallback(async () => {
+    if (!activeLaunch) return;
+
+    setDisconnectingGoogleOauth(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("google-oauth-disconnect", {
+        body: {
+          launchId: activeLaunch.id,
+        },
+      });
+
+      const launch = (data as { launch?: LaunchSettingsRow } | null)?.launch ?? null;
+      if (error || !launch) {
+        throw error ?? new Error("Nao foi possivel desconectar a conta Google.");
+      }
+
+      setLaunchSettings(launch);
+      setHydratedLaunchId(activeLaunch.id);
+      setGsEnabled(false);
+      setGsOauthEmail("");
+      setGsOauthConnected(false);
+      setGsSpreadsheetId("");
+      setGsSpreadsheetTitle("");
+      setGsSheetName("");
+      setGsAvailableSpreadsheets([]);
+      setGsAvailableSheets([]);
+
+      toast({
+        title: "Conta Google desconectada",
+        description: "A integracao do Google Sheets foi desligada para este expert.",
+      });
+    } catch (error) {
+      const description = await extractFunctionInvokeErrorMessage(
+        error,
+        "Nao foi possivel desconectar a conta Google.",
+      );
+
+      toast({
+        title: "Erro ao desconectar Google",
+        description,
+        variant: "destructive",
+      });
+    } finally {
+      setDisconnectingGoogleOauth(false);
+    }
+  }, [activeLaunch, toast]);
 
   const syncActiveCampaignAfterSave = useCallback(
     async (launchId: string) => {
@@ -1272,29 +1645,43 @@ export default function Sources() {
   const saveGoogleSheets = async () => {
     if (!activeLaunch) return;
 
-    if (
-      gsEnabled &&
-      (!gsServiceAccountEmail.trim() ||
-        !gsPrivateKey.trim() ||
-        !gsSpreadsheetId.trim() ||
-        !gsSheetName.trim())
-    ) {
-      toast({
-        title: "Preencha a conexao do Google Sheets",
-        description:
-          "Ative o Google Sheets apenas depois de informar a service account, a chave privada, o ID da planilha e a aba de destino.",
-        variant: "destructive",
-      });
-      return;
+    if (gsEnabled) {
+      if (gsAuthMode === "oauth" && (!gsOauthConnected || !gsSpreadsheetId.trim() || !gsSheetName.trim())) {
+        toast({
+          title: "Finalize a conexao do Google Sheets",
+          description:
+            "Conecte sua conta Google e escolha a planilha e a aba antes de ativar a captura.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (
+        gsAuthMode === "service_account" &&
+        (!gsServiceAccountEmail.trim() ||
+          !gsPrivateKey.trim() ||
+          !gsSpreadsheetId.trim() ||
+          !gsSheetName.trim())
+      ) {
+        toast({
+          title: "Preencha a conexao do Google Sheets",
+          description:
+            "Ative o Google Sheets apenas depois de informar a service account, a chave privada, o ID da planilha e a aba de destino.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     setSaving("gsheets");
     const { error, data } = await supabase.rpc("update_launch_google_sheets_settings", {
       target_launch_id: activeLaunch.id,
+      next_auth_mode: gsAuthMode,
       next_enabled: gsEnabled,
-      next_service_account_email: gsServiceAccountEmail || null,
-      next_private_key: gsPrivateKey || null,
+      next_service_account_email: gsAuthMode === "service_account" ? gsServiceAccountEmail || null : null,
+      next_private_key: gsAuthMode === "service_account" ? gsPrivateKey || null : null,
       next_spreadsheet_id: gsSpreadsheetId || null,
+      next_spreadsheet_title: gsSpreadsheetTitle || null,
       next_sheet_name: gsSheetName || null,
     } as never);
 
@@ -1311,11 +1698,23 @@ export default function Sources() {
 
     setLaunchSettings(data as unknown as LaunchSettingsRow);
     setHydratedLaunchId(activeLaunch.id);
-    if (gsEnabled && gsServiceAccountEmail.trim() && gsPrivateKey.trim() && gsSpreadsheetId.trim()) {
+    if (
+      gsEnabled &&
+      ((gsAuthMode === "oauth" && gsOauthConnected && gsSpreadsheetId.trim()) ||
+        (gsAuthMode === "service_account" &&
+          gsServiceAccountEmail.trim() &&
+          gsPrivateKey.trim() &&
+          gsSpreadsheetId.trim()))
+    ) {
       void loadGoogleSheetsCatalog({
         launchId: activeLaunch.id,
-        serviceAccountEmail: gsServiceAccountEmail,
-        privateKey: gsPrivateKey,
+        authMode: gsAuthMode,
+        ...(gsAuthMode === "service_account"
+          ? {
+              serviceAccountEmail: gsServiceAccountEmail,
+              privateKey: gsPrivateKey,
+            }
+          : {}),
         spreadsheetId: gsSpreadsheetId,
         silent: true,
       });
@@ -1618,63 +2017,174 @@ export default function Sources() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="gs-email">Service account email</Label>
-                <Input
-                  id="gs-email"
-                  value={visibleGsServiceAccountEmail}
-                  onChange={(event) => setGsServiceAccountEmail(event.target.value)}
-                  placeholder="service-account@projeto.iam.gserviceaccount.com"
-                />
+                <Label>Modo de conexao</Label>
+                <Select
+                  value={visibleGsAuthMode}
+                  onValueChange={(value) =>
+                    setGsAuthMode(normalizeGoogleSheetsAuthMode(value))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Escolher modo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="oauth">Login com Google</SelectItem>
+                    <SelectItem value="service_account">Service account avancada</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="gs-key">Chave privada</Label>
-                <Textarea
-                  id="gs-key"
-                  value={visibleGsPrivateKey}
-                  onChange={(event) => setGsPrivateKey(event.target.value)}
-                  placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
-                  className="min-h-[160px] font-mono text-xs"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Compartilhe a planilha com esse email da service account antes de carregar as abas.
-                </p>
-              </div>
+              {visibleGsAuthMode === "oauth" ? (
+                <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="font-medium text-foreground">Conta Google conectada</p>
+                      <p className="text-sm text-muted-foreground">
+                        Entre com a conta Google do expert para listar todas as planilhas disponiveis e escolher a aba de destino.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void connectGoogleSheetsOauth()}
+                        disabled={saving !== null || connectingGoogleOauth}
+                      >
+                        {connectingGoogleOauth && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        {visibleGsOauthConnected ? "Reconectar Google" : "Conectar com Google"}
+                      </Button>
+                      {visibleGsOauthConnected && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void disconnectGoogleSheetsOauth()}
+                          disabled={saving !== null || disconnectingGoogleOauth}
+                        >
+                          {disconnectingGoogleOauth && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Desconectar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="gs-spreadsheet">Spreadsheet ID</Label>
-                <Input
-                  id="gs-spreadsheet"
-                  value={visibleGsSpreadsheetId}
-                  onChange={(event) => setGsSpreadsheetId(event.target.value)}
-                  placeholder="Cole o ID da planilha do Google"
-                />
-              </div>
+                  <div className="rounded-xl border border-border/60 bg-background/50 p-4 text-sm text-muted-foreground">
+                    {visibleGsOauthConnected ? (
+                      <p>
+                        Conta ativa:{" "}
+                        <span className="font-medium text-foreground">
+                          {visibleGsOauthEmail || "Google conectado"}
+                        </span>
+                      </p>
+                    ) : (
+                      <p>Nenhuma conta Google conectada ainda para este expert.</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="gs-email">Service account email</Label>
+                    <Input
+                      id="gs-email"
+                      value={visibleGsServiceAccountEmail}
+                      onChange={(event) => setGsServiceAccountEmail(event.target.value)}
+                      placeholder="service-account@projeto.iam.gserviceaccount.com"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="gs-key">Chave privada</Label>
+                    <Textarea
+                      id="gs-key"
+                      value={visibleGsPrivateKey}
+                      onChange={(event) => setGsPrivateKey(event.target.value)}
+                      placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
+                      className="min-h-[160px] font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Compartilhe a planilha com esse email da service account antes de carregar as abas.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <p className="font-medium text-foreground">Abas disponiveis</p>
+                    <p className="font-medium text-foreground">
+                      {visibleGsAuthMode === "oauth" ? "Planilhas e abas" : "Abas disponiveis"}
+                    </p>
                     <p className="text-sm text-muted-foreground">
-                      Carregue a planilha para escolher a aba onde os contatos do webhook do ActiveCampaign serao salvos.
+                      {visibleGsAuthMode === "oauth"
+                        ? "Carregue a conta Google conectada, escolha uma planilha e depois a aba onde os contatos serao salvos."
+                        : "Carregue a planilha para escolher a aba onde os contatos do webhook do ActiveCampaign serao salvos."}
                     </p>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => void loadGoogleSheetsCatalog()}
+                    onClick={() =>
+                      void loadGoogleSheetsCatalog({
+                        authMode: visibleGsAuthMode,
+                      })
+                    }
                     disabled={saving !== null || loadingGoogleSheetsCatalog}
                   >
                     {loadingGoogleSheetsCatalog && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Carregar abas
+                    {visibleGsAuthMode === "oauth" ? "Carregar planilhas" : "Carregar abas"}
                   </Button>
                 </div>
 
-                {gsSpreadsheetTitle && (
+                {visibleGsSpreadsheetTitle && (
                   <p className="text-xs text-muted-foreground">
-                    Planilha conectada: <span className="font-medium text-foreground">{gsSpreadsheetTitle}</span>
+                    Planilha conectada: <span className="font-medium text-foreground">{visibleGsSpreadsheetTitle}</span>
                   </p>
+                )}
+
+                {visibleGsAuthMode === "oauth" && (
+                  <div className="space-y-2">
+                    <Label>Planilha de destino</Label>
+                    <Select
+                      value={visibleGsSpreadsheetId || undefined}
+                      onValueChange={(value) => {
+                        setGsSpreadsheetId(value);
+                        const selectedSpreadsheet =
+                          gsAvailableSpreadsheets.find((spreadsheet) => spreadsheet.id === value) ?? null;
+                        setGsSpreadsheetTitle(selectedSpreadsheet?.title ?? "");
+                        setGsSheetName("");
+                        setGsAvailableSheets([]);
+                        void loadGoogleSheetsCatalog({
+                          authMode: "oauth",
+                          spreadsheetId: value,
+                          silent: true,
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Escolher planilha" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {gsAvailableSpreadsheets.map((spreadsheet) => (
+                          <SelectItem key={spreadsheet.id} value={spreadsheet.id}>
+                            {spreadsheet.title || spreadsheet.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {visibleGsAuthMode === "service_account" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="gs-spreadsheet">Spreadsheet ID</Label>
+                    <Input
+                      id="gs-spreadsheet"
+                      value={visibleGsSpreadsheetId}
+                      onChange={(event) => setGsSpreadsheetId(event.target.value)}
+                      placeholder="Cole o ID da planilha do Google"
+                    />
+                  </div>
                 )}
 
                 {gsAvailableSheets.length > 0 ? (
