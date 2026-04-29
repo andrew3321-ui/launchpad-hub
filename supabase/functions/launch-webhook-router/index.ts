@@ -289,6 +289,17 @@ function pickPreferredUchatCreatePhone(value: unknown) {
   return buildUchatPhoneCandidates(value).find((candidate) => /^\+[1-9]\d{7,14}$/.test(candidate)) || null;
 }
 
+function isValidEmailAddress(value: unknown) {
+  const email = nonEmptyString(value);
+  if (!email) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+}
+
+function pickUchatSafeEmail(value: unknown) {
+  const email = nonEmptyString(value);
+  return email && isValidEmailAddress(email) ? email : null;
+}
+
 function splitName(fullName?: string | null) {
   const value = nonEmptyString(fullName);
   if (!value) return { firstName: null, lastName: null };
@@ -2504,8 +2515,9 @@ async function createUchatSubscriberFromExplicitPayload(
 ) {
   const explicitContact = extractGenericContact(payload);
   const normalizedPhone = phoneOverride || pickPreferredUchatCreatePhone(explicitContact.phone);
+  const safeEmail = pickUchatSafeEmail(explicitContact.email);
 
-  if (!normalizedPhone && !explicitContact.email) {
+  if (!normalizedPhone && !safeEmail) {
     throw new ProcessContactError(
       "Relay webhook requires explicit valid phone or email to create the UChat subscriber precisely",
       400,
@@ -2518,7 +2530,7 @@ async function createUchatSubscriberFromExplicitPayload(
     last_name: lastName || undefined,
     name: explicitContact.name || undefined,
     phone: normalizedPhone || undefined,
-    email: explicitContact.email || undefined,
+    email: safeEmail || undefined,
   });
 
   const createdRecord = isRecord(created) ? (created as JsonRecord) : null;
@@ -2600,9 +2612,10 @@ async function resolveExplicitUchatRecipient(
     }
   }
 
-  if (explicitContact.email) {
+  const explicitSafeEmail = pickUchatSafeEmail(explicitContact.email);
+  if (explicitSafeEmail) {
     const emailMatch = await fetchUchatSubscriberByQuery(workspace, {
-      email: explicitContact.email,
+      email: explicitSafeEmail,
     });
     const userNs = nonEmptyString(emailMatch?.user_ns);
     if (emailMatch && userNs) {
@@ -2616,7 +2629,7 @@ async function resolveExplicitUchatRecipient(
   }
 
   const createPhone = pickPreferredUchatCreatePhone(explicitContact.phone);
-  if (createPhone || explicitContact.email) {
+  if (createPhone || explicitSafeEmail) {
     return await createUchatSubscriberFromExplicitPayload(workspace, payload, createPhone);
   }
 
@@ -2887,11 +2900,12 @@ async function findOrCreateUchatUser(
     }
   }
 
-  if (contact.primary_email) {
+  const contactSafeEmail = pickUchatSafeEmail(contact.primary_email);
+  if (contactSafeEmail) {
     const emailSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
       limit: 1,
       page: 1,
-      email: contact.primary_email,
+      email: contactSafeEmail,
     });
 
     const emailMatch = Array.isArray((emailSearch as JsonRecord).data)
@@ -2918,7 +2932,7 @@ async function findOrCreateUchatUser(
     last_name: lastName || undefined,
     name: contact.primary_name || undefined,
     phone: normalizedCreatePhone || undefined,
-    email: contact.primary_email || undefined,
+    email: contactSafeEmail || undefined,
   });
 
   const createdUserNs =
