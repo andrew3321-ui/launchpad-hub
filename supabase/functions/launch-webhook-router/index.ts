@@ -594,12 +594,22 @@ function collectValuesDeep(node: unknown, keys: string[]) {
 }
 
 function extractGenericContact(payload: JsonRecord) {
+  const socialHandle = findStringDeep(payload, [
+    "username",
+    "user_name",
+    "ig_username",
+    "instagram_username",
+    "instagram_handle",
+    "handle",
+    "subscriber_username",
+  ]);
   const name =
     findStringDeep(payload, ["name", "full_name", "fullname", "nome"]) ||
     uniqueStrings([
       findStringDeep(payload, ["first_name", "firstname", "first", "primeiro_nome"]),
       findStringDeep(payload, ["last_name", "lastname", "last", "sobrenome"]),
     ]).join(" ") ||
+    (socialHandle ? (socialHandle.startsWith("@") ? socialHandle : `@${socialHandle}`) : null) ||
     null;
 
   return {
@@ -622,6 +632,34 @@ function extractGenericContact(payload: JsonRecord) {
       ]) ||
       null,
   };
+}
+
+function buildQueryPayload(url: URL) {
+  const ignoredParams = new Set([
+    "source",
+    "token",
+    "expertid",
+    "launchid",
+    "expertslug",
+    "launchslug",
+    "workerjobid",
+  ]);
+  const payload: JsonRecord = {};
+
+  for (const [key, value] of url.searchParams.entries()) {
+    if (ignoredParams.has(normalizeKey(key))) continue;
+
+    const existingValue = payload[key];
+    if (existingValue === undefined) {
+      payload[key] = value;
+    } else if (Array.isArray(existingValue)) {
+      existingValue.push(value);
+    } else {
+      payload[key] = [existingValue, value];
+    }
+  }
+
+  return payload;
 }
 
 function extractActiveCampaignContactId(payload: JsonRecord) {
@@ -859,6 +897,21 @@ function normalizeIncomingWebhook(
     findStringDeep(payload, [
       "external_contact_id",
       "contact_id",
+      "subscriber_id",
+      "subscriberid",
+      "subscriber_user_id",
+      "manychat_id",
+      "manychat_user_id",
+      "manychat_subscriber_id",
+      "instagram_id",
+      "instagram_user_id",
+      "ig_id",
+      "ig_user_id",
+      "ig_username",
+      "instagram_username",
+      "username",
+      "handle",
+      "psid",
       "user_ns",
       "uchat_user_ns",
       "user_id",
@@ -4149,7 +4202,12 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const payload = await parseRequestBody(request);
+    const bodyPayload = await parseRequestBody(request);
+    const queryPayload = buildQueryPayload(url);
+    const payload = {
+      ...queryPayload,
+      ...bodyPayload,
+    } satisfies JsonRecord;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const launch = await fetchLaunch(supabase, launchId, launchSlug);
 

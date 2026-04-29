@@ -295,6 +295,8 @@ export async function processIncomingContactEvent(
   const phoneCandidates = rawPhone ? generatePhoneCandidates(rawPhone, settings) : [];
   const validPhoneCandidates = phoneCandidates.filter(isLikelyValidPhone);
   const canonicalPhone = rawPhone ? pickCanonicalPhone(validPhoneCandidates, countryCode) : null;
+  const externalIdentity = body.externalContactId?.trim() || null;
+  const canCreateIdentityOnlyContact = body.source === "manychat" && Boolean(externalIdentity);
 
   let eventId: string | null = null;
 
@@ -305,7 +307,7 @@ export async function processIncomingContactEvent(
         launch_id: launch.id,
         source: body.source,
         event_type: eventType,
-        external_contact_id: body.externalContactId || null,
+        external_contact_id: externalIdentity,
         payload: {
           contact: body.contact || {},
           payload: body.payload || {},
@@ -322,6 +324,24 @@ export async function processIncomingContactEvent(
   }
 
   const logs: Array<Record<string, unknown>> = [];
+  const candidateIds = new Set<string>();
+  let knownIdentityContactId: string | null = null;
+
+  if (externalIdentity) {
+    const { data: existingIdentity } = await supabase
+      .from("lead_contact_identities")
+      .select("contact_id")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
+      .eq("source", body.source)
+      .eq("external_contact_id", externalIdentity)
+      .maybeSingle();
+
+    if (existingIdentity?.contact_id) {
+      knownIdentityContactId = existingIdentity.contact_id;
+      candidateIds.add(existingIdentity.contact_id);
+    }
+  }
 
   if (rawPhone && validPhoneCandidates.length === 0) {
     logs.push({
@@ -339,7 +359,7 @@ export async function processIncomingContactEvent(
     });
   }
 
-  if (!normalizedEmail && !canonicalPhone) {
+  if (!normalizedEmail && !canonicalPhone && !canCreateIdentityOnlyContact && !knownIdentityContactId) {
     logs.push({
       launch_id: launch.id,
       event_id: eventId,
@@ -351,6 +371,13 @@ export async function processIncomingContactEvent(
       details: {
         receivedPhone: rawPhone,
         receivedEmail: body.contact?.email || null,
+        receivedExternalContactId: externalIdentity,
+        ...(body.source === "manychat"
+          ? {
+              suggestion:
+                "Envie subscriber_id, username/ig_username, nome, email ou telefone no External Request do ManyChat.",
+            }
+          : {}),
       },
     });
 
@@ -373,25 +400,6 @@ export async function processIncomingContactEvent(
     }
 
     return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: eventId ?? undefined, logsCreated: logs.length };
-  }
-
-  const candidateIds = new Set<string>();
-  let knownIdentityContactId: string | null = null;
-
-  if (body.externalContactId) {
-    const { data: existingIdentity } = await supabase
-      .from("lead_contact_identities")
-      .select("contact_id")
-      .eq("launch_id", launch.id)
-      .eq("cycle_number", launch.current_cycle_number)
-      .eq("source", body.source)
-      .eq("external_contact_id", body.externalContactId)
-      .maybeSingle();
-
-    if (existingIdentity?.contact_id) {
-      knownIdentityContactId = existingIdentity.contact_id;
-      candidateIds.add(existingIdentity.contact_id);
-    }
   }
 
   if (normalizedEmail && settings.merge_on_exact_email) {
@@ -453,6 +461,7 @@ export async function processIncomingContactEvent(
 
   let processedContactId: string | null = null;
   let action: "created" | "merged" | "updated" = "created";
+  const primaryNameForCreate = normalizedName || (canCreateIdentityOnlyContact ? `ManyChat ${externalIdentity}` : null);
 
   if (existingContact && settings.auto_merge_duplicates) {
     const isKnownIdentityUpdate = Boolean(
@@ -542,7 +551,7 @@ export async function processIncomingContactEvent(
             phoneMatched: Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
             knownIdentityMatched: isKnownIdentityUpdate,
           },
-          externalContactId: body.externalContactId || null,
+          externalContactId: externalIdentity,
         },
       });
     }
@@ -552,7 +561,7 @@ export async function processIncomingContactEvent(
       .insert({
         launch_id: launch.id,
         cycle_number: launch.current_cycle_number,
-        primary_name: normalizedName,
+        primary_name: primaryNameForCreate,
         primary_email: normalizedEmail,
         primary_phone: rawPhone,
         normalized_phone: canonicalPhone,
@@ -593,21 +602,22 @@ export async function processIncomingContactEvent(
         title: "Contato importado",
         message: `O contato recebido de ${body.source} foi salvo como um novo cadastro canonico.`,
         details: {
-          externalContactId: body.externalContactId || null,
+          externalContactId: externalIdentity,
+          provisionalIdentityOnly: Boolean(canCreateIdentityOnlyContact && !normalizedEmail && !canonicalPhone),
         },
       });
     }
   }
 
   if (processedContactId) {
-    if (body.externalContactId) {
+    if (externalIdentity) {
       const { data: existingIdentity } = await supabase
         .from("lead_contact_identities")
         .select("id")
         .eq("launch_id", launch.id)
         .eq("cycle_number", launch.current_cycle_number)
         .eq("source", body.source)
-        .eq("external_contact_id", body.externalContactId)
+        .eq("external_contact_id", externalIdentity)
         .maybeSingle();
 
       if (existingIdentity?.id) {
@@ -627,7 +637,7 @@ export async function processIncomingContactEvent(
           cycle_number: launch.current_cycle_number,
           contact_id: processedContactId,
           source: body.source,
-          external_contact_id: body.externalContactId,
+          external_contact_id: externalIdentity,
           external_email: normalizedEmail,
           external_phone: rawPhone,
           normalized_phone: canonicalPhone,
