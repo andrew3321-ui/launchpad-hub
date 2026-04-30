@@ -231,6 +231,55 @@ function chooseValue(
   return current || incoming || null;
 }
 
+function normalizeTextKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isProvisionalManyChatName(value: string | null | undefined, externalIdentity?: string | null) {
+  const current = cleanIncomingString(value);
+  if (!current) return false;
+
+  if (/^manychat\s+/i.test(current)) return true;
+  if (current.startsWith("@")) return true;
+
+  const identity = cleanIncomingString(externalIdentity);
+  return Boolean(identity && current === identity);
+}
+
+function isLikelyDuplicatedName(value: string | null | undefined) {
+  const current = cleanIncomingString(value);
+  if (!current) return false;
+
+  const tokens = normalizeTextKey(current).split(/\s+/).filter(Boolean);
+  if (tokens.length < 4) return false;
+
+  const repeatedTokens = tokens.filter((token, index) => tokens.indexOf(token) !== index);
+  return repeatedTokens.length >= Math.ceil(tokens.length / 3);
+}
+
+function chooseContactName(
+  currentValue: string | null | undefined,
+  incomingValue: string | null | undefined,
+  preferIncoming: boolean,
+  options: { source: string; externalIdentity?: string | null },
+) {
+  const current = cleanIncomingString(currentValue);
+  const incoming = cleanIncomingString(incomingValue);
+
+  if (options.source === "manychat" && incoming) {
+    if (!current) return incoming;
+    if (isProvisionalManyChatName(current, options.externalIdentity)) return incoming;
+    if (isLikelyDuplicatedName(current) && !isLikelyDuplicatedName(incoming)) return incoming;
+  }
+
+  return chooseValue(current, incoming, preferIncoming);
+}
+
 function asRecord(value: unknown) {
   return typeof value === "object" && value !== null ? (value as JsonRecord) : {};
 }
@@ -561,7 +610,12 @@ export async function processIncomingContactEvent(
     const { data: updatedContact, error: updateError } = await supabase
       .from("lead_contacts")
       .update({
-        primary_name: chooseValue(existingContact.primary_name as string | null | undefined, normalizedName, preferIncoming),
+        primary_name: chooseContactName(
+          existingContact.primary_name as string | null | undefined,
+          normalizedName,
+          preferIncoming,
+          { source: body.source, externalIdentity },
+        ),
         primary_email: nextPrimaryEmail,
         primary_phone: nextPrimaryPhone,
         normalized_phone: nextNormalizedPhone,

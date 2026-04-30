@@ -626,6 +626,40 @@ function pickLikelySocialHandle(value: unknown) {
   return `@${withoutAt}`;
 }
 
+function normalizeNameForCompare(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function cleanNamePart(value: unknown) {
+  const raw = nonEmptyString(value);
+  return raw?.replace(/\s+/g, " ").trim() || null;
+}
+
+function buildPersonNameFromParts(firstName: unknown, lastName: unknown) {
+  const first = cleanNamePart(firstName);
+  const last = cleanNamePart(lastName);
+
+  if (first && last) {
+    const firstKey = normalizeNameForCompare(first);
+    const lastKey = normalizeNameForCompare(last);
+    const firstWords = ` ${firstKey} `;
+    const lastWords = ` ${lastKey} `;
+
+    if (firstKey === lastKey) return first;
+    if (firstWords.includes(lastWords)) return first;
+    if (lastWords.includes(firstWords)) return last;
+
+    return `${first} ${last}`;
+  }
+
+  return first || last || null;
+}
+
 function extractGenericContact(payload: JsonRecord) {
   const socialHandle = pickLikelySocialHandle(
     findStringInPreferredPaths(payload, [
@@ -670,7 +704,7 @@ function extractGenericContact(payload: JsonRecord) {
     ["user", "last_name"],
     ["user", "lastname"],
   ]);
-  const nameFromParts = uniqueStrings([firstName, lastName]).join(" ") || null;
+  const nameFromParts = buildPersonNameFromParts(firstName, lastName);
   const name =
     nameFromParts ||
     findStringInPreferredPaths(payload, [
