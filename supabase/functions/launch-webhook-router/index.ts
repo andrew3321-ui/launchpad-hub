@@ -670,7 +670,9 @@ function extractGenericContact(payload: JsonRecord) {
     ["user", "last_name"],
     ["user", "lastname"],
   ]);
+  const nameFromParts = uniqueStrings([firstName, lastName]).join(" ") || null;
   const name =
+    nameFromParts ||
     findStringInPreferredPaths(payload, [
       ["full_name"],
       ["fullname"],
@@ -685,7 +687,6 @@ function extractGenericContact(payload: JsonRecord) {
       ["user", "full_name"],
       ["user", "fullname"],
     ]) ||
-    uniqueStrings([firstName, lastName]).join(" ") ||
     socialHandle ||
     null;
 
