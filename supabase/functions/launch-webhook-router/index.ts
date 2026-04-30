@@ -593,23 +593,100 @@ function collectValuesDeep(node: unknown, keys: string[]) {
   return values;
 }
 
+function readStringAtPath(source: unknown, path: string[]) {
+  let current: unknown = source;
+  for (const key of path) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+
+  if (typeof current === "string" || typeof current === "number" || typeof current === "boolean") {
+    const value = String(current).trim();
+    return value || null;
+  }
+
+  return null;
+}
+
+function findStringInPreferredPaths(source: JsonRecord, paths: string[][]) {
+  for (const path of paths) {
+    const value = readStringAtPath(source, path);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function pickLikelySocialHandle(value: unknown) {
+  const raw = nonEmptyString(value);
+  if (!raw) return null;
+
+  const withoutAt = raw.replace(/^@+/, "").trim();
+  if (!/^[a-z0-9._]{2,40}$/i.test(withoutAt)) return null;
+  return `@${withoutAt}`;
+}
+
 function extractGenericContact(payload: JsonRecord) {
-  const socialHandle = findStringDeep(payload, [
-    "username",
-    "user_name",
-    "ig_username",
-    "instagram_username",
-    "instagram_handle",
-    "handle",
-    "subscriber_username",
+  const socialHandle = pickLikelySocialHandle(
+    findStringInPreferredPaths(payload, [
+      ["ig_username"],
+      ["instagram_username"],
+      ["username"],
+      ["user_name"],
+      ["handle"],
+      ["subscriber_username"],
+      ["contact", "ig_username"],
+      ["contact", "instagram_username"],
+      ["contact", "username"],
+      ["subscriber", "ig_username"],
+      ["subscriber", "instagram_username"],
+      ["subscriber", "username"],
+      ["user", "ig_username"],
+      ["user", "instagram_username"],
+      ["user", "username"],
+    ]),
+  );
+  const firstName = findStringInPreferredPaths(payload, [
+    ["first_name"],
+    ["firstname"],
+    ["first"],
+    ["primeiro_nome"],
+    ["contact", "first_name"],
+    ["contact", "firstname"],
+    ["subscriber", "first_name"],
+    ["subscriber", "firstname"],
+    ["user", "first_name"],
+    ["user", "firstname"],
+  ]);
+  const lastName = findStringInPreferredPaths(payload, [
+    ["last_name"],
+    ["lastname"],
+    ["last"],
+    ["sobrenome"],
+    ["contact", "last_name"],
+    ["contact", "lastname"],
+    ["subscriber", "last_name"],
+    ["subscriber", "lastname"],
+    ["user", "last_name"],
+    ["user", "lastname"],
   ]);
   const name =
-    findStringDeep(payload, ["name", "full_name", "fullname", "nome"]) ||
-    uniqueStrings([
-      findStringDeep(payload, ["first_name", "firstname", "first", "primeiro_nome"]),
-      findStringDeep(payload, ["last_name", "lastname", "last", "sobrenome"]),
-    ]).join(" ") ||
-    (socialHandle ? (socialHandle.startsWith("@") ? socialHandle : `@${socialHandle}`) : null) ||
+    findStringInPreferredPaths(payload, [
+      ["full_name"],
+      ["fullname"],
+      ["contact_name"],
+      ["contact", "name"],
+      ["contact", "full_name"],
+      ["contact", "fullname"],
+      ["subscriber", "name"],
+      ["subscriber", "full_name"],
+      ["subscriber", "fullname"],
+      ["user", "name"],
+      ["user", "full_name"],
+      ["user", "fullname"],
+    ]) ||
+    uniqueStrings([firstName, lastName]).join(" ") ||
+    socialHandle ||
     null;
 
   return {
