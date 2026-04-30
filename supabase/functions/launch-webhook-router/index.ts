@@ -3415,6 +3415,36 @@ async function routeToActiveCampaign(
 ) {
   const tagNames = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
   const fieldValues = extractActiveCampaignFieldValues(source, payload);
+  const contactHasActiveIdentity = Boolean(
+    nonEmptyString(contact.primary_email) ||
+      nonEmptyString(contact.normalized_phone) ||
+      nonEmptyString(contact.primary_phone),
+  );
+
+  if (source === "manychat" && !contactHasActiveIdentity) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "info",
+      "MANYCHAT_CONTACT_WAITING_FOR_COMPLETION",
+      "Contato ManyChat aguardando cadastro",
+      "O contato do ManyChat foi salvo como provisorio, mas ainda nao tem email nem telefone para envio ao ActiveCampaign. Se nao completar em 90 minutos, sera removido automaticamente.",
+      {
+        primaryEmail: contact.primary_email,
+        primaryPhone: contact.primary_phone,
+        normalizedPhone: contact.normalized_phone,
+      },
+    );
+
+    return {
+      target: "activecampaign",
+      skipped: true,
+      reason: "manychat_contact_waiting_for_email_or_phone",
+    };
+  }
 
   if (isActiveCampaignTaggedSource(source) && tagNames.length === 0) {
     const sourceLabel = formatWebhookSourceLabel(source);

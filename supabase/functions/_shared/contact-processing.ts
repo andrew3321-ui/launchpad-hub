@@ -310,7 +310,10 @@ export async function processIncomingContactEvent(
   const validPhoneCandidates = phoneCandidates.filter(isLikelyValidPhone);
   const canonicalPhone = rawPhone ? pickCanonicalPhone(validPhoneCandidates, countryCode) : null;
   const externalIdentity = cleanIncomingString(body.externalContactId);
-  const canCreateIdentityOnlyContact = body.source === "manychat" && Boolean(externalIdentity);
+  const isManyChatSource = body.source === "manychat";
+  const canCreateIdentityOnlyContact = isManyChatSource && Boolean(externalIdentity);
+  const isManyChatIncomplete = isManyChatSource && !normalizedEmail && !canonicalPhone;
+  const manyChatCompletionExpiresAt = new Date(Date.now() + 90 * 60 * 1000).toISOString();
 
   let eventId: string | null = null;
 
@@ -499,6 +502,27 @@ export async function processIncomingContactEvent(
 
     const existingData = asRecord(existingContact.data);
     const existingPlatforms = asRecord(existingData.platforms);
+    const nextPrimaryEmail = chooseValue(
+      existingContact.primary_email as string | null | undefined,
+      normalizedEmail,
+      preferIncoming,
+    );
+    const nextPrimaryPhone = chooseValue(
+      existingContact.primary_phone as string | null | undefined,
+      rawPhone,
+      preferIncoming,
+    );
+    const nextNormalizedPhone = chooseValue(
+      existingContact.normalized_phone as string | null | undefined,
+      canonicalPhone,
+      preferIncoming,
+    );
+    const hasResolvedManyChatIdentity = Boolean(nextPrimaryEmail || nextNormalizedPhone || nextPrimaryPhone);
+    const manyChatStillIncomplete =
+      body.source === "manychat"
+        ? !hasResolvedManyChatIdentity
+        : Boolean(existingData.manychatCompletionRequired && !hasResolvedManyChatIdentity);
+    const shouldTrackManyChatCompletion = body.source === "manychat" || Boolean(existingData.manychatCompletionRequired);
     const mergedData = {
       ...existingData,
       latestPayload: body.payload || {},
@@ -513,6 +537,18 @@ export async function processIncomingContactEvent(
         ...(Array.isArray(existingData.sources) ? (existingData.sources as string[]) : []),
         body.source,
       ]),
+      ...(shouldTrackManyChatCompletion
+        ? {
+            manychatCompletionRequired: manyChatStillIncomplete,
+            manychatCompletionExpiresAt: manyChatStillIncomplete
+              ? cleanIncomingString(existingData.manychatCompletionExpiresAt as string | null | undefined) ||
+                manyChatCompletionExpiresAt
+              : null,
+            manychatCompletedAt: !manyChatStillIncomplete && existingData.manychatCompletionRequired
+              ? new Date().toISOString()
+              : existingData.manychatCompletedAt || null,
+          }
+        : {}),
       platforms: {
         ...existingPlatforms,
         [body.source]: {
@@ -526,13 +562,9 @@ export async function processIncomingContactEvent(
       .from("lead_contacts")
       .update({
         primary_name: chooseValue(existingContact.primary_name as string | null | undefined, normalizedName, preferIncoming),
-        primary_email: chooseValue(existingContact.primary_email as string | null | undefined, normalizedEmail, preferIncoming),
-        primary_phone: chooseValue(existingContact.primary_phone as string | null | undefined, rawPhone, preferIncoming),
-        normalized_phone: chooseValue(
-          existingContact.normalized_phone as string | null | undefined,
-          canonicalPhone,
-          preferIncoming,
-        ),
+        primary_email: nextPrimaryEmail,
+        primary_phone: nextPrimaryPhone,
+        normalized_phone: nextNormalizedPhone,
         last_source: body.source,
         merged_from_count: isKnownIdentityUpdate
           ? Number(existingContact.merged_from_count || 0) + duplicateMergeCount
@@ -616,6 +648,13 @@ export async function processIncomingContactEvent(
           latestSource: body.source,
           lastEventType: eventType,
           sources: [body.source],
+          ...(isManyChatSource
+            ? {
+                manychatCompletionRequired: isManyChatIncomplete,
+                manychatCompletionExpiresAt: isManyChatIncomplete ? manyChatCompletionExpiresAt : null,
+                manychatCompletedAt: !isManyChatIncomplete ? new Date().toISOString() : null,
+              }
+            : {}),
           platforms: {
             [body.source]: body.payload || {},
           },
@@ -643,6 +682,8 @@ export async function processIncomingContactEvent(
         details: {
           externalContactId: externalIdentity,
           provisionalIdentityOnly: Boolean(canCreateIdentityOnlyContact && !normalizedEmail && !canonicalPhone),
+          manychatCompletionRequired: isManyChatIncomplete,
+          manychatCompletionExpiresAt: isManyChatIncomplete ? manyChatCompletionExpiresAt : null,
         },
       });
     }
