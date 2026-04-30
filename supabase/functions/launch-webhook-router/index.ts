@@ -635,9 +635,47 @@ function normalizeNameForCompare(value: string) {
     .trim();
 }
 
+function compactPersonName(value: string | null | undefined) {
+  const raw = nonEmptyString(value)?.replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const words = raw.split(/\s+/);
+  const normalizedWords = words.map(normalizeNameForCompare).filter(Boolean);
+  if (words.length !== normalizedWords.length) return raw;
+
+  let compactWords = [...words];
+  let compactKeys = [...normalizedWords];
+  let changed = true;
+
+  while (changed && compactWords.length > 1) {
+    changed = false;
+
+    for (let index = compactKeys.length - 1; index > 0; index -= 1) {
+      if (compactKeys[index] === compactKeys[index - 1]) {
+        compactWords.splice(index, 1);
+        compactKeys.splice(index, 1);
+        changed = true;
+      }
+    }
+
+    for (let size = Math.floor(compactKeys.length / 2); size >= 2; size -= 1) {
+      const suffix = compactKeys.slice(-size).join(" ");
+      const prefix = compactKeys.slice(0, -size).join(" ");
+
+      if (prefix.split(" ").some((_, index, parts) => parts.slice(index, index + size).join(" ") === suffix)) {
+        compactWords.splice(-size, size);
+        compactKeys.splice(-size, size);
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  return compactWords.join(" ").trim() || raw;
+}
+
 function cleanNamePart(value: unknown) {
-  const raw = nonEmptyString(value);
-  return raw?.replace(/\s+/g, " ").trim() || null;
+  return compactPersonName(nonEmptyString(value));
 }
 
 function buildPersonNameFromParts(firstName: unknown, lastName: unknown) {
@@ -651,13 +689,13 @@ function buildPersonNameFromParts(firstName: unknown, lastName: unknown) {
     const lastWords = ` ${lastKey} `;
 
     if (firstKey === lastKey) return first;
-    if (firstWords.includes(lastWords)) return first;
-    if (lastWords.includes(firstWords)) return last;
+    if (firstWords.includes(lastWords)) return compactPersonName(first);
+    if (lastWords.includes(firstWords)) return compactPersonName(last);
 
-    return `${first} ${last}`;
+    return compactPersonName(`${first} ${last}`);
   }
 
-  return first || last || null;
+  return compactPersonName(first || last);
 }
 
 function extractGenericContact(payload: JsonRecord) {

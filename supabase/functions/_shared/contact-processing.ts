@@ -240,6 +240,48 @@ function normalizeTextKey(value: string) {
     .trim();
 }
 
+function compactPersonName(value: string | null | undefined) {
+  const raw = cleanIncomingString(value)?.replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const words = raw.split(/\s+/);
+  const normalizedWords = words.map(normalizeTextKey).filter(Boolean);
+  if (words.length !== normalizedWords.length) return raw;
+
+  let compactWords = [...words];
+  let compactKeys = [...normalizedWords];
+  let changed = true;
+
+  while (changed && compactWords.length > 1) {
+    changed = false;
+
+    for (let index = compactKeys.length - 1; index > 0; index -= 1) {
+      if (compactKeys[index] === compactKeys[index - 1]) {
+        compactWords.splice(index, 1);
+        compactKeys.splice(index, 1);
+        changed = true;
+      }
+    }
+
+    for (let size = Math.floor(compactKeys.length / 2); size >= 2; size -= 1) {
+      const suffix = compactKeys.slice(-size).join(" ");
+      const prefixParts = compactKeys.slice(0, -size);
+      const appearsEarlier = prefixParts.some((_, index) =>
+        prefixParts.slice(index, index + size).join(" ") === suffix,
+      );
+
+      if (appearsEarlier) {
+        compactWords.splice(-size, size);
+        compactKeys.splice(-size, size);
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  return compactWords.join(" ").trim() || raw;
+}
+
 function isProvisionalManyChatName(value: string | null | undefined, externalIdentity?: string | null) {
   const current = cleanIncomingString(value);
   if (!current) return false;
@@ -262,19 +304,51 @@ function isLikelyDuplicatedName(value: string | null | undefined) {
   return repeatedTokens.length >= Math.ceil(tokens.length / 3);
 }
 
+function normalizedNameTokens(value: string | null | undefined) {
+  const current = compactPersonName(value);
+  if (!current) return [];
+  return normalizeTextKey(current).split(/\s+/).filter(Boolean);
+}
+
+function containsTokenSequence(container: string[], candidate: string[]) {
+  if (candidate.length === 0 || candidate.length > container.length) return false;
+
+  return container.some((_, index) =>
+    container.slice(index, index + candidate.length).join(" ") === candidate.join(" "),
+  );
+}
+
+function chooseMostCompleteCompatibleName(currentValue: string, incomingValue: string) {
+  const current = compactPersonName(currentValue);
+  const incoming = compactPersonName(incomingValue);
+  if (!current || !incoming) return current || incoming || null;
+
+  const currentTokens = normalizedNameTokens(current);
+  const incomingTokens = normalizedNameTokens(incoming);
+  const compatible =
+    containsTokenSequence(currentTokens, incomingTokens) ||
+    containsTokenSequence(incomingTokens, currentTokens);
+
+  if (!compatible) return null;
+  return incomingTokens.length > currentTokens.length ? incoming : current;
+}
+
 function chooseContactName(
   currentValue: string | null | undefined,
   incomingValue: string | null | undefined,
   preferIncoming: boolean,
   options: { source: string; externalIdentity?: string | null },
 ) {
-  const current = cleanIncomingString(currentValue);
-  const incoming = cleanIncomingString(incomingValue);
+  const current = compactPersonName(currentValue);
+  const incoming = compactPersonName(incomingValue);
 
   if (options.source === "manychat" && incoming) {
     if (!current) return incoming;
     if (isProvisionalManyChatName(current, options.externalIdentity)) return incoming;
-    if (isLikelyDuplicatedName(current) && !isLikelyDuplicatedName(incoming)) return incoming;
+    if (isLikelyDuplicatedName(current) && !isLikelyDuplicatedName(incoming)) {
+      return chooseMostCompleteCompatibleName(current, incoming) || incoming;
+    }
+    return chooseMostCompleteCompatibleName(current, incoming) || current;
   }
 
   return chooseValue(current, incoming, preferIncoming);
