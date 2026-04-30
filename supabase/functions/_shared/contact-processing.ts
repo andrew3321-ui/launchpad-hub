@@ -681,9 +681,13 @@ export async function processIncomingContactEvent(
         message: `O contato recebido de ${body.source} foi salvo como um novo cadastro canonico.`,
         details: {
           externalContactId: externalIdentity,
-          provisionalIdentityOnly: Boolean(canCreateIdentityOnlyContact && !normalizedEmail && !canonicalPhone),
-          manychatCompletionRequired: isManyChatIncomplete,
-          manychatCompletionExpiresAt: isManyChatIncomplete ? manyChatCompletionExpiresAt : null,
+          ...(isManyChatSource
+            ? {
+                provisionalIdentityOnly: Boolean(canCreateIdentityOnlyContact && !normalizedEmail && !canonicalPhone),
+                manychatCompletionRequired: isManyChatIncomplete,
+                manychatCompletionExpiresAt: isManyChatIncomplete ? manyChatCompletionExpiresAt : null,
+              }
+            : {}),
         },
       });
     }
