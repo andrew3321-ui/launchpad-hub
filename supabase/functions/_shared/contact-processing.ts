@@ -170,13 +170,25 @@ function isLikelyValidPhone(candidate: string) {
   return [10, 11, 12, 13].includes(digits.length);
 }
 
+function cleanIncomingString(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  if (/^\{\{[^}]+\}\}$/.test(trimmed)) return null;
+  if (/\{\{[^}]+\}\}/.test(trimmed)) return null;
+  if (/^[-\u2013\u2014]+$/.test(trimmed)) return null;
+  if (/^(null|undefined|n\/a|na|none)$/i.test(trimmed)) return null;
+
+  return trimmed;
+}
+
 function normalizeEmail(email?: string | null) {
-  const value = email?.trim().toLowerCase();
+  const value = cleanIncomingString(email)?.toLowerCase();
   return value || null;
 }
 
 function normalizeName(name?: string | null) {
-  const value = name?.trim();
+  const value = cleanIncomingString(name);
   return value || null;
 }
 
@@ -197,10 +209,10 @@ function scoreRecord(record: {
 }) {
   const data = typeof record.data === "object" && record.data !== null ? (record.data as JsonRecord) : {};
   return [
-    record.primary_name,
-    record.primary_email,
-    record.primary_phone,
-    record.normalized_phone,
+    cleanIncomingString(record.primary_name),
+    cleanIncomingString(record.primary_email),
+    cleanIncomingString(record.primary_phone),
+    cleanIncomingString(record.normalized_phone),
     ...Object.values(data),
   ].filter((value) => {
     if (typeof value === "string") return value.trim().length > 0;
@@ -213,8 +225,10 @@ function chooseValue(
   incomingValue: string | null | undefined,
   preferIncoming: boolean,
 ) {
-  if (preferIncoming) return incomingValue || currentValue || null;
-  return currentValue || incomingValue || null;
+  const current = cleanIncomingString(currentValue);
+  const incoming = cleanIncomingString(incomingValue);
+  if (preferIncoming) return incoming || current || null;
+  return current || incoming || null;
 }
 
 function asRecord(value: unknown) {
@@ -291,11 +305,11 @@ export async function processIncomingContactEvent(
 
   const normalizedEmail = normalizeEmail(body.contact?.email);
   const normalizedName = normalizeName(body.contact?.name);
-  const rawPhone = body.contact?.phone?.trim() || null;
+  const rawPhone = cleanIncomingString(body.contact?.phone);
   const phoneCandidates = rawPhone ? generatePhoneCandidates(rawPhone, settings) : [];
   const validPhoneCandidates = phoneCandidates.filter(isLikelyValidPhone);
   const canonicalPhone = rawPhone ? pickCanonicalPhone(validPhoneCandidates, countryCode) : null;
-  const externalIdentity = body.externalContactId?.trim() || null;
+  const externalIdentity = cleanIncomingString(body.externalContactId);
   const canCreateIdentityOnlyContact = body.source === "manychat" && Boolean(externalIdentity);
 
   let eventId: string | null = null;
@@ -434,6 +448,7 @@ export async function processIncomingContactEvent(
   }
 
   let existingContact: Record<string, unknown> | null = null;
+  let duplicateContactsToMerge: Array<Record<string, unknown>> = [];
 
   if (candidateIds.size > 0) {
     const { data: matchedContacts } = await supabase.from("lead_contacts").select("*").in("id", [...candidateIds]);
@@ -448,6 +463,7 @@ export async function processIncomingContactEvent(
           string,
           unknown
         >);
+      duplicateContactsToMerge = matchedContacts.filter((row: { id: string }) => row.id !== existingContact?.id);
     }
   }
 
@@ -467,6 +483,7 @@ export async function processIncomingContactEvent(
     const isKnownIdentityUpdate = Boolean(
       knownIdentityContactId && existingContact.id === knownIdentityContactId,
     );
+    const duplicateMergeCount = duplicateContactsToMerge.length;
     const preferIncoming =
       settings.prefer_most_complete_record &&
       incomingScore >
@@ -518,8 +535,8 @@ export async function processIncomingContactEvent(
         ),
         last_source: body.source,
         merged_from_count: isKnownIdentityUpdate
-          ? Number(existingContact.merged_from_count || 0)
-          : Number(existingContact.merged_from_count || 0) + 1,
+          ? Number(existingContact.merged_from_count || 0) + duplicateMergeCount
+          : Number(existingContact.merged_from_count || 0) + Math.max(1, duplicateMergeCount),
         data: mergedData,
       })
       .eq("id", existingContact.id as string)
@@ -532,6 +549,27 @@ export async function processIncomingContactEvent(
 
     processedContactId = updatedContact.id;
     action = isKnownIdentityUpdate ? "updated" : "merged";
+
+    if (duplicateContactsToMerge.length > 0) {
+      const duplicateIds = duplicateContactsToMerge
+        .map((row) => String(row.id || ""))
+        .filter(Boolean);
+
+      await supabase
+        .from("lead_contacts")
+        .update({ status: "merged" })
+        .in("id", duplicateIds);
+
+      await supabase
+        .from("lead_contact_identities")
+        .update({ contact_id: processedContactId })
+        .in("contact_id", duplicateIds);
+
+      await supabase
+        .from("inbound_contact_events")
+        .update({ processed_contact_id: processedContactId })
+        .in("processed_contact_id", duplicateIds);
+    }
 
     if (shouldPersistInboundEvent) {
       logs.push({
@@ -552,6 +590,7 @@ export async function processIncomingContactEvent(
             knownIdentityMatched: isKnownIdentityUpdate,
           },
           externalContactId: externalIdentity,
+          mergedContactIds: duplicateContactsToMerge.map((row) => row.id).filter(Boolean),
         },
       });
     }
