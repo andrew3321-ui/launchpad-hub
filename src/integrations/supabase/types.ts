@@ -841,6 +841,7 @@ export type Database = {
         Args: { target_launch_id: string }
         Returns: Json
       }
+      cleanup_stale_manychat_incomplete_contacts: { Args: never; Returns: Json }
       configure_activecampaign_sync_scheduler: {
         Args: { anon_key: string; cron_secret: string; project_url: string }
         Returns: Json
