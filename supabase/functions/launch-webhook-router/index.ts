@@ -5,7 +5,7 @@ import {
   processIncomingContactEvent,
   type IncomingEventBody,
 } from "../_shared/contact-processing.ts";
-import { appendGoogleSheetsRow, parseGoogleSheetsConfig } from "../_shared/google-sheets.ts";
+import { appendGoogleSheetsRow, parseGoogleSheetsConfig, readGoogleSheetsValues } from "../_shared/google-sheets.ts";
 
 type JsonRecord = Record<string, unknown>;
 type AnySupabaseClient = any;
@@ -517,7 +517,7 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
   };
 }
 
-function buildGoogleSheetsCaptureFingerprint(contact: LeadContactRow, payload: JsonRecord) {
+function getActiveCampaignSheetsIdentity(contact: LeadContactRow, payload: JsonRecord) {
   const activeContactId =
     getActiveCampaignBodyValue(payload, "contact[id]") ||
     getActiveCampaignBodyValue(payload, "contactid") ||
@@ -529,13 +529,128 @@ function buildGoogleSheetsCaptureFingerprint(contact: LeadContactRow, payload: J
     pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
     contact.normalized_phone ||
     contact.primary_phone;
+
+  return {
+    activeContactId: nonEmptyString(activeContactId),
+    email: nonEmptyString(email)?.toLowerCase() || null,
+    phone: nonEmptyString(phone),
+    normalizedPhone: digitsOnly(phone),
+  };
+}
+
+function buildGoogleSheetsCaptureFingerprint(contact: LeadContactRow, payload: JsonRecord) {
+  const identity = getActiveCampaignSheetsIdentity(contact, payload);
   const fingerprint =
-    activeContactId ||
-    (email ? `email:${email.toLowerCase()}` : null) ||
-    (phone ? `phone:${digitsOnly(phone) || phone}` : null) ||
+    (identity.normalizedPhone ? `phone:${identity.normalizedPhone}` : null) ||
+    (identity.email ? `email:${identity.email}` : null) ||
+    (identity.activeContactId ? `active:${identity.activeContactId}` : null) ||
     contact.id;
 
   return normalizeDedupeKeyPart(fingerprint);
+}
+
+function buildGoogleSheetsPhoneIdentityKeys(values: Array<string | null | undefined>) {
+  return new Set(
+    buildPhoneSearchCandidates(values)
+      .map((value) => digitsOnly(value))
+      .filter((value): value is string => Boolean(value)),
+  );
+}
+
+async function findExistingGoogleSheetsCaptureRecord(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  spreadsheetId: string,
+  sheetName: string,
+) {
+  const identity = getActiveCampaignSheetsIdentity(contact, payload);
+  const fingerprint = buildGoogleSheetsCaptureFingerprint(contact, payload);
+  const baseQuery = () =>
+    supabase
+      .from("launch_google_sheet_capture_records")
+      .select("id")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number || 1)
+      .eq("spreadsheet_id", spreadsheetId)
+      .eq("sheet_name", sheetName)
+      .limit(1);
+
+  const checks: Array<{ column: string; value: string; reason: string; ilike?: boolean }> = [
+    { column: "row_fingerprint", value: fingerprint, reason: "row_fingerprint" },
+  ];
+
+  if (identity.normalizedPhone) {
+    checks.push({ column: "normalized_phone", value: identity.normalizedPhone, reason: "normalized_phone" });
+  }
+
+  if (identity.email) {
+    checks.push({ column: "primary_email", value: identity.email, reason: "email", ilike: true });
+  }
+
+  if (identity.activeContactId) {
+    checks.push({ column: "active_contact_id", value: identity.activeContactId, reason: "active_contact_id" });
+  }
+
+  for (const check of checks) {
+    const query = check.ilike
+      ? baseQuery().ilike(check.column, check.value)
+      : baseQuery().eq(check.column, check.value);
+    const { data, error } = await query.maybeSingle();
+    if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe", 500, error.message);
+    if (data?.id) {
+      return {
+        exists: true,
+        reason: check.reason,
+        fingerprint,
+        identity,
+      };
+    }
+  }
+
+  return {
+    exists: false,
+    reason: null,
+    fingerprint,
+    identity,
+  };
+}
+
+async function findExistingGoogleSheetsRow(
+  config: ReturnType<typeof parseGoogleSheetsConfig>,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+) {
+  if (!config) return { exists: false, reason: "google_sheets_not_configured" };
+
+  const identity = getActiveCampaignSheetsIdentity(contact, payload);
+  const phoneKeys = buildGoogleSheetsPhoneIdentityKeys([identity.phone, identity.normalizedPhone]);
+
+  if (!identity.email && phoneKeys.size === 0) {
+    return { exists: false, reason: "missing_identity" };
+  }
+
+  const result = await readGoogleSheetsValues(config, "C2:D");
+  if (result.skipped) {
+    return { exists: false, reason: result.reason };
+  }
+
+  for (const row of result.values) {
+    const rowEmail = nonEmptyString(row[0])?.toLowerCase() || null;
+    if (identity.email && rowEmail === identity.email) {
+      return { exists: true, reason: "sheet_email", identity };
+    }
+
+    const rowPhoneKeys = buildGoogleSheetsPhoneIdentityKeys([nonEmptyString(row[1])]);
+    for (const phoneKey of phoneKeys) {
+      if (rowPhoneKeys.has(phoneKey)) {
+        return { exists: true, reason: "sheet_phone", identity };
+      }
+    }
+  }
+
+  return { exists: false, reason: null, identity };
 }
 
 async function recordGoogleSheetsCapture(
@@ -547,17 +662,7 @@ async function recordGoogleSheetsCapture(
   sheetName: string,
   source: string,
 ) {
-  const activeContactId =
-    getActiveCampaignBodyValue(payload, "contact[id]") ||
-    getActiveCampaignBodyValue(payload, "contactid") ||
-    findStringDeep(payload, ["contact_id", "contactid", "id"]);
-  const email =
-    getActiveCampaignBodyValue(payload, "contact[email]") ||
-    contact.primary_email;
-  const phone =
-    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
-    contact.normalized_phone ||
-    contact.primary_phone;
+  const identity = getActiveCampaignSheetsIdentity(contact, payload);
 
   await supabase
     .from("launch_google_sheet_capture_records")
@@ -565,9 +670,9 @@ async function recordGoogleSheetsCapture(
       {
         launch_id: launch.id,
         cycle_number: launch.current_cycle_number || 1,
-        active_contact_id: activeContactId,
-        primary_email: email,
-        normalized_phone: digitsOnly(phone) || phone,
+        active_contact_id: identity.activeContactId,
+        primary_email: identity.email,
+        normalized_phone: identity.normalizedPhone || identity.phone,
         spreadsheet_id: spreadsheetId,
         sheet_name: sheetName,
         row_fingerprint: buildGoogleSheetsCaptureFingerprint(contact, payload),
@@ -1672,6 +1777,50 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   }
 
   const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
+  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
+    supabase,
+    launch,
+    contact,
+    payload,
+    config.spreadsheetId,
+    config.sheetName,
+  );
+
+  if (existingRecord.exists) {
+    return {
+      skipped: true,
+      deduped: true,
+      reason: "duplicate_capture_record",
+      duplicateReason: existingRecord.reason,
+      spreadsheetId: config.spreadsheetId,
+      sheetName: config.sheetName,
+      fingerprint: existingRecord.fingerprint,
+      identity: existingRecord.identity,
+    } as const;
+  }
+
+  const existingSheetRow = await findExistingGoogleSheetsRow(config, contact, payload);
+  if (existingSheetRow.exists) {
+    await recordGoogleSheetsCapture(
+      supabase,
+      launch,
+      contact,
+      payload,
+      config.spreadsheetId,
+      config.sheetName,
+      "activecampaign_webhook_existing_sheet",
+    );
+
+    return {
+      skipped: true,
+      deduped: true,
+      reason: "duplicate_sheet_row",
+      duplicateReason: existingSheetRow.reason,
+      spreadsheetId: config.spreadsheetId,
+      sheetName: config.sheetName,
+      identity: existingSheetRow.identity,
+    } as const;
+  }
 
   const result = await appendGoogleSheetsRow(config, header, row);
 
@@ -1694,13 +1843,23 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     eventId,
     "activecampaign",
     result.skipped ? "info" : "success",
-    result.skipped ? "GOOGLE_SHEETS_SKIPPED" : "GOOGLE_SHEETS_APPENDED",
-    result.skipped ? "Google Sheets nao configurado" : "Contato enviado ao Google Sheets",
+    result.skipped && "deduped" in result && result.deduped
+      ? "GOOGLE_SHEETS_APPEND_DEDUPED"
+      : result.skipped
+        ? "GOOGLE_SHEETS_SKIPPED"
+        : "GOOGLE_SHEETS_APPENDED",
+    result.skipped && "deduped" in result && result.deduped
+      ? "Registro duplicado na planilha bloqueado"
+      : result.skipped
+        ? "Google Sheets nao configurado"
+        : "Contato enviado ao Google Sheets",
+    result.skipped && "deduped" in result && result.deduped
+      ? "O webhook do ActiveCampaign tentou enviar um contato que ja estava registrado na planilha deste ciclo."
+      : result.skipped
+        ? "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets nao estava configurada para este expert."
+        : "O webhook do ActiveCampaign foi registrado automaticamente na planilha configurada do expert.",
     result.skipped
-      ? "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets nao estava configurada para este expert."
-      : "O webhook do ActiveCampaign foi registrado automaticamente na planilha configurada do expert.",
-    result.skipped
-      ? { reason: result.reason }
+      ? { reason: result.reason, ...("deduped" in result && result.deduped ? result : {}) }
       : {
           spreadsheetId: result.spreadsheetId,
           sheetName: result.sheetName,
@@ -2086,18 +2245,11 @@ function buildActiveCampaignSheetsActionKey(
   contact: LeadContactRow,
   payload: JsonRecord,
 ) {
-  const activeContactId =
-    getActiveCampaignBodyValue(payload, "contact[id]") ||
-    getActiveCampaignBodyValue(payload, "contactid") ||
-    findStringDeep(payload, ["contact_id", "contactid", "id"]);
-  const phoneKey =
-    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
-    contact.normalized_phone ||
-    contact.primary_phone;
+  const identity = getActiveCampaignSheetsIdentity(contact, payload);
   const recipientKey =
-    activeContactId ||
-    contact.primary_email ||
-    phoneKey ||
+    (identity.normalizedPhone ? `phone:${identity.normalizedPhone}` : null) ||
+    (identity.email ? `email:${identity.email}` : null) ||
+    (identity.activeContactId ? `active:${identity.activeContactId}` : null) ||
     contact.id;
 
   return [
@@ -4194,7 +4346,7 @@ async function appendActiveCampaignWebhookToGoogleSheetsJob(
     await updateRoutingAction(
       supabase,
       actionId,
-      result.skipped ? "skipped" : "success",
+      result.skipped && !("deduped" in result && result.deduped) ? "skipped" : "success",
       result as unknown as JsonRecord,
       result.skipped ? result.reason : null,
     );
