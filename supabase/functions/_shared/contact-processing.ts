@@ -818,7 +818,7 @@ export async function processIncomingContactEvent(
         details: {
           mergeReason: {
             emailMatched: Boolean(normalizedEmail && settings.merge_on_exact_email),
-            phoneMatched: phoneMatchedExistingContact || Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
+            phoneMatched: contactWasMatchedByPhone || Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
             knownIdentityMatched: isKnownIdentityUpdate,
           },
           externalContactId: externalIdentity,
