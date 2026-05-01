@@ -672,17 +672,19 @@ export async function processIncomingContactEvent(
 
     const existingData = asRecord(existingContact.data);
     const existingPlatforms = asRecord(existingData.platforms);
-    const phoneMatchedExistingContact = hasPhoneCandidateOverlap(
-      [
-        existingContact.primary_phone as string | null | undefined,
-        existingContact.normalized_phone as string | null | undefined,
-      ],
-      validPhoneCandidates,
-      settings,
-    );
+    const contactWasMatchedByPhone =
+      phoneCandidateIds.has(existingContact.id as string) ||
+      hasPhoneCandidateOverlap(
+        [
+          existingContact.primary_phone as string | null | undefined,
+          existingContact.normalized_phone as string | null | undefined,
+        ],
+        validPhoneCandidates,
+        settings,
+      );
     const existingPrimaryEmail = normalizeEmail(existingContact.primary_email as string | null | undefined);
     const shouldPreserveExistingEmail =
-      phoneMatchedExistingContact &&
+      contactWasMatchedByPhone &&
       Boolean(existingPrimaryEmail && normalizedEmail) &&
       existingPrimaryEmail !== normalizedEmail;
     const nextPrimaryEmail = chooseValue(
