@@ -648,6 +648,30 @@ async function matchActiveCampaignCaptureTag(launch: LaunchRow, payload: JsonRec
   } as const;
 }
 
+function extractExplicitUchatSubflowNs(payload: JsonRecord) {
+  return findStringDeep(payload, [
+    "uchat_subflow_ns",
+    "uchat_welcome_subflow_ns",
+    "subflow_ns",
+    "subflow",
+    "welcome_subflow_ns",
+  ]);
+}
+
+function extractExplicitUchatTagName(source: WebhookSource, payload: JsonRecord) {
+  const explicitUchatTag = findStringDeep(payload, [
+    "uchat_tag",
+    "uchat_tag_name",
+    "uchat_label",
+    "uchat_label_name",
+  ]);
+  if (explicitUchatTag) return explicitUchatTag;
+
+  // ActiveCampaign global tag webhooks also use tag/tag_name for the AC tag.
+  // Only non-Active sources may treat generic tag_name as an UChat action.
+  return source === "activecampaign" ? null : findStringDeep(payload, ["tag_name"]);
+}
+
 function activeCampaignFieldDefinitionKeys(item: JsonRecord) {
   const keys = [
     item.title,
@@ -2137,16 +2161,20 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   }
 
   const captureMatch = await matchActiveCampaignCaptureTag(launch, payload);
+  const captureTag = {
+    configuredIds: captureMatch.configuredIds,
+    configuredName: captureMatch.configuredName,
+    receivedIds: captureMatch.context.ids,
+    receivedNames: captureMatch.context.names,
+    matchedBy: captureMatch.matches ? captureMatch.matchedBy : null,
+  };
+
   if (!captureMatch.matches) {
     return {
       skipped: true,
       reason: captureMatch.reason,
-      captureTag: {
-        configuredIds: captureMatch.configuredIds,
-        configuredName: captureMatch.configuredName,
-        receivedIds: captureMatch.context.ids,
-        receivedNames: captureMatch.context.names,
-      },
+      webhookKind: "activecampaign_global_contact_tag_added",
+      captureTag,
     } as const;
   }
 
@@ -2170,6 +2198,8 @@ async function appendActiveCampaignWebhookToGoogleSheets(
       sheetName: config.sheetName,
       fingerprint: existingRecord.fingerprint,
       identity: existingRecord.identity,
+      webhookKind: "activecampaign_global_contact_tag_added",
+      captureTag,
     } as const;
   }
 
@@ -2193,6 +2223,8 @@ async function appendActiveCampaignWebhookToGoogleSheets(
       spreadsheetId: config.spreadsheetId,
       sheetName: config.sheetName,
       identity: existingSheetRow.identity,
+      webhookKind: "activecampaign_global_contact_tag_added",
+      captureTag,
     } as const;
   }
 
@@ -2244,16 +2276,27 @@ async function appendActiveCampaignWebhookToGoogleSheets(
         ? skippedMessage || "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets foi ignorada."
         : "O webhook do ActiveCampaign foi registrado automaticamente na planilha configurada do expert.",
     result.skipped
-      ? { reason: result.reason, ...("deduped" in result && result.deduped ? result : {}) }
+      ? {
+          reason: result.reason,
+          ...("webhookKind" in result ? { webhookKind: result.webhookKind } : {}),
+          ...("captureTag" in result ? { captureTag: result.captureTag } : {}),
+          ...("deduped" in result && result.deduped ? result : {}),
+        }
       : {
           spreadsheetId: result.spreadsheetId,
           sheetName: result.sheetName,
           columns: header,
+          ...("webhookKind" in result ? { webhookKind: result.webhookKind } : {}),
+          ...("captureTag" in result ? { captureTag: result.captureTag } : {}),
           ...metadata,
         },
   );
 
-  return result;
+  return {
+    ...result,
+    webhookKind: "activecampaign_global_contact_tag_added",
+    captureTag,
+  };
 }
 
 async function fetchLaunch(
@@ -3836,7 +3879,8 @@ async function routeToUchat(
   const tagName =
     options.allowTag === false
       ? null
-      : findStringDeep(payload, ["tag_name", "uchat_tag"]) ||
+      : findStringDeep(payload, ["uchat_tag", "uchat_tag_name", "uchat_label", "uchat_label_name"]) ||
+        findStringDeep(payload, ["tag_name"]) ||
         nonEmptyString(workspace.default_tag_name);
 
   const responses: JsonRecord[] = [];
@@ -4529,9 +4573,47 @@ async function dispatchRoutes(
     }
   }
 
-  if (["activecampaign", "sendflow"].includes(normalizedEvent.source)) {
+  const explicitUchatSubflowNs = extractExplicitUchatSubflowNs(normalizedEvent.payload);
+  const requestedTagName = extractExplicitUchatTagName(normalizedEvent.source, normalizedEvent.payload);
+  const shouldRouteToUchat =
+    normalizedEvent.source === "sendflow" || Boolean(explicitUchatSubflowNs || requestedTagName);
+
+  if (normalizedEvent.source === "activecampaign" && !shouldRouteToUchat) {
+    const captureMatch = await matchActiveCampaignCaptureTag(launch, normalizedEvent.payload);
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      normalizedEvent.source,
+      "info",
+      "ACTIVE_GLOBAL_TAG_WEBHOOK_NO_UCHAT_ROUTE",
+      "Webhook global do ActiveCampaign tratado sem UChat",
+      "O evento veio do webhook global de tag do ActiveCampaign e nao trouxe subflow_ns nem acao explicita de UChat. O Launch Hub nao tentou reenviar ao UChat; a etapa de planilha continua separada.",
+      {
+        webhookKind: "activecampaign_global_contact_tag_added",
+        captureTag: {
+          matchesCaptureTag: captureMatch.matches,
+          reason: captureMatch.matches ? null : captureMatch.reason,
+          configuredIds: captureMatch.configuredIds,
+          configuredName: captureMatch.configuredName,
+          receivedIds: captureMatch.context.ids,
+          receivedNames: captureMatch.context.names,
+          matchedBy: captureMatch.matches ? captureMatch.matchedBy : null,
+        },
+      },
+    );
+
+    return {
+      skipped: true,
+      reason: "activecampaign_global_tag_webhook_has_no_uchat_action",
+      webhookKind: "activecampaign_global_contact_tag_added",
+      googleSheets: "handled_by_google_sheets_step",
+    };
+  }
+
+  if (["activecampaign", "sendflow"].includes(normalizedEvent.source) && shouldRouteToUchat) {
     try {
-      const requestedTagName = findStringDeep(normalizedEvent.payload, ["tag_name", "uchat_tag"]);
       const routed = await routeToUchat(
         supabase,
         launch,
@@ -4596,8 +4678,7 @@ async function dispatchRoutes(
         {
           error: message,
           ...buildRoutingFailureContext(contact, normalizedEvent.payload, normalizedEvent),
-          configuredSubflowNs:
-            findStringDeep(normalizedEvent.payload, ["subflow_ns", "subflow", "welcome_subflow_ns"]) || null,
+          configuredSubflowNs: explicitUchatSubflowNs || null,
           workspaceHint:
             findStringDeep(normalizedEvent.payload, ["workspace_id", "workspaceId", "uchat_workspace_id", "bot_id"]) ||
             null,
