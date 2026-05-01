@@ -75,6 +75,19 @@ interface ActiveCampaignFieldValueInput {
   value: string;
 }
 
+interface ActiveCampaignContactSnapshot {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  firstName: string | null;
+  lastName: string | null;
+}
+
+interface ActiveCampaignFieldDefinition {
+  id: string;
+  keys: string[];
+}
+
 interface UchatSubscriberLookup {
   workspace: UChatWorkspaceRow;
   userNs: string;
@@ -150,6 +163,22 @@ const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v2";
 const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
 const ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX = "active-sheets:v1";
 const ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX = "active-job:v1";
+const ACTIVE_CAMPAIGN_SHEET_FIELD_ALIASES: Record<string, string[]> = {
+  data_evento: ["data_evento", "data do evento", "data evento"],
+  tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
+  produto: ["produto", "product"],
+  utm_source: ["utm_source", "utm source"],
+  utm_campaign: ["utm_campaign", "utm campaign"],
+  utm_medium: ["utm_medium", "utm medium"],
+  utm_content: ["utm_content", "utm content"],
+  utm_term: ["utm_term", "utm term"],
+  utm_site: ["utm_site", "utm site"],
+  data_de_cadastro: ["data_de_cadastro", "data de cadastro", "data do cadastro"],
+  dashboard_value: ["dashboard_value", "vlr dash", "valor dash", "dash"],
+  hotlead: ["hotlead", "hot lead"],
+  vk_source: ["vk_source", "vk source"],
+  vk_ad_id: ["vk_ad_id", "vk ad id"],
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -515,6 +544,300 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
       cycle: launch.current_cycle_number,
     },
   };
+}
+
+function extractActiveCampaignWebhookTagContext(payload: JsonRecord) {
+  const rawTag = getActiveCampaignBodyValue(payload, "tag");
+  const tagIds = uniqueStrings([
+    getActiveCampaignBodyValue(payload, "tag[id]"),
+    getActiveCampaignBodyValue(payload, "tagid"),
+    getActiveCampaignBodyValue(payload, "tag_id"),
+    getActiveCampaignBodyValue(payload, "contactTag[tag]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[tag]"),
+    rawTag && /^\d+$/.test(rawTag) ? rawTag : null,
+    ...collectStringListDeep(payload, [
+      "tag_id",
+      "tagid",
+      "tag_ids",
+      "activecampaign_tag_ids",
+      "active_campaign_tag_ids",
+      "ac_tag_ids",
+    ]).filter((value) => /^\d+$/.test(value)),
+  ]);
+  const tagNames = uniqueStrings([
+    getActiveCampaignBodyValue(payload, "tag[name]"),
+    getActiveCampaignBodyValue(payload, "tag[tag]"),
+    getActiveCampaignBodyValue(payload, "tag_name"),
+    getActiveCampaignBodyValue(payload, "tagName"),
+    rawTag && !/^\d+$/.test(rawTag) ? rawTag : null,
+    ...extractTagNames(payload).filter((value) => !/^\d+$/.test(value)),
+  ]);
+
+  return {
+    ids: tagIds,
+    names: tagNames,
+  };
+}
+
+async function resolveConfiguredCaptureTagIds(launch: LaunchRow) {
+  const explicitId = nonEmptyString(launch.gs_capture_tag_id);
+  if (explicitId) return [explicitId];
+
+  const tagName = nonEmptyString(launch.gs_capture_tag_name);
+  if (!tagName || !launch.ac_api_url || !launch.ac_api_key) return [] as string[];
+
+  try {
+    const tags = await loadAllActiveCampaignTags(launch.ac_api_url, launch.ac_api_key);
+    return tags
+      .filter((item) => normalizeKey(item.tag) === normalizeKey(tagName))
+      .map((item) => item.id);
+  } catch {
+    return [] as string[];
+  }
+}
+
+async function matchActiveCampaignCaptureTag(launch: LaunchRow, payload: JsonRecord) {
+  const context = extractActiveCampaignWebhookTagContext(payload);
+  const configuredIds = await resolveConfiguredCaptureTagIds(launch);
+  const configuredName = nonEmptyString(launch.gs_capture_tag_name);
+
+  if (configuredIds.length === 0 && !configuredName) {
+    return {
+      matches: false,
+      reason: "capture_tag_not_configured",
+      context,
+      configuredIds,
+      configuredName,
+    } as const;
+  }
+
+  if (
+    configuredIds.some((configuredId) =>
+      context.ids.some((receivedId) => normalizeKey(receivedId) === normalizeKey(configuredId))
+    )
+  ) {
+    return {
+      matches: true,
+      matchedBy: "tag_id",
+      context,
+      configuredIds,
+      configuredName,
+    } as const;
+  }
+
+  if (
+    configuredName &&
+    context.names.some((receivedName) => normalizeKey(receivedName) === normalizeKey(configuredName))
+  ) {
+    return {
+      matches: true,
+      matchedBy: "tag_name",
+      context,
+      configuredIds,
+      configuredName,
+    } as const;
+  }
+
+  const hasAnyTagContext = context.ids.length > 0 || context.names.length > 0;
+  return {
+    matches: false,
+    reason: hasAnyTagContext ? "capture_tag_mismatch" : "missing_tag_context",
+    context,
+    configuredIds,
+    configuredName,
+  } as const;
+}
+
+function activeCampaignFieldDefinitionKeys(item: JsonRecord) {
+  const keys = [
+    item.title,
+    item.perstag,
+    item.personalization,
+    item.header,
+    item.descript,
+  ]
+    .map(nonEmptyString)
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => [value, value.replace(/%/g, "")])
+    .map(normalizeKey)
+    .filter(Boolean);
+
+  return [...new Set(keys)];
+}
+
+async function loadActiveCampaignSheetFieldDefinitions(launch: LaunchRow) {
+  if (!launch.ac_api_url || !launch.ac_api_key) return [] as ActiveCampaignFieldDefinition[];
+
+  const fields: ActiveCampaignFieldDefinition[] = [];
+  let offset = 0;
+
+  while (true) {
+    const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/fields", "GET", undefined, {
+      limit: 100,
+      offset,
+    });
+    const batch = Array.isArray((payload as JsonRecord).fields)
+      ? ((payload as JsonRecord).fields as JsonRecord[])
+      : [];
+
+    for (const item of batch) {
+      const id = nonEmptyString(item.id);
+      if (!id) continue;
+      fields.push({ id, keys: activeCampaignFieldDefinitionKeys(item) });
+    }
+
+    offset += batch.length;
+    if (batch.length < 100) break;
+  }
+
+  return fields;
+}
+
+function resolveActiveCampaignSheetFieldKey(fieldDefinitions: ActiveCampaignFieldDefinition[], fieldId: string) {
+  const definition = fieldDefinitions.find((field) => field.id === fieldId);
+  if (!definition) return null;
+
+  for (const [targetKey, aliases] of Object.entries(ACTIVE_CAMPAIGN_SHEET_FIELD_ALIASES)) {
+    const normalizedAliases = aliases.map(normalizeKey);
+    if (definition.keys.some((key) => normalizedAliases.includes(key))) {
+      return targetKey;
+    }
+  }
+
+  return null;
+}
+
+async function fetchActiveCampaignSheetFieldPayload(
+  launch: LaunchRow,
+  fieldDefinitions: ActiveCampaignFieldDefinition[],
+  activeContactId: string,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key) return {} as JsonRecord;
+
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    `/api/3/contacts/${encodeURIComponent(activeContactId)}/fieldValues`,
+    "GET",
+  );
+  const fieldValues = Array.isArray((payload as JsonRecord).fieldValues)
+    ? ((payload as JsonRecord).fieldValues as JsonRecord[])
+    : [];
+  const mappedFields: JsonRecord = {};
+
+  for (const fieldValue of fieldValues) {
+    const fieldId = nonEmptyString(fieldValue.field);
+    const value = nonEmptyString(fieldValue.value);
+    if (!fieldId || !value) continue;
+
+    const fieldKey = resolveActiveCampaignSheetFieldKey(fieldDefinitions, fieldId);
+    if (fieldKey && !mappedFields[fieldKey]) {
+      mappedFields[fieldKey] = value;
+    }
+  }
+
+  if (!nonEmptyString(mappedFields.produto) && nonEmptyString(launch.gs_default_product_name)) {
+    mappedFields.produto = launch.gs_default_product_name;
+  }
+
+  if (!nonEmptyString(mappedFields.dashboard_value)) {
+    mappedFields.dashboard_value = "1";
+  }
+
+  return mappedFields;
+}
+
+async function fetchActiveCampaignContactSnapshot(launch: LaunchRow, activeContactId: string) {
+  if (!launch.ac_api_url || !launch.ac_api_key) return null;
+
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    `/api/3/contacts/${encodeURIComponent(activeContactId)}`,
+    "GET",
+  );
+  const contact = isRecord((payload as JsonRecord).contact) ? ((payload as JsonRecord).contact as JsonRecord) : {};
+  const id = nonEmptyString(contact.id) || activeContactId;
+
+  return {
+    id,
+    email: nonEmptyString(contact.email),
+    phone: nonEmptyString(contact.phone),
+    firstName: nonEmptyString(contact.firstName) || nonEmptyString(contact.first_name),
+    lastName: nonEmptyString(contact.lastName) || nonEmptyString(contact.last_name),
+  } satisfies ActiveCampaignContactSnapshot;
+}
+
+function buildActiveCampaignEnrichedPayload(
+  payload: JsonRecord,
+  contact: ActiveCampaignContactSnapshot,
+  fieldPayload: JsonRecord,
+) {
+  const existingContact = isRecord(payload.contact) ? payload.contact : {};
+
+  return {
+    ...payload,
+    ...fieldPayload,
+    "contact[id]": contact.id,
+    "contact[email]": contact.email,
+    "contact[phone]": contact.phone,
+    "contact[first_name]": contact.firstName,
+    "contact[last_name]": contact.lastName,
+    contact: {
+      ...existingContact,
+      id: contact.id,
+      email: contact.email,
+      phone: contact.phone,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      first_name: contact.firstName,
+      last_name: contact.lastName,
+    },
+    launchhub_activecampaign_enriched: true,
+  } satisfies JsonRecord;
+}
+
+async function enrichActiveCampaignWebhookForCapture(
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+) {
+  if (normalizedEvent.source !== "activecampaign") return normalizedEvent;
+
+  const captureMatch = await matchActiveCampaignCaptureTag(launch, normalizedEvent.payload);
+  const activeContactId = extractActiveCampaignContactId(normalizedEvent.payload) || normalizedEvent.externalContactId;
+  const hasEnoughContactData = Boolean(
+    normalizedEvent.contact.email ||
+      normalizedEvent.contact.phone ||
+      getActiveCampaignBodyValue(normalizedEvent.payload, "contact[email]") ||
+      getActiveCampaignBodyValue(normalizedEvent.payload, "contact[phone]"),
+  );
+
+  if (!activeContactId || (!captureMatch.matches && hasEnoughContactData)) {
+    return normalizedEvent;
+  }
+
+  const activeContact = await fetchActiveCampaignContactSnapshot(launch, activeContactId);
+  if (!activeContact) return normalizedEvent;
+
+  const fieldDefinitions = captureMatch.matches
+    ? await loadActiveCampaignSheetFieldDefinitions(launch)
+    : [];
+  const fieldPayload = captureMatch.matches
+    ? await fetchActiveCampaignSheetFieldPayload(launch, fieldDefinitions, activeContact.id)
+    : {};
+  const payload = buildActiveCampaignEnrichedPayload(normalizedEvent.payload, activeContact, fieldPayload);
+  const name = buildPersonNameFromParts(activeContact.firstName, activeContact.lastName) || normalizedEvent.contact.name;
+
+  return {
+    ...normalizedEvent,
+    externalContactId: activeContact.id,
+    contact: {
+      name,
+      email: activeContact.email || normalizedEvent.contact.email,
+      phone: activeContact.phone || normalizedEvent.contact.phone,
+    },
+    payload,
+  } satisfies NormalizedWebhookEvent;
 }
 
 function getActiveCampaignSheetsIdentity(contact: LeadContactRow, payload: JsonRecord) {
@@ -1002,9 +1325,18 @@ function buildQueryPayload(url: URL) {
 }
 
 function extractActiveCampaignContactId(payload: JsonRecord) {
+  const body = isRecord(payload.body) ? payload.body : payload;
+  const contact = isRecord(body.contact)
+    ? body.contact
+    : isRecord(payload.contact)
+      ? payload.contact
+      : null;
+
   return (
     getActiveCampaignBodyValue(payload, "contact[id]") ||
     getActiveCampaignBodyValue(payload, "contactid") ||
+    getActiveCampaignBodyValue(payload, "contact_id") ||
+    (contact ? nonEmptyString(contact.id) : null) ||
     findStringDeep(payload, ["contact_id", "contactid"])
   );
 }
@@ -1260,18 +1592,27 @@ function normalizeIncomingWebhook(
     ]) || null;
 
   if (source === "activecampaign") {
+    const firstName =
+      getActiveCampaignBodyValue(payload, "contact[first_name]") ||
+      findStringDeep(payload, ["first_name", "firstname"]);
+    const lastName =
+      getActiveCampaignBodyValue(payload, "contact[last_name]") ||
+      findStringDeep(payload, ["last_name", "lastname"]);
+
     return {
       source,
       eventType,
-      externalContactId,
+      externalContactId: extractActiveCampaignContactId(payload) || externalContactId,
       contact: {
-        name:
-          uniqueStrings([
-            findStringDeep(payload, ["first_name", "firstname"]),
-            findStringDeep(payload, ["last_name", "lastname"]),
-          ]).join(" ") || contact.name,
-        email: findStringDeep(payload, ["email"]) || contact.email,
-        phone: findStringDeep(payload, ["phone"]) || contact.phone,
+        name: buildPersonNameFromParts(firstName, lastName) || contact.name,
+        email:
+          getActiveCampaignBodyValue(payload, "contact[email]") ||
+          findStringDeep(payload, ["email"]) ||
+          contact.email,
+        phone:
+          getActiveCampaignBodyValue(payload, "contact[phone]") ||
+          findStringDeep(payload, ["phone"]) ||
+          contact.phone,
       },
       payload,
     };
@@ -1795,6 +2136,20 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     return { skipped: true, reason: "google_sheets_not_configured" } as const;
   }
 
+  const captureMatch = await matchActiveCampaignCaptureTag(launch, payload);
+  if (!captureMatch.matches) {
+    return {
+      skipped: true,
+      reason: captureMatch.reason,
+      captureTag: {
+        configuredIds: captureMatch.configuredIds,
+        configuredName: captureMatch.configuredName,
+        receivedIds: captureMatch.context.ids,
+        receivedNames: captureMatch.context.names,
+      },
+    } as const;
+  }
+
   const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
   const existingRecord = await findExistingGoogleSheetsCaptureRecord(
     supabase,
@@ -1855,6 +2210,17 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     );
   }
 
+  const skippedTitle = result.skipped && !("deduped" in result && result.deduped)
+    ? result.reason === "google_sheets_not_configured"
+      ? "Google Sheets nao configurado"
+      : "Captura Google Sheets ignorada"
+    : null;
+  const skippedMessage = result.skipped && !("deduped" in result && result.deduped)
+    ? result.reason === "google_sheets_not_configured"
+      ? "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets nao estava configurada para este expert."
+      : "O webhook do ActiveCampaign foi tratado, mas nao correspondeu a tag de captura configurada para envio a planilha."
+    : null;
+
   await insertProcessingLog(
     supabase,
     launch.id,
@@ -1870,12 +2236,12 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     result.skipped && "deduped" in result && result.deduped
       ? "Registro duplicado na planilha bloqueado"
       : result.skipped
-        ? "Google Sheets nao configurado"
+        ? skippedTitle || "Captura Google Sheets ignorada"
         : "Contato enviado ao Google Sheets",
     result.skipped && "deduped" in result && result.deduped
       ? "O webhook do ActiveCampaign tentou enviar um contato que ja estava registrado na planilha deste ciclo."
       : result.skipped
-        ? "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets nao estava configurada para este expert."
+        ? skippedMessage || "O webhook do ActiveCampaign foi tratado, mas a captura complementar no Google Sheets foi ignorada."
         : "O webhook do ActiveCampaign foi registrado automaticamente na planilha configurada do expert.",
     result.skipped
       ? { reason: result.reason, ...("deduped" in result && result.deduped ? result : {}) }
@@ -2299,6 +2665,8 @@ function buildActiveCampaignWebhookJobDedupeKey(
     "welcome_subflow_ns",
   ]);
   const tagName = findStringDeep(normalizedEvent.payload, ["tag_name", "uchat_tag"]);
+  const activeTagContext = extractActiveCampaignWebhookTagContext(normalizedEvent.payload);
+  const activeTagKey = activeTagContext.ids[0] || activeTagContext.names[0] || tagName;
 
   return [
     ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX,
@@ -2306,7 +2674,7 @@ function buildActiveCampaignWebhookJobDedupeKey(
     `event:${normalizeDedupeKeyPart(normalizedEvent.eventType)}`,
     `recipient:${normalizeDedupeKeyPart(recipientKey)}`,
     `subflow:${normalizeDedupeKeyPart(subflowNs)}`,
-    `tag:${normalizeDedupeKeyPart(tagName)}`,
+    `tag:${normalizeDedupeKeyPart(activeTagKey)}`,
   ].join(":");
 }
 
@@ -4537,7 +4905,10 @@ async function processQueuedLaunchWebhookJob(
 
   try {
     const launch = await fetchLaunch(supabase, job.launch_id, null);
-    const normalizedEvent = normalizeIncomingWebhook(job.source, job.payload);
+    const normalizedEvent = await enrichActiveCampaignWebhookForCapture(
+      launch,
+      normalizeIncomingWebhook(job.source, job.payload),
+    );
     const processingResult = await processIncomingContactEvent(supabase, {
       launchId: launch.id,
       source: normalizedEvent.source,
