@@ -574,19 +574,7 @@ export async function processIncomingContactEvent(
     return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: eventId ?? undefined, logsCreated: logs.length };
   }
 
-  if (normalizedEmail && settings.merge_on_exact_email) {
-    const { data: emailMatches } = await supabase
-      .from("lead_contacts")
-      .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
-      .eq("launch_id", launch.id)
-      .eq("cycle_number", launch.current_cycle_number)
-      .eq("primary_email", normalizedEmail);
-
-    emailMatches?.forEach((row: { id: string }) => {
-      candidateIds.add(row.id);
-    });
-  }
-
+  // Phone lookup FIRST — phone has priority over email for deduplication
   if (validPhoneCandidates.length > 0 && settings.merge_on_exact_phone) {
     const { data: phoneIdentityMatches } = await supabase
       .from("lead_contact_identities")
@@ -610,6 +598,21 @@ export async function processIncomingContactEvent(
     phoneMatches?.forEach((row: { id: string }) => {
       candidateIds.add(row.id);
       phoneCandidateIds.add(row.id);
+    });
+  }
+
+  // Email lookup ONLY when no phone match was found — avoids pulling
+  // unrelated contacts that share an email but have a different phone
+  if (normalizedEmail && settings.merge_on_exact_email && phoneCandidateIds.size === 0) {
+    const { data: emailMatches } = await supabase
+      .from("lead_contacts")
+      .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
+      .eq("primary_email", normalizedEmail);
+
+    emailMatches?.forEach((row: { id: string }) => {
+      candidateIds.add(row.id);
     });
   }
 
@@ -669,17 +672,19 @@ export async function processIncomingContactEvent(
 
     const existingData = asRecord(existingContact.data);
     const existingPlatforms = asRecord(existingData.platforms);
-    const phoneMatchedExistingContact = hasPhoneCandidateOverlap(
-      [
-        existingContact.primary_phone as string | null | undefined,
-        existingContact.normalized_phone as string | null | undefined,
-      ],
-      validPhoneCandidates,
-      settings,
-    );
+    const contactWasMatchedByPhone =
+      phoneCandidateIds.has(existingContact.id as string) ||
+      hasPhoneCandidateOverlap(
+        [
+          existingContact.primary_phone as string | null | undefined,
+          existingContact.normalized_phone as string | null | undefined,
+        ],
+        validPhoneCandidates,
+        settings,
+      );
     const existingPrimaryEmail = normalizeEmail(existingContact.primary_email as string | null | undefined);
     const shouldPreserveExistingEmail =
-      phoneMatchedExistingContact &&
+      contactWasMatchedByPhone &&
       Boolean(existingPrimaryEmail && normalizedEmail) &&
       existingPrimaryEmail !== normalizedEmail;
     const nextPrimaryEmail = chooseValue(
@@ -813,7 +818,7 @@ export async function processIncomingContactEvent(
         details: {
           mergeReason: {
             emailMatched: Boolean(normalizedEmail && settings.merge_on_exact_email),
-            phoneMatched: phoneMatchedExistingContact || Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
+            phoneMatched: contactWasMatchedByPhone || Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
             knownIdentityMatched: isKnownIdentityUpdate,
           },
           externalContactId: externalIdentity,
