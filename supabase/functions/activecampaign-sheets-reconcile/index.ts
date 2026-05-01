@@ -54,8 +54,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const DEFAULT_BATCH_LIMIT = 500;
-const MAX_BATCH_LIMIT = 500;
+const DEFAULT_BATCH_LIMIT = 200;
+const MAX_BATCH_LIMIT = 300;
 const ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT = 100;
 const ACTIVE_CAMPAIGN_RETRIES = 2;
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
