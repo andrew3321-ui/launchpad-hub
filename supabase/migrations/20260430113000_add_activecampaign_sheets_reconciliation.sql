@@ -367,7 +367,7 @@ begin
       ),
       body := jsonb_build_object(
         'launchId', launch_row.id,
-        'limit', 50,
+        'limit', 500,
         'trigger', 'scheduled_hourly_capture_reconcile'
       ),
       timeout_milliseconds := 60000
