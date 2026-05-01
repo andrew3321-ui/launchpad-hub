@@ -231,6 +231,37 @@ function chooseValue(
   return current || incoming || null;
 }
 
+function buildValidPhoneCandidateSet(
+  values: Array<string | null | undefined>,
+  settings: DedupeSettingsRow,
+) {
+  const candidates = new Set<string>();
+
+  for (const value of values) {
+    const cleanValue = cleanIncomingString(value);
+    if (!cleanValue) continue;
+
+    for (const candidate of generatePhoneCandidates(cleanValue, settings)) {
+      if (isLikelyValidPhone(candidate)) {
+        candidates.add(candidate);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function hasPhoneCandidateOverlap(
+  contactValues: Array<string | null | undefined>,
+  incomingCandidates: string[],
+  settings: DedupeSettingsRow,
+) {
+  if (incomingCandidates.length === 0) return false;
+
+  const currentCandidates = buildValidPhoneCandidateSet(contactValues, settings);
+  return incomingCandidates.some((candidate) => currentCandidates.has(candidate));
+}
+
 function normalizeTextKey(value: string) {
   return value
     .normalize("NFD")
@@ -465,6 +496,7 @@ export async function processIncomingContactEvent(
 
   const logs: Array<Record<string, unknown>> = [];
   const candidateIds = new Set<string>();
+  const phoneCandidateIds = new Set<string>();
   let knownIdentityContactId: string | null = null;
 
   if (externalIdentity) {
@@ -550,7 +582,9 @@ export async function processIncomingContactEvent(
       .eq("cycle_number", launch.current_cycle_number)
       .eq("primary_email", normalizedEmail);
 
-    emailMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
+    emailMatches?.forEach((row: { id: string }) => {
+      candidateIds.add(row.id);
+    });
   }
 
   if (validPhoneCandidates.length > 0 && settings.merge_on_exact_phone) {
@@ -561,7 +595,10 @@ export async function processIncomingContactEvent(
       .eq("cycle_number", launch.current_cycle_number)
       .in("normalized_phone", validPhoneCandidates);
 
-    phoneIdentityMatches?.forEach((row: { contact_id: string }) => candidateIds.add(row.contact_id));
+    phoneIdentityMatches?.forEach((row: { contact_id: string }) => {
+      candidateIds.add(row.contact_id);
+      phoneCandidateIds.add(row.contact_id);
+    });
 
     const { data: phoneMatches } = await supabase
       .from("lead_contacts")
@@ -570,7 +607,10 @@ export async function processIncomingContactEvent(
       .eq("cycle_number", launch.current_cycle_number)
       .in("normalized_phone", validPhoneCandidates);
 
-    phoneMatches?.forEach((row: { id: string }) => candidateIds.add(row.id));
+    phoneMatches?.forEach((row: { id: string }) => {
+      candidateIds.add(row.id);
+      phoneCandidateIds.add(row.id);
+    });
   }
 
   let existingContact: Record<string, unknown> | null = null;
@@ -583,8 +623,12 @@ export async function processIncomingContactEvent(
       const identityMatchedContact = knownIdentityContactId
         ? matchedContacts.find((row: { id: string }) => row.id === knownIdentityContactId)
         : null;
+      const phoneMatchedContact = [...matchedContacts]
+        .filter((row: { id: string }) => phoneCandidateIds.has(row.id))
+        .sort((left, right) => scoreRecord(right) - scoreRecord(left))[0];
       existingContact =
         (identityMatchedContact as Record<string, unknown> | null) ||
+        (phoneMatchedContact as Record<string, unknown> | null) ||
         ([...matchedContacts].sort((left, right) => scoreRecord(right) - scoreRecord(left))[0] as Record<
           string,
           unknown
@@ -625,10 +669,23 @@ export async function processIncomingContactEvent(
 
     const existingData = asRecord(existingContact.data);
     const existingPlatforms = asRecord(existingData.platforms);
+    const phoneMatchedExistingContact = hasPhoneCandidateOverlap(
+      [
+        existingContact.primary_phone as string | null | undefined,
+        existingContact.normalized_phone as string | null | undefined,
+      ],
+      validPhoneCandidates,
+      settings,
+    );
+    const existingPrimaryEmail = normalizeEmail(existingContact.primary_email as string | null | undefined);
+    const shouldPreserveExistingEmail =
+      phoneMatchedExistingContact &&
+      Boolean(existingPrimaryEmail && normalizedEmail) &&
+      existingPrimaryEmail !== normalizedEmail;
     const nextPrimaryEmail = chooseValue(
       existingContact.primary_email as string | null | undefined,
       normalizedEmail,
-      preferIncoming,
+      shouldPreserveExistingEmail ? false : preferIncoming,
     );
     const nextPrimaryPhone = chooseValue(
       existingContact.primary_phone as string | null | undefined,
@@ -656,6 +713,16 @@ export async function processIncomingContactEvent(
       },
       latestSource: body.source,
       lastEventType: eventType,
+      ...(shouldPreserveExistingEmail
+        ? {
+            preservedEmailConflict: {
+              existingEmail: existingPrimaryEmail,
+              incomingEmail: normalizedEmail,
+              reason: "phone_match_email_conflict",
+              preservedAt: new Date().toISOString(),
+            },
+          }
+        : {}),
       sources: uniqueValues([
         ...(Array.isArray(existingData.sources) ? (existingData.sources as string[]) : []),
         body.source,
@@ -746,11 +813,20 @@ export async function processIncomingContactEvent(
         details: {
           mergeReason: {
             emailMatched: Boolean(normalizedEmail && settings.merge_on_exact_email),
-            phoneMatched: Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
+            phoneMatched: phoneMatchedExistingContact || Boolean(validPhoneCandidates.length > 0 && settings.merge_on_exact_phone),
             knownIdentityMatched: isKnownIdentityUpdate,
           },
           externalContactId: externalIdentity,
           mergedContactIds: duplicateContactsToMerge.map((row) => row.id).filter(Boolean),
+          ...(shouldPreserveExistingEmail
+            ? {
+                preservedEmailConflict: {
+                  existingEmail: existingPrimaryEmail,
+                  incomingEmail: normalizedEmail,
+                  reason: "phone_match_email_conflict",
+                },
+              }
+            : {}),
         },
       });
     }

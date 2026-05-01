@@ -2232,22 +2232,12 @@ async function syncContactToActiveCampaign(
     throw new ProcessContactError("ActiveCampaign is not configured for this expert", 400);
   }
 
-  if (!contact.primary_email && !contact.primary_phone) {
+  if (!contact.primary_email && !contact.primary_phone && !contact.normalized_phone) {
     throw new ProcessContactError("The contact does not have email or phone to send to ActiveCampaign", 400);
   }
 
   const phoneOnly = options?.phoneOnlyMatch === true;
   const overridePhone = nonEmptyString(options?.phoneSearchValue) || null;
-
-  const { firstName, lastName } = splitName(contact.primary_name);
-  // For Sendflow (phoneOnly), never overwrite the email of the existing AC contact;
-  // we only want to merge/update by phone and apply the configured tag.
-  const contactPayload = {
-    email: phoneOnly ? undefined : (contact.primary_email || undefined),
-    phone: overridePhone || contact.primary_phone || undefined,
-    firstName: firstName || undefined,
-    lastName: lastName || undefined,
-  };
   const existingContact = await findExistingActiveCampaignContact(
     launch,
     contact,
@@ -2262,6 +2252,29 @@ async function syncContactToActiveCampaign(
       404,
     );
   }
+
+  const { firstName, lastName } = splitName(contact.primary_name);
+  const incomingEmail = nonEmptyString(contact.primary_email);
+  const existingActiveEmail = nonEmptyString(existingContact?.snapshot?.email);
+  const activeEmailConflict =
+    !phoneOnly &&
+    existingContact?.matchedBy !== "email" &&
+    Boolean(incomingEmail && existingActiveEmail) &&
+    incomingEmail?.toLowerCase() !== existingActiveEmail?.toLowerCase();
+  const shouldSendEmail =
+    !phoneOnly &&
+    Boolean(incomingEmail) &&
+    (!existingContact || existingContact.matchedBy === "email" || !existingActiveEmail || !activeEmailConflict);
+
+  // When the match was driven by phone/known identity, phone is the authority.
+  // Do not overwrite the existing ActiveCampaign email with a different email
+  // sent later by the same person.
+  const contactPayload = {
+    email: shouldSendEmail ? incomingEmail || undefined : undefined,
+    phone: overridePhone || contact.primary_phone || contact.normalized_phone || undefined,
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+  };
 
   const payload = existingContact
     ? await activeCampaignRequest(
@@ -2357,6 +2370,13 @@ async function syncContactToActiveCampaign(
     appliedFieldValues,
     matchedBy: existingContact?.matchedBy || null,
     operation: existingContact ? "updated_existing" : "synced",
+    preservedEmailConflict: activeEmailConflict
+      ? {
+          activeCampaignEmail: existingActiveEmail,
+          incomingEmail,
+          matchedBy: existingContact?.matchedBy || null,
+        }
+      : null,
   };
 }
 
@@ -2508,15 +2528,11 @@ function pickActiveCampaignContactByPhone(
 ) {
   const contacts = extractActiveCampaignContacts(payload);
 
-  return (
-    contacts.find((candidate) =>
-      phoneCandidates.some((phoneCandidate) =>
-        phonesLookEquivalent(candidate.phone, phoneCandidate)
-      )
-    ) ||
-    contacts[0] ||
-    null
-  );
+  return contacts.find((candidate) =>
+    phoneCandidates.some((phoneCandidate) =>
+      phonesLookEquivalent(candidate.phone, phoneCandidate)
+    )
+  ) || null;
 }
 
 async function findExistingActiveCampaignContact(
@@ -2554,27 +2570,6 @@ async function findExistingActiveCampaignContact(
     }
   }
 
-  if (!phoneOnly && contact.primary_email) {
-    const payload = await activeCampaignRequest(
-      launch.ac_api_url,
-      launch.ac_api_key,
-      "/api/3/contacts",
-      "GET",
-      undefined,
-      { email: contact.primary_email },
-    );
-
-    const matchedContact = extractActiveCampaignContact(payload);
-    const activeContactId = nonEmptyString(matchedContact?.id);
-    if (matchedContact && activeContactId) {
-      return {
-        matchedBy: "email",
-        activeContactId,
-        snapshot: matchedContact,
-      };
-    }
-  }
-
   const phoneCandidates = buildPhoneSearchCandidates([
     options?.phoneSearchValue,
     contact.primary_phone,
@@ -2607,6 +2602,27 @@ async function findExistingActiveCampaignContact(
           snapshot: matchedContact,
         };
       }
+    }
+  }
+
+  if (!phoneOnly && contact.primary_email) {
+    const payload = await activeCampaignRequest(
+      launch.ac_api_url,
+      launch.ac_api_key,
+      "/api/3/contacts",
+      "GET",
+      undefined,
+      { email: contact.primary_email },
+    );
+
+    const matchedContact = extractActiveCampaignContact(payload);
+    const activeContactId = nonEmptyString(matchedContact?.id);
+    if (matchedContact && activeContactId) {
+      return {
+        matchedBy: "email",
+        activeContactId,
+        snapshot: matchedContact,
+      };
     }
   }
 
@@ -3650,7 +3666,21 @@ async function routeToActiveCampaign(
     };
   }
 
+  const sendflowPhoneFromPayload =
+    source === "sendflow" ? findStringDeep(payload, ["number"]) : null;
+  const phoneCandidates = buildPhoneSearchCandidates([
+    sendflowPhoneFromPayload,
+    contact.primary_phone,
+    contact.normalized_phone,
+  ]);
+  const phoneIdentityKey = phoneCandidates.map((candidate) => digitsOnly(candidate)).find(Boolean);
+  const identityKey =
+    (phoneIdentityKey ? `phone:${phoneIdentityKey}` : null) ||
+    (contact.primary_email ? `email:${contact.primary_email.toLowerCase()}` : null) ||
+    `contact:${contact.id}`;
+
   const actionKey = JSON.stringify({
+    identityKey,
     listId: launch.ac_default_list_id || null,
     fieldValues: fieldValues.map((item) => `${item.fieldId}:${item.value}`).sort(),
     tags: [...tagNames].sort(),
@@ -3671,9 +3701,7 @@ async function routeToActiveCampaign(
       fieldValues,
       tags: tagNames,
       listId: launch.ac_default_list_id,
-      phoneCandidates: source === "sendflow"
-        ? buildPhoneSearchCandidates([contact.primary_phone, contact.normalized_phone])
-        : [],
+      phoneCandidates,
     },
   );
 
@@ -3691,8 +3719,6 @@ async function routeToActiveCampaign(
       contact.id,
       "activecampaign",
     );
-    const sendflowPhoneFromPayload =
-      source === "sendflow" ? findStringDeep(payload, ["number"]) : null;
     const response = await syncContactToActiveCampaign(
       launch,
       contact,
@@ -3720,6 +3746,21 @@ async function routeToActiveCampaign(
         operation: response.operation,
       },
     );
+
+    if (response.preservedEmailConflict) {
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        source,
+        "warning",
+        "ACTIVECAMPAIGN_EMAIL_CONFLICT_PRESERVED",
+        "Email divergente preservado no ActiveCampaign",
+        "O contato foi encontrado pelo telefone/identidade e recebeu tags/campos, mas o email principal do ActiveCampaign nao foi sobrescrito para evitar duplicidade da mesma pessoa.",
+        response.preservedEmailConflict,
+      );
+    }
 
     await updateRoutingAction(supabase, actionId, "success", response as unknown as JsonRecord);
     return {
