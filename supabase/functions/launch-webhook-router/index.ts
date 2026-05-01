@@ -577,35 +577,54 @@ async function findExistingGoogleSheetsCaptureRecord(
       .eq("sheet_name", sheetName)
       .limit(1);
 
-  const checks: Array<{ column: string; value: string; reason: string; ilike?: boolean }> = [
-    { column: "row_fingerprint", value: fingerprint, reason: "row_fingerprint" },
-  ];
+  // 1) Phone variant check — highest priority
+  if (identity.normalizedPhone || identity.phone) {
+    const phoneCandidates = buildPhoneSearchCandidates([identity.phone, identity.normalizedPhone])
+      .map((v) => digitsOnly(v))
+      .filter((v): v is string => Boolean(v));
+    const uniquePhoneCandidates = [...new Set(phoneCandidates)].slice(0, 18);
 
-  if (identity.normalizedPhone) {
-    checks.push({ column: "normalized_phone", value: identity.normalizedPhone, reason: "normalized_phone" });
+    if (uniquePhoneCandidates.length > 0) {
+      const { data, error } = await baseQuery()
+        .in("normalized_phone", uniquePhoneCandidates)
+        .maybeSingle();
+      if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (phone)", 500, error.message);
+      if (data?.id) {
+        return { exists: true, reason: "normalized_phone", fingerprint, identity };
+      }
+    }
   }
 
+  // 2) Email check
   if (identity.email) {
-    checks.push({ column: "primary_email", value: identity.email, reason: "email", ilike: true });
-  }
-
-  if (identity.activeContactId) {
-    checks.push({ column: "active_contact_id", value: identity.activeContactId, reason: "active_contact_id" });
-  }
-
-  for (const check of checks) {
-    const query = check.ilike
-      ? baseQuery().ilike(check.column, check.value)
-      : baseQuery().eq(check.column, check.value);
-    const { data, error } = await query.maybeSingle();
-    if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe", 500, error.message);
+    const { data, error } = await baseQuery()
+      .ilike("primary_email", identity.email)
+      .maybeSingle();
+    if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (email)", 500, error.message);
     if (data?.id) {
-      return {
-        exists: true,
-        reason: check.reason,
-        fingerprint,
-        identity,
-      };
+      return { exists: true, reason: "email", fingerprint, identity };
+    }
+  }
+
+  // 3) Fingerprint check
+  {
+    const { data, error } = await baseQuery()
+      .eq("row_fingerprint", fingerprint)
+      .maybeSingle();
+    if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (fingerprint)", 500, error.message);
+    if (data?.id) {
+      return { exists: true, reason: "row_fingerprint", fingerprint, identity };
+    }
+  }
+
+  // 4) ActiveCampaign ID — lowest priority
+  if (identity.activeContactId) {
+    const { data, error } = await baseQuery()
+      .eq("active_contact_id", identity.activeContactId)
+      .maybeSingle();
+    if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (active_id)", 500, error.message);
+    if (data?.id) {
+      return { exists: true, reason: "active_contact_id", fingerprint, identity };
     }
   }
 
