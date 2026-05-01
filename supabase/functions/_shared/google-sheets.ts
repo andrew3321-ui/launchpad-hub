@@ -682,9 +682,21 @@ export async function appendGoogleSheetsRow(
   header: string[],
   row: Array<string | number | boolean | null | undefined>,
 ) {
+  return await appendGoogleSheetsRows(config, header, [row]);
+}
+
+export async function appendGoogleSheetsRows(
+  config: GoogleSheetsConfigInput,
+  header: string[],
+  rows: Array<Array<string | number | boolean | null | undefined>>,
+) {
   const parsedConfig = resolveGoogleSheetsRuntimeConfig(config);
   if (!parsedConfig) {
     return { skipped: true, reason: "google_sheets_not_configured" } as const;
+  }
+
+  if (rows.length === 0) {
+    return { skipped: true, reason: "no_rows_to_append" } as const;
   }
 
   const accessToken = await getGoogleAccessToken(parsedConfig, [
@@ -706,13 +718,13 @@ export async function appendGoogleSheetsRow(
       method: "POST",
       body: JSON.stringify({
         majorDimension: "ROWS",
-        values: [
+        values: rows.map((row) =>
           row.map((value) => {
             if (value === null || value === undefined) return "";
             if (typeof value === "boolean") return value ? "true" : "false";
             return String(value);
           }),
-        ],
+        ),
       }),
     },
     {
@@ -725,5 +737,35 @@ export async function appendGoogleSheetsRow(
     skipped: false,
     spreadsheetId: parsedConfig.spreadsheetId,
     sheetName: parsedConfig.sheetName,
+  } as const;
+}
+
+export async function readGoogleSheetsValues(
+  config: GoogleSheetsConfigInput,
+  range: string,
+) {
+  const parsedConfig = resolveGoogleSheetsRuntimeConfig(config);
+  if (!parsedConfig) {
+    return { skipped: true, reason: "google_sheets_not_configured", values: [] as unknown[][] } as const;
+  }
+
+  const accessToken = await getGoogleAccessToken(parsedConfig, [
+    GOOGLE_SHEETS_SCOPE,
+    GOOGLE_DRIVE_METADATA_SCOPE,
+  ]);
+
+  const payload = await googleSheetsRequest(
+    accessToken,
+    `/spreadsheets/${encodeURIComponent(parsedConfig.spreadsheetId)}/values/${encodeURIComponent(buildSheetRange(parsedConfig.sheetName, range))}`,
+  );
+
+  const root = isRecord(payload) ? payload : {};
+  const values = Array.isArray(root.values) ? root.values : [];
+
+  return {
+    skipped: false,
+    spreadsheetId: parsedConfig.spreadsheetId,
+    sheetName: parsedConfig.sheetName,
+    values: values.map((row) => (Array.isArray(row) ? row : [])),
   } as const;
 }

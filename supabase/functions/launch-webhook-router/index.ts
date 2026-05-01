@@ -36,6 +36,9 @@ interface LaunchRow {
   gs_spreadsheet_id: string | null;
   gs_spreadsheet_title: string | null;
   gs_sheet_name: string | null;
+  gs_capture_tag_id: string | null;
+  gs_capture_tag_name: string | null;
+  gs_default_product_name: string | null;
 }
 
 interface LeadContactRow {
@@ -494,7 +497,7 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
       getActiveCampaignBodyValue(payload, "contact[email]") || contact.primary_email,
       formatGoogleSheetsPhone(contact, payload),
       getActiveCampaignContactField(payload, "tipo_de_lead"),
-      getActiveCampaignContactField(payload, "produto"),
+      getActiveCampaignContactField(payload, "produto") || launch.gs_default_product_name,
       getActiveCampaignContactField(payload, "utm_source"),
       getActiveCampaignContactField(payload, "utm_campaign"),
       getActiveCampaignContactField(payload, "utm_medium"),
@@ -512,6 +515,68 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
       cycle: launch.current_cycle_number,
     },
   };
+}
+
+function buildGoogleSheetsCaptureFingerprint(contact: LeadContactRow, payload: JsonRecord) {
+  const activeContactId =
+    getActiveCampaignBodyValue(payload, "contact[id]") ||
+    getActiveCampaignBodyValue(payload, "contactid") ||
+    findStringDeep(payload, ["contact_id", "contactid", "id"]);
+  const email =
+    getActiveCampaignBodyValue(payload, "contact[email]") ||
+    contact.primary_email;
+  const phone =
+    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
+    contact.normalized_phone ||
+    contact.primary_phone;
+  const fingerprint =
+    activeContactId ||
+    (email ? `email:${email.toLowerCase()}` : null) ||
+    (phone ? `phone:${digitsOnly(phone) || phone}` : null) ||
+    contact.id;
+
+  return normalizeDedupeKeyPart(fingerprint);
+}
+
+async function recordGoogleSheetsCapture(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  spreadsheetId: string,
+  sheetName: string,
+  source: string,
+) {
+  const activeContactId =
+    getActiveCampaignBodyValue(payload, "contact[id]") ||
+    getActiveCampaignBodyValue(payload, "contactid") ||
+    findStringDeep(payload, ["contact_id", "contactid", "id"]);
+  const email =
+    getActiveCampaignBodyValue(payload, "contact[email]") ||
+    contact.primary_email;
+  const phone =
+    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
+    contact.normalized_phone ||
+    contact.primary_phone;
+
+  await supabase
+    .from("launch_google_sheet_capture_records")
+    .upsert(
+      {
+        launch_id: launch.id,
+        cycle_number: launch.current_cycle_number || 1,
+        active_contact_id: activeContactId,
+        primary_email: email,
+        normalized_phone: digitsOnly(phone) || phone,
+        spreadsheet_id: spreadsheetId,
+        sheet_name: sheetName,
+        row_fingerprint: buildGoogleSheetsCaptureFingerprint(contact, payload),
+        source,
+      } as Record<string, unknown>,
+      {
+        onConflict: "launch_id,cycle_number,spreadsheet_id,sheet_name,row_fingerprint",
+      },
+    );
 }
 
 function collectStringListDeep(node: unknown, keys: string[]) {
@@ -1610,6 +1675,18 @@ async function appendActiveCampaignWebhookToGoogleSheets(
 
   const result = await appendGoogleSheetsRow(config, header, row);
 
+  if (!result.skipped) {
+    await recordGoogleSheetsCapture(
+      supabase,
+      launch,
+      contact,
+      payload,
+      result.spreadsheetId,
+      result.sheetName,
+      "activecampaign_webhook",
+    );
+  }
+
   await insertProcessingLog(
     supabase,
     launch.id,
@@ -1643,11 +1720,11 @@ async function fetchLaunch(
   const query = launchId
     ? supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name, gs_capture_tag_id, gs_capture_tag_name, gs_default_product_name")
         .eq("id", launchId)
     : supabase
         .from("launches")
-        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name")
+        .select("id, slug, name, webhook_secret, ac_api_url, ac_api_key, ac_default_list_id, ac_named_tags, current_cycle_number, gs_enabled, gs_auth_mode, gs_oauth_email, gs_oauth_refresh_token, gs_service_account_email, gs_private_key, gs_spreadsheet_id, gs_spreadsheet_title, gs_sheet_name, gs_capture_tag_id, gs_capture_tag_name, gs_default_product_name")
         .eq("slug", launchSlug as string);
 
   const { data, error } = await query.maybeSingle();

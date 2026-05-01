@@ -73,6 +73,9 @@ interface LaunchSettingsRow {
   gs_spreadsheet_id: string | null;
   gs_spreadsheet_title: string | null;
   gs_sheet_name: string | null;
+  gs_capture_tag_id: string | null;
+  gs_capture_tag_name: string | null;
+  gs_default_product_name: string | null;
 }
 
 interface SourcesDraft {
@@ -90,6 +93,9 @@ interface SourcesDraft {
   gsSpreadsheetId: string;
   gsSpreadsheetTitle: string;
   gsSheetName: string;
+  gsCaptureTagId: string;
+  gsCaptureTagName: string;
+  gsDefaultProductName: string;
 }
 
 interface LaunchSourcesPayload {
@@ -196,6 +202,7 @@ const ACTIVE_CAMPAIGN_STALE_SYNC_MS = 90_000;
 const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_OAUTH_CLIENT_ID = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
 const DEFAULT_GOOGLE_SHEET_NAME = "Página1";
+const NO_CAPTURE_TAG_VALUE = "__none";
 const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.metadata.readonly",
@@ -236,6 +243,10 @@ function parseSourcesDraft(raw: string | null): SourcesDraft | null {
       gsSpreadsheetTitle:
         typeof parsed.gsSpreadsheetTitle === "string" ? parsed.gsSpreadsheetTitle : "",
       gsSheetName: typeof parsed.gsSheetName === "string" ? parsed.gsSheetName : "",
+      gsCaptureTagId: typeof parsed.gsCaptureTagId === "string" ? parsed.gsCaptureTagId : "",
+      gsCaptureTagName: typeof parsed.gsCaptureTagName === "string" ? parsed.gsCaptureTagName : "",
+      gsDefaultProductName:
+        typeof parsed.gsDefaultProductName === "string" ? parsed.gsDefaultProductName : "",
     };
   } catch {
     return null;
@@ -539,6 +550,9 @@ export default function Sources() {
   const [gsSpreadsheetId, setGsSpreadsheetId] = useState("");
   const [gsSpreadsheetTitle, setGsSpreadsheetTitle] = useState("");
   const [gsSheetName, setGsSheetName] = useState("");
+  const [gsCaptureTagId, setGsCaptureTagId] = useState("");
+  const [gsCaptureTagName, setGsCaptureTagName] = useState("");
+  const [gsDefaultProductName, setGsDefaultProductName] = useState("");
   const [gsAvailableSpreadsheets, setGsAvailableSpreadsheets] = useState<
     Array<{
       id: string;
@@ -585,6 +599,9 @@ export default function Sources() {
   const visibleGsSpreadsheetId = isHydratedActiveLaunch ? gsSpreadsheetId : "";
   const visibleGsSpreadsheetTitle = isHydratedActiveLaunch ? gsSpreadsheetTitle : "";
   const visibleGsSheetName = isHydratedActiveLaunch ? gsSheetName : "";
+  const visibleGsCaptureTagId = isHydratedActiveLaunch ? gsCaptureTagId : "";
+  const visibleGsCaptureTagName = isHydratedActiveLaunch ? gsCaptureTagName : "";
+  const visibleGsDefaultProductName = isHydratedActiveLaunch ? gsDefaultProductName : "";
   const visibleActiveCampaignTags = isHydratedActiveLaunch ? activeCampaignTags : [];
   const visibleActiveCampaignTagsLoadedAt = isHydratedActiveLaunch
     ? activeCampaignTagsLoadedAt
@@ -998,6 +1015,9 @@ export default function Sources() {
         setGsSpreadsheetId("");
         setGsSpreadsheetTitle("");
         setGsSheetName("");
+        setGsCaptureTagId("");
+        setGsCaptureTagName("");
+        setGsDefaultProductName("");
         setGsAvailableSpreadsheets([]);
         setGsAvailableSheets([]);
         setLoadingGoogleSheetsCatalog(false);
@@ -1035,6 +1055,9 @@ export default function Sources() {
       setGsSpreadsheetId(draft?.gsSpreadsheetId ?? "");
       setGsSpreadsheetTitle(draft?.gsSpreadsheetTitle ?? "");
       setGsSheetName(draft?.gsSheetName ?? "");
+      setGsCaptureTagId(draft?.gsCaptureTagId ?? "");
+      setGsCaptureTagName(draft?.gsCaptureTagName ?? "");
+      setGsDefaultProductName(draft?.gsDefaultProductName ?? "");
       setGsAvailableSpreadsheets([]);
       setGsAvailableSheets([]);
       setLoadingGoogleSheetsCatalog(false);
@@ -1117,6 +1140,11 @@ export default function Sources() {
         draft?.gsSpreadsheetTitle ?? typedLaunch.gs_spreadsheet_title ?? "",
       );
       setGsSheetName(draft?.gsSheetName ?? typedLaunch.gs_sheet_name ?? "");
+      setGsCaptureTagId(draft?.gsCaptureTagId ?? typedLaunch.gs_capture_tag_id ?? "");
+      setGsCaptureTagName(draft?.gsCaptureTagName ?? typedLaunch.gs_capture_tag_name ?? "");
+      setGsDefaultProductName(
+        draft?.gsDefaultProductName ?? typedLaunch.gs_default_product_name ?? "",
+      );
       setHydratedLaunchId(launchId);
       setLoading(false);
     };
@@ -1191,6 +1219,9 @@ export default function Sources() {
         gsSpreadsheetId,
         gsSpreadsheetTitle,
         gsSheetName,
+        gsCaptureTagId,
+        gsCaptureTagName,
+        gsDefaultProductName,
       } satisfies SourcesDraft),
     );
   }, [
@@ -1211,6 +1242,9 @@ export default function Sources() {
     gsSpreadsheetId,
     gsSpreadsheetTitle,
     gsSheetName,
+    gsCaptureTagId,
+    gsCaptureTagName,
+    gsDefaultProductName,
   ]);
 
   useEffect(() => {
@@ -1887,6 +1921,12 @@ export default function Sources() {
       gsAvailableSheets.find((sheet) => typeof sheet.title === "string" && sheet.title.trim())
         ?.title?.trim() ||
       "";
+    const selectedCaptureTagId = gsCaptureTagId.trim();
+    const selectedCaptureTagName =
+      gsCaptureTagName.trim() ||
+      activeCampaignTags.find((tag) => tag.id === selectedCaptureTagId)?.name?.trim() ||
+      "";
+    const selectedDefaultProductName = gsDefaultProductName.trim();
     const selectedServiceAccountEmail = gsServiceAccountEmail.trim();
     const selectedPrivateKey = gsPrivateKey.trim();
 
@@ -1928,6 +1968,9 @@ export default function Sources() {
       next_spreadsheet_id: selectedSpreadsheetId || null,
       next_spreadsheet_title: selectedSpreadsheetTitle || null,
       next_sheet_name: selectedSheetName || null,
+      next_capture_tag_id: selectedCaptureTagId || null,
+      next_capture_tag_name: selectedCaptureTagName || null,
+      next_default_product_name: selectedDefaultProductName || null,
     } as never);
 
     setSaving(null);
@@ -1944,6 +1987,9 @@ export default function Sources() {
     setLaunchSettings(data as unknown as LaunchSettingsRow);
     setHydratedLaunchId(activeLaunch.id);
     setGsSheetName(selectedSheetName);
+    setGsCaptureTagId(selectedCaptureTagId);
+    setGsCaptureTagName(selectedCaptureTagName);
+    setGsDefaultProductName(selectedDefaultProductName);
     if (
       gsEnabled &&
       ((selectedAuthMode === "oauth" && gsOauthConnected && selectedSpreadsheetId) ||
@@ -2505,6 +2551,79 @@ export default function Sources() {
                     />
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-4">
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">Revisão horária da captura</p>
+                  <p className="text-sm text-muted-foreground">
+                    A cada 1 hora, o backend procura no ActiveCampaign quem tem a tag abaixo e ainda não está na planilha,
+                    então envia a linha usando o mesmo mapeamento dos webhooks do ActiveCampaign.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Tag do evento no ActiveCampaign</Label>
+                  <Select
+                    value={visibleGsCaptureTagId || NO_CAPTURE_TAG_VALUE}
+                    onValueChange={(value) => {
+                      if (value === NO_CAPTURE_TAG_VALUE) {
+                        setGsCaptureTagId("");
+                        setGsCaptureTagName("");
+                        return;
+                      }
+
+                      const selectedTag = visibleActiveCampaignTags.find((tag) => tag.id === value);
+                      setGsCaptureTagId(value);
+                      setGsCaptureTagName(selectedTag?.name ?? "");
+                    }}
+                    disabled={saving !== null || loadingActiveCampaignTags || visibleActiveCampaignTags.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          loadingActiveCampaignTags
+                            ? "Carregando tags"
+                            : visibleActiveCampaignTags.length > 0
+                              ? "Escolher tag do evento"
+                              : "Carregue as tags do ActiveCampaign primeiro"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_CAPTURE_TAG_VALUE}>Sem revisão horária</SelectItem>
+                      {visibleGsCaptureTagId &&
+                        !visibleActiveCampaignTags.some((tag) => tag.id === visibleGsCaptureTagId) && (
+                          <SelectItem value={visibleGsCaptureTagId}>
+                            {visibleGsCaptureTagName || `Tag #${visibleGsCaptureTagId}`} #{visibleGsCaptureTagId}
+                          </SelectItem>
+                        )}
+                      {visibleActiveCampaignTags.map((tag) => (
+                        <SelectItem key={`capture-${tag.id}`} value={tag.id}>
+                          {tag.name} #{tag.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {visibleGsCaptureTagName && (
+                    <p className="text-xs text-muted-foreground">
+                      Tag monitorada: <span className="font-medium text-foreground">{visibleGsCaptureTagName}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gs-default-product">Produto padrão quando vier vazio</Label>
+                  <Input
+                    id="gs-default-product"
+                    value={visibleGsDefaultProductName}
+                    onChange={(event) => setGsDefaultProductName(event.target.value)}
+                    placeholder="Ex: Libras Sem Medo"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Se o campo Produto vier preenchido do ActiveCampaign, o valor original é preservado.
+                  </p>
+                </div>
               </div>
             </CardContent>
             <CardFooter className="justify-end">

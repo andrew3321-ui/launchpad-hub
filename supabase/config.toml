@@ -23,3 +23,6 @@ verify_jwt = true
 
 [functions.launch-webhook-router]
 verify_jwt = false
+
+[functions.activecampaign-sheets-reconcile]
+verify_jwt = false
