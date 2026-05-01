@@ -311,6 +311,106 @@ export type Database = {
           },
         ]
       }
+      launch_google_sheet_capture_records: {
+        Row: {
+          active_contact_id: string | null
+          created_at: string
+          cycle_number: number
+          id: string
+          launch_id: string
+          normalized_phone: string | null
+          primary_email: string | null
+          row_fingerprint: string
+          sheet_name: string
+          source: string
+          spreadsheet_id: string
+        }
+        Insert: {
+          active_contact_id?: string | null
+          created_at?: string
+          cycle_number?: number
+          id?: string
+          launch_id: string
+          normalized_phone?: string | null
+          primary_email?: string | null
+          row_fingerprint: string
+          sheet_name: string
+          source?: string
+          spreadsheet_id: string
+        }
+        Update: {
+          active_contact_id?: string | null
+          created_at?: string
+          cycle_number?: number
+          id?: string
+          launch_id?: string
+          normalized_phone?: string | null
+          primary_email?: string | null
+          row_fingerprint?: string
+          sheet_name?: string
+          source?: string
+          spreadsheet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_google_sheet_capture_records_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      launch_google_sheet_reconcile_state: {
+        Row: {
+          created_at: string
+          last_error: string | null
+          last_finished_at: string | null
+          last_run_summary: Json
+          last_started_at: string | null
+          last_status: string | null
+          launch_id: string
+          next_offset: number
+          tag_id: string | null
+          tag_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          last_error?: string | null
+          last_finished_at?: string | null
+          last_run_summary?: Json
+          last_started_at?: string | null
+          last_status?: string | null
+          launch_id: string
+          next_offset?: number
+          tag_id?: string | null
+          tag_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          last_error?: string | null
+          last_finished_at?: string | null
+          last_run_summary?: Json
+          last_started_at?: string | null
+          last_status?: string | null
+          launch_id?: string
+          next_offset?: number
+          tag_id?: string | null
+          tag_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_google_sheet_reconcile_state_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: true
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launch_uchat_workspaces: {
         Row: {
           created_at: string
@@ -428,6 +528,9 @@ export type Database = {
           current_cycle_started_at: string
           custom_states: Json
           gs_auth_mode: string
+          gs_capture_tag_id: string | null
+          gs_capture_tag_name: string | null
+          gs_default_product_name: string | null
           gs_enabled: boolean
           gs_oauth_email: string | null
           gs_oauth_refresh_token: string | null
@@ -459,6 +562,9 @@ export type Database = {
           current_cycle_started_at?: string
           custom_states?: Json
           gs_auth_mode?: string
+          gs_capture_tag_id?: string | null
+          gs_capture_tag_name?: string | null
+          gs_default_product_name?: string | null
           gs_enabled?: boolean
           gs_oauth_email?: string | null
           gs_oauth_refresh_token?: string | null
@@ -490,6 +596,9 @@ export type Database = {
           current_cycle_started_at?: string
           custom_states?: Json
           gs_auth_mode?: string
+          gs_capture_tag_id?: string | null
+          gs_capture_tag_name?: string | null
+          gs_default_product_name?: string | null
           gs_enabled?: boolean
           gs_oauth_email?: string | null
           gs_oauth_refresh_token?: string | null
@@ -857,6 +966,10 @@ export type Database = {
         Returns: Json
       }
       csv_escape: { Args: { value: string }; Returns: string }
+      dispatch_activecampaign_sheet_reconcile_jobs: {
+        Args: never
+        Returns: Json
+      }
       dispatch_activecampaign_sync_jobs: { Args: never; Returns: Json }
       dispatch_launch_webhook_job: {
         Args: { target_job_id: string }
@@ -933,6 +1046,9 @@ export type Database = {
         | {
             Args: {
               next_auth_mode?: string
+              next_capture_tag_id?: string
+              next_capture_tag_name?: string
+              next_default_product_name?: string
               next_enabled?: boolean
               next_private_key?: string
               next_service_account_email?: string
