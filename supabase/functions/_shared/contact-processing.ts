@@ -574,19 +574,7 @@ export async function processIncomingContactEvent(
     return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: eventId ?? undefined, logsCreated: logs.length };
   }
 
-  if (normalizedEmail && settings.merge_on_exact_email) {
-    const { data: emailMatches } = await supabase
-      .from("lead_contacts")
-      .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
-      .eq("launch_id", launch.id)
-      .eq("cycle_number", launch.current_cycle_number)
-      .eq("primary_email", normalizedEmail);
-
-    emailMatches?.forEach((row: { id: string }) => {
-      candidateIds.add(row.id);
-    });
-  }
-
+  // Phone lookup FIRST — phone has priority over email for deduplication
   if (validPhoneCandidates.length > 0 && settings.merge_on_exact_phone) {
     const { data: phoneIdentityMatches } = await supabase
       .from("lead_contact_identities")
@@ -610,6 +598,21 @@ export async function processIncomingContactEvent(
     phoneMatches?.forEach((row: { id: string }) => {
       candidateIds.add(row.id);
       phoneCandidateIds.add(row.id);
+    });
+  }
+
+  // Email lookup ONLY when no phone match was found — avoids pulling
+  // unrelated contacts that share an email but have a different phone
+  if (normalizedEmail && settings.merge_on_exact_email && phoneCandidateIds.size === 0) {
+    const { data: emailMatches } = await supabase
+      .from("lead_contacts")
+      .select("id, primary_name, primary_email, primary_phone, normalized_phone, data")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number)
+      .eq("primary_email", normalizedEmail);
+
+    emailMatches?.forEach((row: { id: string }) => {
+      candidateIds.add(row.id);
     });
   }
 
