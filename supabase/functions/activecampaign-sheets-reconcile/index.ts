@@ -56,6 +56,7 @@ const corsHeaders = {
 
 const DEFAULT_BATCH_LIMIT = 500;
 const MAX_BATCH_LIMIT = 500;
+const ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT = 100;
 const ACTIVE_CAMPAIGN_RETRIES = 2;
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
@@ -254,6 +255,28 @@ async function fetchContactsByTag(launch: LaunchRow, tagId: string, offset: numb
   return contacts
     .map(parseActiveCampaignContact)
     .filter((contact): contact is ActiveCampaignContact => Boolean(contact));
+}
+
+async function fetchContactsByTagBatch(launch: LaunchRow, tagId: string, offset: number, batchLimit: number) {
+  const contacts: ActiveCampaignContact[] = [];
+  let currentOffset = offset;
+  let reachedEnd = false;
+
+  while (contacts.length < batchLimit && !reachedEnd) {
+    const pageLimit = Math.min(ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT, batchLimit - contacts.length);
+    const pageContacts = await fetchContactsByTag(launch, tagId, currentOffset, pageLimit);
+
+    contacts.push(...pageContacts);
+    currentOffset += pageContacts.length;
+    reachedEnd = pageContacts.length < pageLimit;
+  }
+
+  return {
+    contacts,
+    nextOffset: reachedEnd ? 0 : currentOffset,
+    reachedEnd,
+    pageLimit: ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT,
+  };
 }
 
 function fieldDefinitionKeys(item: JsonRecord) {
@@ -649,7 +672,8 @@ async function reconcileLaunch(
     return { launchId: launch.id, skipped: true, reason: "google_sheets_not_configured" };
   }
 
-  const contacts = await fetchContactsByTag(launch, tag.id, state.offset, limit);
+  const contactBatch = await fetchContactsByTagBatch(launch, tag.id, state.offset, limit);
+  const contacts = contactBatch.contacts;
   const fieldDefinitions = contacts.length > 0 ? await loadActiveCampaignFieldDefinitions(launch) : [];
   const rowsToAppend: Array<{
     contact: ActiveCampaignContact;
@@ -751,7 +775,7 @@ async function reconcileLaunch(
     }
   }
 
-  const nextOffset = batchAppendFailed ? state.offset : contacts.length < limit ? 0 : state.offset + contacts.length;
+  const nextOffset = batchAppendFailed ? state.offset : contactBatch.nextOffset;
   const summary = {
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -759,6 +783,9 @@ async function reconcileLaunch(
     tagName: tag.name,
     offset: state.offset,
     nextOffset,
+    reachedEnd: contactBatch.reachedEnd,
+    activeCampaignPageLimit: contactBatch.pageLimit,
+    requestedBatchLimit: limit,
     ...counters,
   };
 
