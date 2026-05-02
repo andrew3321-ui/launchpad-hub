@@ -54,10 +54,13 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const DEFAULT_BATCH_LIMIT = 200;
+const DEFAULT_BATCH_LIMIT = 300;
 const MAX_BATCH_LIMIT = 300;
 const ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT = 100;
 const ACTIVE_CAMPAIGN_RETRIES = 2;
+const RECENT_UPDATED_SWEEP_HOURS = 48;
+const RECENT_UPDATED_SWEEP_LIMIT = 100;
+const FRONT_SWEEP_LIMIT = 50;
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
   tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
@@ -179,6 +182,10 @@ async function activeCampaignRequest(
   throw lastError || new Error("Unknown ActiveCampaign request error");
 }
 
+function formatActiveCampaignDateTime(date: Date) {
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
 async function loadActiveCampaignTags(launch: LaunchRow) {
   if (!launch.ac_api_url || !launch.ac_api_key) return [] as Array<{ id: string; tag: string }>;
 
@@ -240,13 +247,20 @@ function parseActiveCampaignContact(item: unknown): ActiveCampaignContact | null
   };
 }
 
-async function fetchContactsByTag(launch: LaunchRow, tagId: string, offset: number, limit: number) {
+async function fetchContactsByTag(
+  launch: LaunchRow,
+  tagId: string,
+  offset: number,
+  limit: number,
+  extraQuery: Record<string, string | number | undefined> = {},
+) {
   if (!launch.ac_api_url || !launch.ac_api_key) return [] as ActiveCampaignContact[];
 
   const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/contacts", {
     tagid: tagId,
     limit,
     offset,
+    ...extraQuery,
   });
   const contacts = Array.isArray((payload as JsonRecord).contacts)
     ? ((payload as JsonRecord).contacts as unknown[])
@@ -257,14 +271,20 @@ async function fetchContactsByTag(launch: LaunchRow, tagId: string, offset: numb
     .filter((contact): contact is ActiveCampaignContact => Boolean(contact));
 }
 
-async function fetchContactsByTagBatch(launch: LaunchRow, tagId: string, offset: number, batchLimit: number) {
+async function fetchContactsByTagBatch(
+  launch: LaunchRow,
+  tagId: string,
+  offset: number,
+  batchLimit: number,
+  extraQuery: Record<string, string | number | undefined> = {},
+) {
   const contacts: ActiveCampaignContact[] = [];
   let currentOffset = offset;
   let reachedEnd = false;
 
   while (contacts.length < batchLimit && !reachedEnd) {
     const pageLimit = Math.min(ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT, batchLimit - contacts.length);
-    const pageContacts = await fetchContactsByTag(launch, tagId, currentOffset, pageLimit);
+    const pageContacts = await fetchContactsByTag(launch, tagId, currentOffset, pageLimit, extraQuery);
 
     contacts.push(...pageContacts);
     currentOffset += pageContacts.length;
@@ -276,6 +296,69 @@ async function fetchContactsByTagBatch(launch: LaunchRow, tagId: string, offset:
     nextOffset: reachedEnd ? 0 : currentOffset,
     reachedEnd,
     pageLimit: ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT,
+  };
+}
+
+async function fetchContactsByTagCoverageBatch(
+  launch: LaunchRow,
+  tagId: string,
+  stateOffset: number,
+  batchLimit: number,
+) {
+  const recentUpdatedLimit = Math.min(RECENT_UPDATED_SWEEP_LIMIT, Math.max(0, batchLimit));
+  const frontSweepLimit = Math.min(FRONT_SWEEP_LIMIT, Math.max(0, batchLimit - recentUpdatedLimit));
+  const cursorLimit = Math.max(0, batchLimit - recentUpdatedLimit - frontSweepLimit);
+  const updatedAfter = formatActiveCampaignDateTime(
+    new Date(Date.now() - RECENT_UPDATED_SWEEP_HOURS * 60 * 60 * 1000),
+  );
+
+  const recentUpdatedContacts = recentUpdatedLimit > 0
+    ? await fetchContactsByTag(launch, tagId, 0, recentUpdatedLimit, {
+        "filters[updated_after]": updatedAfter,
+        "orders[cdate]": "desc",
+        forceQuery: 1,
+      })
+    : [];
+  const frontContacts = frontSweepLimit > 0
+    ? await fetchContactsByTag(launch, tagId, 0, frontSweepLimit, {
+        "orders[cdate]": "desc",
+        forceQuery: 1,
+      })
+    : [];
+  const cursorOffset = stateOffset === 0 ? frontSweepLimit : stateOffset;
+  const cursorBatch = cursorLimit > 0
+    ? await fetchContactsByTagBatch(launch, tagId, cursorOffset, cursorLimit, {
+        "orders[cdate]": "desc",
+        forceQuery: 1,
+      })
+    : {
+        contacts: [] as ActiveCampaignContact[],
+        nextOffset: cursorOffset,
+        reachedEnd: true,
+        pageLimit: ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT,
+      };
+  const contactsById = new Map<string, ActiveCampaignContact>();
+
+  for (const contact of [...recentUpdatedContacts, ...frontContacts, ...cursorBatch.contacts]) {
+    contactsById.set(contact.id, contact);
+  }
+
+  return {
+    contacts: [...contactsById.values()],
+    nextOffset: cursorBatch.reachedEnd ? 0 : cursorBatch.nextOffset,
+    reachedEnd: cursorBatch.reachedEnd,
+    pageLimit: ACTIVE_CAMPAIGN_CONTACT_PAGE_LIMIT,
+    coverage: {
+      recentUpdatedLimit,
+      recentUpdatedFetched: recentUpdatedContacts.length,
+      recentUpdatedAfter: updatedAfter,
+      frontSweepLimit,
+      frontSweepFetched: frontContacts.length,
+      cursorLimit,
+      cursorOffset,
+      cursorFetched: cursorBatch.contacts.length,
+      uniqueFetched: contactsById.size,
+    },
   };
 }
 
@@ -460,7 +543,7 @@ function buildContactPayload(contact: ActiveCampaignContact, fieldPayload: JsonR
 function buildCaptureFingerprint(contact: ActiveCampaignContact) {
   const email = contact.email ? `email:${contact.email.toLowerCase()}` : null;
   const phone = normalizeBrazilianPhone(contact.phone);
-  return normalizeKey(contact.id || email || phone || "");
+  return normalizeKey((phone ? `phone:${phone}` : null) || email || `active:${contact.id}` || "");
 }
 
 function buildSheetIndex(values: unknown[][]) {
@@ -510,6 +593,12 @@ function contactAlreadyInSheet(
   const email = contact.email?.toLowerCase() || null;
   const phone = normalizeBrazilianPhone(contact.phone);
   return Boolean((email && sheetIndex.emails.has(email)) || (phone && sheetIndex.phones.has(phone)));
+}
+
+function rememberSample<T>(items: T[], item: T, max = 10) {
+  if (items.length < max) {
+    items.push(item);
+  }
 }
 
 async function hasCaptureRecord(
@@ -672,7 +761,7 @@ async function reconcileLaunch(
     return { launchId: launch.id, skipped: true, reason: "google_sheets_not_configured" };
   }
 
-  const contactBatch = await fetchContactsByTagBatch(launch, tag.id, state.offset, limit);
+  const contactBatch = await fetchContactsByTagCoverageBatch(launch, tag.id, state.offset, limit);
   const contacts = contactBatch.contacts;
   const fieldDefinitions = contacts.length > 0 ? await loadActiveCampaignFieldDefinitions(launch) : [];
   const rowsToAppend: Array<{
@@ -685,19 +774,42 @@ async function reconcileLaunch(
     fetched: contacts.length,
     appended: 0,
     skippedExisting: 0,
+    skippedExistingSheet: 0,
+    skippedExistingRecord: 0,
     skippedMissingIdentity: 0,
     errors: 0,
+  };
+  const samples = {
+    appended: [] as JsonRecord[],
+    skippedExisting: [] as JsonRecord[],
+    skippedMissingIdentity: [] as JsonRecord[],
+    failed: [] as JsonRecord[],
   };
 
   for (const contact of contacts) {
     try {
       if (!contact.email && !normalizeBrazilianPhone(contact.phone)) {
         counters.skippedMissingIdentity += 1;
+        rememberSample(samples.skippedMissingIdentity, {
+          activeContactId: contact.id,
+          email: contact.email,
+          phone: contact.phone,
+        });
         continue;
       }
 
-      if (contactAlreadyInSheet(contact, sheetIndex) || await hasCaptureRecord(supabase, launch, contact)) {
+      const alreadyInSheet = contactAlreadyInSheet(contact, sheetIndex);
+      const alreadyRecorded = alreadyInSheet ? false : await hasCaptureRecord(supabase, launch, contact);
+      if (alreadyInSheet || alreadyRecorded) {
         counters.skippedExisting += 1;
+        if (alreadyInSheet) counters.skippedExistingSheet += 1;
+        if (alreadyRecorded) counters.skippedExistingRecord += 1;
+        rememberSample(samples.skippedExisting, {
+          activeContactId: contact.id,
+          email: contact.email,
+          phone: contact.phone,
+          reason: alreadyInSheet ? "sheet_email_or_phone" : "capture_record",
+        });
         continue;
       }
 
@@ -706,8 +818,19 @@ async function reconcileLaunch(
       const builtRow = buildActiveCampaignSheetsRow(launch, contact, payload);
       header = header ?? builtRow.header;
       rowsToAppend.push({ contact, row: builtRow.row });
+      rememberSample(samples.appended, {
+        activeContactId: contact.id,
+        email: contact.email,
+        phone: contact.phone,
+      });
     } catch (error) {
       counters.errors += 1;
+      rememberSample(samples.failed, {
+        activeContactId: contact.id,
+        email: contact.email,
+        phone: contact.phone,
+        error: error instanceof Error ? error.message : String(error),
+      });
       await insertProcessingLog(
         supabase,
         launch.id,
@@ -786,6 +909,8 @@ async function reconcileLaunch(
     reachedEnd: contactBatch.reachedEnd,
     activeCampaignPageLimit: contactBatch.pageLimit,
     requestedBatchLimit: limit,
+    coverage: contactBatch.coverage,
+    samples,
     ...counters,
   };
 
@@ -797,7 +922,7 @@ async function reconcileLaunch(
       launch.id,
       counters.errors > 0 ? "warning" : "success",
       "ACTIVE_SHEETS_CAPTURE_RECONCILED",
-      "Revisao horaria ActiveCampaign -> Google Sheets concluida",
+      "Revisao periodica ActiveCampaign -> Google Sheets concluida",
       "O Launch Hub procurou contatos com a tag de captura no ActiveCampaign e completou a planilha sem reenviar duplicados.",
       summary,
     );
