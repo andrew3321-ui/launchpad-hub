@@ -6,6 +6,7 @@ import {
   processIncomingContactEvent,
   type IncomingEventBody,
 } from "../_shared/contact-processing.ts";
+import { insertContactLog } from "../_shared/contact-logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -468,7 +469,7 @@ async function insertProcessingLog(
   message: string,
   details: JsonRecord = {},
 ) {
-  await supabase.from("contact_processing_logs").insert({
+  await insertContactLog(supabase, {
     launch_id: launchId,
     source,
     level,

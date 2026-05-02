@@ -5,6 +5,7 @@ import {
   processIncomingContactEvent,
   type IncomingEventBody,
 } from "../_shared/contact-processing.ts";
+import { insertContactLog } from "../_shared/contact-logging.ts";
 import { appendGoogleSheetsRow, parseGoogleSheetsConfig, readGoogleSheetsValues } from "../_shared/google-sheets.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -2585,7 +2586,7 @@ async function insertProcessingLog(
   message: string,
   details: JsonRecord = {},
 ) {
-  await supabase.from("contact_processing_logs").insert({
+  await insertContactLog(supabase, {
     launch_id: launchId,
     contact_id: contactId,
     event_id: eventId,
@@ -2595,7 +2596,7 @@ async function insertProcessingLog(
     title,
     message,
     details,
-  } as Record<string, unknown>);
+  });
 }
 
 async function createRoutingAction(

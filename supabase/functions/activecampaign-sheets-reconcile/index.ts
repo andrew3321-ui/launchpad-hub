@@ -5,6 +5,7 @@ import {
   parseGoogleSheetsConfig,
   readGoogleSheetsValues,
 } from "../_shared/google-sheets.ts";
+import { insertContactLog } from "../_shared/contact-logging.ts";
 
 type AnySupabaseClient = ReturnType<typeof createClient>;
 type JsonRecord = Record<string, unknown>;
@@ -723,7 +724,7 @@ async function insertProcessingLog(
   message: string,
   details: JsonRecord = {},
 ) {
-  await supabase.from("contact_processing_logs").insert({
+  await insertContactLog(supabase, {
     launch_id: launchId,
     source: "activecampaign",
     level,

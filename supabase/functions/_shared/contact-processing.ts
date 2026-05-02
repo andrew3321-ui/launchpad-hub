@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { insertContactLogs, type ContactLogRow } from "./contact-logging.ts";
 type AnySupabaseClient = any;
 
 export const validSources = [
@@ -494,7 +495,7 @@ export async function processIncomingContactEvent(
     eventId = event.id;
   }
 
-  const logs: Array<Record<string, unknown>> = [];
+  const logs: ContactLogRow[] = [];
   const candidateIds = new Set<string>();
   const phoneCandidateIds = new Set<string>();
   let knownIdentityContactId: string | null = null;
@@ -568,7 +569,7 @@ export async function processIncomingContactEvent(
     }
 
     if (logs.length > 0) {
-      await supabase.from("contact_processing_logs").insert(logs);
+      await insertContactLogs(supabase, logs);
     }
 
     return { status: "rejected", reason: "missing_valid_email_or_phone", eventId: eventId ?? undefined, logsCreated: logs.length };
@@ -968,7 +969,7 @@ export async function processIncomingContactEvent(
   }
 
   if (logs.length > 0) {
-    await supabase.from("contact_processing_logs").insert(logs);
+    await insertContactLogs(supabase, logs);
   }
 
   return {
