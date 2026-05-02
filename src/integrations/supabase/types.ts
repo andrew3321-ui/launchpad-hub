@@ -391,11 +391,14 @@ export type Database = {
       launch_google_sheet_capture_records: {
         Row: {
           active_contact_id: string | null
+          append_status: string
+          claimed_at: string
           created_at: string
           cycle_number: number
           id: string
           launch_id: string
           normalized_phone: string | null
+          phone_dedupe_key: string | null
           primary_email: string | null
           row_fingerprint: string
           sheet_name: string
@@ -404,11 +407,14 @@ export type Database = {
         }
         Insert: {
           active_contact_id?: string | null
+          append_status?: string
+          claimed_at?: string
           created_at?: string
           cycle_number?: number
           id?: string
           launch_id: string
           normalized_phone?: string | null
+          phone_dedupe_key?: string | null
           primary_email?: string | null
           row_fingerprint: string
           sheet_name: string
@@ -417,11 +423,14 @@ export type Database = {
         }
         Update: {
           active_contact_id?: string | null
+          append_status?: string
+          claimed_at?: string
           created_at?: string
           cycle_number?: number
           id?: string
           launch_id?: string
           normalized_phone?: string | null
+          phone_dedupe_key?: string | null
           primary_email?: string | null
           row_fingerprint?: string
           sheet_name?: string
@@ -1148,6 +1157,10 @@ export type Database = {
       }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      launchhub_phone_dedupe_key: {
+        Args: { input_phone: string }
+        Returns: string
+      }
       list_admin_user_access_overview: {
         Args: never
         Returns: {
