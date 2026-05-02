@@ -68,19 +68,21 @@ function normalizeAssignedExperts(value: unknown): AssignedExpert[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((item) => {
+    .map((item): AssignedExpert | null => {
       if (!item || typeof item !== "object") return null;
       const record = item as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      if (!id) return null;
 
       return {
-        assignedAt: typeof record.assignedAt === "string" ? record.assignedAt : null,
-        id: typeof record.id === "string" ? record.id : "",
+        assignedAt: typeof record.assignedAt === "string" ? record.assignedAt : undefined,
+        id,
         name: typeof record.name === "string" ? record.name : "Expert sem nome",
-        slug: typeof record.slug === "string" ? record.slug : null,
-        status: typeof record.status === "string" ? record.status : null,
+        slug: typeof record.slug === "string" ? record.slug : undefined,
+        status: typeof record.status === "string" ? record.status : undefined,
       };
     })
-    .filter((item): item is AssignedExpert => Boolean(item.id));
+    .filter((item): item is AssignedExpert => item !== null);
 }
 
 export default function Settings() {
