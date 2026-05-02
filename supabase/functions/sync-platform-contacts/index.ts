@@ -7,6 +7,13 @@ import {
   type IncomingEventBody,
 } from "../_shared/contact-processing.ts";
 import { insertContactLog } from "../_shared/contact-logging.ts";
+import {
+  PlatformRateLimitExceededError,
+  readPlatformRateLimit,
+  stableRateLimitKey,
+  waitForPlatformRateLimit,
+  type PlatformProvider,
+} from "../_shared/platform-rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,6 +32,8 @@ const defaultActiveCampaignRuntimeMs = 12000;
 const activeCampaignChainGraceMs = 120000;
 const maxSampleErrors = 10;
 const ACTIVE_CAMPAIGN_SYNC_DISABLED = true;
+const PLATFORM_RATE_LIMIT_MAX_WAIT_MS = Number(Deno.env.get("LAUNCHHUB_SYNC_RATE_LIMIT_MAX_WAIT_MS") || 8000);
+let platformRateLimitClient: AnySupabaseClient | null = null;
 
 type SyncSource = "activecampaign" | "uchat";
 type ActiveCampaignSyncMode = "full" | "resume" | "incremental";
@@ -370,6 +379,34 @@ function normalizeActiveCampaignBaseUrl(apiUrl: string) {
   return trimmed.endsWith("/api/3") ? trimmed.slice(0, -6) : trimmed;
 }
 
+async function enforcePlatformRateLimit(
+  provider: PlatformProvider,
+  scopeKey: string,
+  weight = 1,
+) {
+  if (!platformRateLimitClient) return;
+
+  try {
+    await waitForPlatformRateLimit(platformRateLimitClient, {
+      provider,
+      scopeKey,
+      weight,
+      limitPerMinute: readPlatformRateLimit(provider),
+      maxWaitMs: PLATFORM_RATE_LIMIT_MAX_WAIT_MS,
+    });
+  } catch (error) {
+    if (error instanceof PlatformRateLimitExceededError) {
+      throw new ProcessContactError(
+        `Rate limit atingido para ${provider}. Tente novamente em instantes.`,
+        429,
+        JSON.stringify(error.details),
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function fetchJsonWithRetry(url: string, init: RequestInit, retries = 2) {
   let lastError: Error | null = null;
 
@@ -410,6 +447,8 @@ async function activeCampaignRequest(
     url.searchParams.set(key, String(value));
   }
 
+  await enforcePlatformRateLimit("activecampaign", normalizeActiveCampaignBaseUrl(apiUrl));
+
   return await fetchJsonWithRetry(url.toString(), {
     method: "GET",
     headers: {
@@ -430,6 +469,8 @@ async function uchatRequest(
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
   }
+
+  await enforcePlatformRateLimit("uchat", stableRateLimitKey(apiToken));
 
   return await fetchJsonWithRetry(url.toString(), {
     method: "GET",
@@ -1069,6 +1110,7 @@ Deno.serve(async (request) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+  platformRateLimitClient = supabase;
   const isInternalSync = hasInternalSyncAuthorization(request);
   let runId: string | null = null;
   let launch: LaunchRow | null = null;

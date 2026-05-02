@@ -856,6 +856,33 @@ export type Database = {
           },
         ]
       }
+      platform_rate_limit_windows: {
+        Row: {
+          limit_per_minute: number
+          provider: string
+          request_count: number
+          scope_key: string
+          updated_at: string
+          window_started_at: string
+        }
+        Insert: {
+          limit_per_minute: number
+          provider: string
+          request_count?: number
+          scope_key: string
+          updated_at?: string
+          window_started_at: string
+        }
+        Update: {
+          limit_per_minute?: number
+          provider?: string
+          request_count?: number
+          scope_key?: string
+          updated_at?: string
+          window_started_at?: string
+        }
+        Relationships: []
+      }
       platform_sync_runs: {
         Row: {
           created_count: number
@@ -1063,6 +1090,23 @@ export type Database = {
       configure_activecampaign_sync_scheduler: {
         Args: { anon_key: string; cron_secret: string; project_url: string }
         Returns: Json
+      }
+      consume_platform_rate_limit: {
+        Args: {
+          p_limit_per_minute: number
+          p_provider: string
+          p_scope_key: string
+          p_weight?: number
+        }
+        Returns: {
+          allowed: boolean
+          limit_per_minute: number
+          provider: string
+          request_count: number
+          retry_after_ms: number
+          scope_key: string
+          window_started_at: string
+        }[]
       }
       create_launch_metadata: {
         Args: {

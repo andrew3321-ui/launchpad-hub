@@ -7,6 +7,13 @@ import {
 } from "../_shared/contact-processing.ts";
 import { insertContactLog } from "../_shared/contact-logging.ts";
 import { appendGoogleSheetsRow, parseGoogleSheetsConfig, readGoogleSheetsValues } from "../_shared/google-sheets.ts";
+import {
+  PlatformRateLimitExceededError,
+  readPlatformRateLimit,
+  stableRateLimitKey,
+  waitForPlatformRateLimit,
+  type PlatformProvider,
+} from "../_shared/platform-rate-limit.ts";
 
 type JsonRecord = Record<string, unknown>;
 type AnySupabaseClient = any;
@@ -143,7 +150,9 @@ const corsHeaders = {
 
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
+const PLATFORM_RATE_LIMIT_MAX_WAIT_MS = Number(Deno.env.get("LAUNCHHUB_RATE_LIMIT_MAX_WAIT_MS") || 2500);
 const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
+let platformRateLimitClient: AnySupabaseClient | null = null;
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
   utm_source: "21",
   utm_medium: "22",
@@ -1074,6 +1083,7 @@ async function findExistingGoogleSheetsRow(
     return { exists: false, reason: "missing_identity" };
   }
 
+  await enforcePlatformRateLimit("google_sheets", config.spreadsheetId);
   const result = await readGoogleSheetsValues(config, "C2:D");
   if (result.skipped) {
     return { exists: false, reason: result.reason };
@@ -1890,6 +1900,34 @@ function normalizeActiveCampaignBaseUrl(apiUrl: string) {
   return trimmed.endsWith("/api/3") ? trimmed.slice(0, -6) : trimmed;
 }
 
+async function enforcePlatformRateLimit(
+  provider: PlatformProvider,
+  scopeKey: string,
+  weight = 1,
+) {
+  if (!platformRateLimitClient) return;
+
+  try {
+    await waitForPlatformRateLimit(platformRateLimitClient, {
+      provider,
+      scopeKey,
+      weight,
+      limitPerMinute: readPlatformRateLimit(provider),
+      maxWaitMs: PLATFORM_RATE_LIMIT_MAX_WAIT_MS,
+    });
+  } catch (error) {
+    if (error instanceof PlatformRateLimitExceededError) {
+      throw new ProcessContactError(
+        `Rate limit atingido para ${provider}. A tentativa sera reagendada automaticamente.`,
+        429,
+        JSON.stringify(error.details),
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function activeCampaignRequest(
   apiUrl: string,
   apiKey: string,
@@ -1903,6 +1941,8 @@ async function activeCampaignRequest(
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
   }
+
+  await enforcePlatformRateLimit("activecampaign", normalizeActiveCampaignBaseUrl(apiUrl));
 
   return await requestJson(url.toString(), {
     method,
@@ -1927,6 +1967,8 @@ async function uchatRequest(
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
   }
+
+  await enforcePlatformRateLimit("uchat", stableRateLimitKey(apiToken));
 
   const response = await requestJson(url.toString(), {
     method,
@@ -2381,6 +2423,7 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     } as const;
   }
 
+  await enforcePlatformRateLimit("google_sheets", config.spreadsheetId);
   const result = await appendGoogleSheetsRow(config, header, row);
 
   if (!result.skipped) {
@@ -5197,12 +5240,27 @@ async function processQueuedLaunchWebhookJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const shouldRetry = nextAttempts < 5;
+    let retryDelayMs = Math.min(nextAttempts * 30_000, 5 * 60_000);
+
+    if (error instanceof ProcessContactError && error.statusCode === 429 && error.details) {
+      try {
+        const details = JSON.parse(error.details);
+        if (isRecord(details)) {
+          const retryAfterMs = Number(details.retryAfterMs);
+          if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+            retryDelayMs = Math.min(Math.max(retryAfterMs, 15_000), 5 * 60_000);
+          }
+        }
+      } catch {
+        // Keep the default backoff when details are not JSON.
+      }
+    }
 
     await updateLaunchWebhookJob(supabase, jobId, {
       status: shouldRetry ? "pending" : "failed",
       last_error: message,
       next_attempt_at: shouldRetry
-        ? new Date(Date.now() + Math.min(nextAttempts * 30_000, 5 * 60_000)).toISOString()
+        ? new Date(Date.now() + retryDelayMs).toISOString()
         : null,
     });
 
@@ -5240,6 +5298,7 @@ Deno.serve(async (request) => {
 
     try {
       const supabase = createClient(supabaseUrl, serviceRoleKey);
+      platformRateLimitClient = supabase;
       const result = await processQueuedLaunchWebhookJob(supabase, workerJobId);
       return jsonResponse(result);
     } catch (error) {
@@ -5283,6 +5342,7 @@ Deno.serve(async (request) => {
       ...bodyPayload,
     } satisfies JsonRecord;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
+    platformRateLimitClient = supabase;
     const launch = await fetchLaunch(supabase, launchId, launchSlug);
 
     if (!token || token !== launch.webhook_secret) {

@@ -6,6 +6,11 @@ import {
   readGoogleSheetsValues,
 } from "../_shared/google-sheets.ts";
 import { insertContactLog } from "../_shared/contact-logging.ts";
+import {
+  readPlatformRateLimit,
+  waitForPlatformRateLimit,
+  type PlatformProvider,
+} from "../_shared/platform-rate-limit.ts";
 
 type AnySupabaseClient = ReturnType<typeof createClient>;
 type JsonRecord = Record<string, unknown>;
@@ -63,6 +68,8 @@ const ACTIVE_CAMPAIGN_RETRIES = 2;
 const RECENT_UPDATED_SWEEP_HOURS = 48;
 const RECENT_UPDATED_SWEEP_LIMIT = 100;
 const FRONT_SWEEP_LIMIT = 50;
+const PLATFORM_RATE_LIMIT_MAX_WAIT_MS = Number(Deno.env.get("LAUNCHHUB_RECONCILE_RATE_LIMIT_MAX_WAIT_MS") || 8000);
+let platformRateLimitClient: AnySupabaseClient | null = null;
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
   tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
@@ -136,6 +143,22 @@ function normalizeActiveCampaignBaseUrl(apiUrl: string) {
   return trimmed.endsWith("/api/3") ? trimmed.slice(0, -6) : trimmed;
 }
 
+async function enforcePlatformRateLimit(
+  provider: PlatformProvider,
+  scopeKey: string,
+  weight = 1,
+) {
+  if (!platformRateLimitClient) return;
+
+  await waitForPlatformRateLimit(platformRateLimitClient, {
+    provider,
+    scopeKey,
+    weight,
+    limitPerMinute: readPlatformRateLimit(provider),
+    maxWaitMs: PLATFORM_RATE_LIMIT_MAX_WAIT_MS,
+  });
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -151,6 +174,8 @@ async function activeCampaignRequest(
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
   }
+
+  await enforcePlatformRateLimit("activecampaign", normalizeActiveCampaignBaseUrl(apiUrl));
 
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= ACTIVE_CAMPAIGN_RETRIES; attempt += 1) {
@@ -643,6 +668,7 @@ async function loadSheetIndex(launch: LaunchRow) {
     return { configured: false, emails: new Set<string>(), phones: new Set<string>() };
   }
 
+  await enforcePlatformRateLimit("google_sheets", config.spreadsheetId);
   const result = await readGoogleSheetsValues(config, "C2:D");
   if (result.skipped) {
     return { configured: false, emails: new Set<string>(), phones: new Set<string>() };
@@ -932,6 +958,7 @@ async function reconcileLaunch(
         throw new Error("Google Sheets configuration is incomplete.");
       }
 
+      await enforcePlatformRateLimit("google_sheets", config.spreadsheetId);
       const result = await appendGoogleSheetsRows(
         config,
         header,
@@ -1029,6 +1056,7 @@ Deno.serve(async (request) => {
     const launchId = nonEmptyString(body.launchId);
     const limit = clampNumber(body.limit, DEFAULT_BATCH_LIMIT, 1, MAX_BATCH_LIMIT);
     const supabase = createClient(supabaseUrl, serviceRoleKey);
+    platformRateLimitClient = supabase;
     const launches = await loadLaunches(supabase, launchId);
     const results = [];
 

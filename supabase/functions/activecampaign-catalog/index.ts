@@ -1,7 +1,14 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  readPlatformRateLimit,
+  waitForPlatformRateLimit,
+} from "../_shared/platform-rate-limit.ts";
 
 type JsonRecord = Record<string, unknown>;
 const ACTIVECAMPAIGN_REQUEST_TIMEOUT_MS = 12000;
+const PLATFORM_RATE_LIMIT_MAX_WAIT_MS = Number(Deno.env.get("LAUNCHHUB_CATALOG_RATE_LIMIT_MAX_WAIT_MS") || 5000);
+let platformRateLimitClient: any | null = null;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,6 +39,17 @@ function isRecord(value: unknown): value is JsonRecord {
 function normalizeActiveCampaignBaseUrl(apiUrl: string) {
   const trimmed = apiUrl.trim().replace(/\/+$/, "");
   return trimmed.endsWith("/api/3") ? trimmed.slice(0, -6) : trimmed;
+}
+
+async function enforceActiveCampaignRateLimit(apiUrl: string) {
+  if (!platformRateLimitClient) return;
+
+  await waitForPlatformRateLimit(platformRateLimitClient, {
+    provider: "activecampaign",
+    scopeKey: normalizeActiveCampaignBaseUrl(apiUrl),
+    limitPerMinute: readPlatformRateLimit("activecampaign"),
+    maxWaitMs: PLATFORM_RATE_LIMIT_MAX_WAIT_MS,
+  });
 }
 
 async function requestJson(
@@ -84,6 +102,8 @@ async function activeCampaignRequest(
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
   }
+
+  await enforceActiveCampaignRateLimit(apiUrl);
 
   return await requestJson(url.toString(), {
     method: "GET",
@@ -139,6 +159,12 @@ serve(async (request) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (supabaseUrl && serviceRoleKey) {
+      platformRateLimitClient = createClient(supabaseUrl, serviceRoleKey);
+    }
+
     const payload = (await request.json()) as JsonRecord;
     const apiUrl = nonEmptyString(payload.apiUrl);
     const apiKey = nonEmptyString(payload.apiKey);
