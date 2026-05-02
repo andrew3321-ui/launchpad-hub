@@ -175,7 +175,11 @@ const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflo
 const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v2";
 const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
 const ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX = "active-sheets:v1";
-const ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX = "active-job:v1";
+const WEBHOOK_JOB_DEDUPE_PREFIX = "webhook-job:v2";
+const WEBHOOK_JOB_IDEMPOTENCY_BUCKET_MS = Math.max(
+  Number(Deno.env.get("LAUNCHHUB_WEBHOOK_IDEMPOTENCY_BUCKET_MS") || 5 * 60 * 1000),
+  10 * 1000,
+);
 const ACTIVE_CAMPAIGN_SHEET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
   tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
@@ -3117,37 +3121,143 @@ function buildActiveCampaignSheetsActionKey(
   ].join(":");
 }
 
-function buildActiveCampaignWebhookJobDedupeKey(
-  launch: LaunchRow,
-  normalizedEvent: NormalizedWebhookEvent,
-) {
+function normalizeDedupeList(values: Array<string | null | undefined>) {
+  const normalizedValues = uniqueStrings(values)
+    .map((value) => normalizeDedupeKeyPart(value, ""))
+    .filter(Boolean)
+    .sort();
+
+  return normalizedValues.length > 0 ? normalizedValues.join("_") : null;
+}
+
+function extractWebhookProviderEventId(payload: JsonRecord) {
+  return findStringDeep(payload, [
+    "event_id",
+    "eventid",
+    "webhook_id",
+    "webhookid",
+    "message_id",
+    "messageid",
+    "request_id",
+    "requestid",
+    "submission_id",
+    "response_id",
+    "result_id",
+    "id",
+  ]);
+}
+
+function parseWebhookTimestampMs(value: unknown) {
+  const raw = typeof value === "number" ? String(value) : nonEmptyString(value);
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const numericTimestamp = Number(raw);
+    if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) return null;
+    return numericTimestamp > 10_000_000_000 ? numericTimestamp : numericTimestamp * 1000;
+  }
+
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractWebhookEventTimestampMs(payload: JsonRecord) {
+  const rawTimestamp =
+    findStringDeep(payload, [
+      "event_timestamp",
+      "event_time",
+      "webhook_timestamp",
+      "webhook_time",
+      "occurred_at",
+      "occurredAt",
+      "createdAt_with_timezone_br",
+      "created_at_with_timezone_br",
+      "memberAddedAt",
+      "member_added_at",
+      "joinedAt",
+      "joined_at",
+      "submitted_at",
+      "submittedAt",
+      "date_time",
+      "datetime",
+      "timestamp",
+      "created_at",
+      "createdAt",
+    ]) ||
+    getActiveCampaignBodyValue(payload, "date_time") ||
+    getActiveCampaignBodyValue(payload, "datetime") ||
+    getActiveCampaignBodyValue(payload, "timestamp");
+
+  return parseWebhookTimestampMs(rawTimestamp) ?? Date.now();
+}
+
+function buildWebhookTimestampBucket(payload: JsonRecord) {
+  const timestampMs = extractWebhookEventTimestampMs(payload);
+  return String(Math.floor(timestampMs / WEBHOOK_JOB_IDEMPOTENCY_BUCKET_MS));
+}
+
+function buildWebhookRecipientDedupeKey(normalizedEvent: NormalizedWebhookEvent) {
   const phoneKey =
+    buildBrazilianPhoneDedupeKey(normalizedEvent.contact.phone) ||
     pickPreferredUchatCreatePhone(normalizedEvent.contact.phone) ||
     digitsOnly(normalizedEvent.contact.phone) ||
-    normalizedEvent.contact.phone;
-  const recipientKey =
-    normalizedEvent.externalContactId ||
-    normalizedEvent.contact.email ||
-    phoneKey;
+    null;
+  const emailKey = normalizedEvent.contact.email?.toLowerCase() || null;
+  const externalKey = normalizedEvent.externalContactId;
 
-  if (!recipientKey) return null;
+  if (phoneKey) return `phone:${phoneKey}`;
+  if (emailKey) return `email:${emailKey}`;
+  if (externalKey) return `external:${externalKey}`;
+  return null;
+}
 
-  const subflowNs = findStringDeep(normalizedEvent.payload, [
+function buildWebhookTagDedupeKey(launch: LaunchRow, source: WebhookSource, payload: JsonRecord) {
+  const subflowNs = findStringDeep(payload, [
     "subflow_ns",
     "subflow",
     "welcome_subflow_ns",
   ]);
-  const tagName = findStringDeep(normalizedEvent.payload, ["tag_name", "uchat_tag"]);
-  const activeTagContext = extractActiveCampaignWebhookTagContext(normalizedEvent.payload);
-  const activeTagKey = activeTagContext.ids[0] || activeTagContext.names[0] || tagName;
+  const tagId = findStringDeep(payload, ["tag_id", "tagid"]);
+  const uchatTag = findStringDeep(payload, ["uchat_tag", "uchat_tag_name"]);
+  const resolvedActiveTags = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
+  const activeTagContext = source === "activecampaign"
+    ? extractActiveCampaignWebhookTagContext(payload)
+    : { ids: [] as string[], names: [] as string[] };
+
+  return normalizeDedupeList([
+    ...activeTagContext.ids.map((value) => `active_tag_id:${value}`),
+    ...activeTagContext.names.map((value) => `active_tag_name:${value}`),
+    ...extractExplicitActiveCampaignTags(payload).map((value) => `active_tag:${value}`),
+    ...extractTagNames(payload).map((value) => `tag:${value}`),
+    ...resolvedActiveTags.map((value) => `resolved_active_tag:${value}`),
+    tagId && `tag_id:${tagId}`,
+    uchatTag && `uchat_tag:${uchatTag}`,
+    subflowNs && `subflow:${subflowNs}`,
+    source === "sendflow" ? findStringDeep(payload, ["campaignId", "campaign_id"]) : null,
+    source === "sendflow" ? findStringDeep(payload, ["groupJid", "group_jid", "groupId", "group_id"]) : null,
+    source === "sendflow" ? extractWebhookProviderEventId(payload) : null,
+  ]);
+}
+
+function buildWebhookJobDedupeKey(
+  launch: LaunchRow,
+  normalizedEvent: NormalizedWebhookEvent,
+) {
+  const recipientKey = buildWebhookRecipientDedupeKey(normalizedEvent);
+  if (!recipientKey) return null;
+
+  const tagKey = buildWebhookTagDedupeKey(launch, normalizedEvent.source, normalizedEvent.payload);
+  const timestampBucket = buildWebhookTimestampBucket(normalizedEvent.payload);
 
   return [
-    ACTIVE_CAMPAIGN_JOB_ACTION_PREFIX,
+    WEBHOOK_JOB_DEDUPE_PREFIX,
+    `source:${normalizedEvent.source}`,
+    `expert:${launch.id}`,
     `cycle:${launch.current_cycle_number || 1}`,
     `event:${normalizeDedupeKeyPart(normalizedEvent.eventType)}`,
     `recipient:${normalizeDedupeKeyPart(recipientKey)}`,
-    `subflow:${normalizeDedupeKeyPart(subflowNs)}`,
-    `tag:${normalizeDedupeKeyPart(activeTagKey)}`,
+    `tag:${normalizeDedupeKeyPart(tagKey)}`,
+    `bucket:${timestampBucket}`,
   ].join(":");
 }
 
@@ -5282,9 +5392,7 @@ async function enqueueLaunchWebhookJob(
   launch: LaunchRow,
   normalizedEvent: NormalizedWebhookEvent,
 ) {
-  const dedupeKey = normalizedEvent.source === "activecampaign"
-    ? buildActiveCampaignWebhookJobDedupeKey(launch, normalizedEvent)
-    : null;
+  const dedupeKey = buildWebhookJobDedupeKey(launch, normalizedEvent);
 
   if (dedupeKey) {
     const { data: existingJob } = await supabase
