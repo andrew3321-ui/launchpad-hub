@@ -80,7 +80,7 @@ function normalizeAssignedExperts(value: unknown): AssignedExpert[] {
         status: typeof record.status === "string" ? record.status : null,
       };
     })
-    .filter((item): item is AssignedExpert => Boolean(item?.id));
+    .filter((item): item is AssignedExpert => Boolean(item.id));
 }
 
 export default function Settings() {
