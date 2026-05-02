@@ -17,6 +17,7 @@ const pageTitles: Record<string, string> = {
   "/leads": "Base tratada de contatos",
   "/queue": "Fila operacional",
   "/logs": "Observabilidade e logs",
+  "/settings": "Perfil e configuracoes",
 };
 
 export function AppLayout() {

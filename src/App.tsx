@@ -16,6 +16,7 @@ import Rules from "./pages/Rules";
 import Leads from "./pages/Leads";
 import Queue from "./pages/Queue";
 import Logs from "./pages/Logs";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
@@ -51,6 +52,7 @@ const App = () => (
               <Route path="/leads" element={<Leads />} />
               <Route path="/queue" element={<Queue />} />
               <Route path="/logs" element={<Logs />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

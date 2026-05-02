@@ -1,7 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Orbit, RadioTower, Settings2, Sparkles, Users } from "lucide-react";
-import { SchemaSetupCard } from "@/components/SchemaSetupCard";
-import { SupabaseConnectionCard } from "@/components/SupabaseConnectionCard";
+import { ArrowUpRight, Orbit, RadioTower, Sparkles, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,8 +13,8 @@ const operationalCards = [
   },
   {
     icon: Orbit,
-    label: "Tratamento automático",
-    description: "Padronize números, mescle duplicados e acompanhe as tags que surgiram em cada jornada.",
+    label: "Tratamento automatico",
+    description: "Padronize numeros, mescle duplicados e acompanhe as tags que surgiram em cada jornada.",
   },
   {
     icon: Users,
@@ -46,10 +44,10 @@ export default function Dashboard() {
 
             <div className="space-y-4">
               <h2 className="max-w-4xl text-balance font-display text-4xl font-semibold leading-[1.02] text-white sm:text-5xl xl:text-6xl">
-                Quem tem um <span className="text-[#a9f0ff]">Megafone</span> não precisa gritar.
+                Quem tem um <span className="text-[#a9f0ff]">Megafone</span> nao precisa gritar.
               </h2>
               <p className="max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-                Organize a operação por expert, receba todos os sinais por webhook, trate contatos automaticamente
+                Organize a operacao por expert, receba todos os sinais por webhook, trate contatos automaticamente
                 e direcione o que importa para ActiveCampaign, UChat e Google Sheets.
               </p>
             </div>
@@ -62,7 +60,7 @@ export default function Dashboard() {
                 </Link>
               </Button>
               <Button asChild variant="outline">
-                <Link to="/experts">Gerenciar experts</Link>
+                <Link to="/settings">Perfil e configuracoes</Link>
               </Button>
             </div>
 
@@ -87,13 +85,13 @@ export default function Dashboard() {
               className="brand-astronaut-image absolute bottom-0 right-0 h-full w-full object-contain object-bottom"
             />
             <div className="absolute inset-x-0 bottom-0 rounded-b-[2rem] bg-gradient-to-t from-[#051020] via-[#051020]/85 to-transparent p-5 pt-20">
-              <p className="brand-kicker">Operação em orbita</p>
+              <p className="brand-kicker">Operacao em orbita</p>
               <h3 className="mt-2 font-display text-2xl font-semibold text-white">
                 {activeLaunch ? activeLaunch.name : "Selecione um expert para amplificar"}
               </h3>
               <p className="mt-3 text-sm leading-7 text-slate-300">
                 {activeLaunch
-                  ? `Ciclo atual ${activeLaunch.current_cycle_number}. Esse expert já pode receber conexões, regras e observabilidade em tempo real.`
+                  ? `Ciclo atual ${activeLaunch.current_cycle_number}. Esse expert ja pode receber conexoes, regras e observabilidade em tempo real.`
                   : "Crie ou escolha um expert para ativar a cabine principal do sistema."}
               </p>
             </div>
@@ -104,9 +102,9 @@ export default function Dashboard() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="brand-card border-white/10 bg-[linear-gradient(180deg,rgba(8,23,46,0.92),rgba(4,12,24,0.84))]">
           <CardHeader>
-            <CardTitle className="text-white">Panorama rápido</CardTitle>
+            <CardTitle className="text-white">Panorama rapido</CardTitle>
             <CardDescription className="text-slate-300">
-              Um resumo do ambiente atual enquanto você constroi a operação.
+              Um resumo do ambiente atual enquanto voce constroi a operacao.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -121,31 +119,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-
-      <section className="space-y-4">
-        <div className="flex items-start gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-[#8feeff]">
-            <Settings2 className="h-5 w-5" />
-          </span>
-          <div className="space-y-1">
-            <h2 className="text-2xl font-semibold text-white">Configurações do ambiente</h2>
-            <p className="max-w-2xl text-sm leading-7 text-slate-300">
-              Centralize aqui a conexão do Supabase e a validação do schema para acompanhar o estado tecnico do app sem sair do dashboard.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          <SupabaseConnectionCard
-            title="Conexão Supabase"
-            description="Troque rapidamente o backend ativo durante desenvolvimento e homologacao, sem rebuild."
-          />
-          <SchemaSetupCard
-            title="Validação do schema"
-            description="Confira se o backend conectado já recebeu todas as estruturas que o app precisa para operar."
-          />
-        </div>
-      </section>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   LogOut,
   Radio,
   Rocket,
+  Settings2,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ const menuItems = [
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Fila", url: "/queue", icon: ListOrdered },
   { title: "Logs", url: "/logs", icon: FileText },
+  { title: "Configuracoes", url: "/settings", icon: Settings2 },
 ];
 
 export function AppSidebar() {
@@ -83,7 +85,11 @@ export function AppSidebar() {
                   <p className="text-sm font-semibold text-white">{displayName || "Operador Megafone"}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.28em] text-[#91ecff]/75">Painel de controle</p>
                 </div>
-                <Badge variant="outline" className="border-white/10 bg-white/5 text-[#aef4ff]">
+                <Badge variant="outline" className="gap-2 border-white/10 bg-white/5 text-[#aef4ff]">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#39d5ff] opacity-70" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#39d5ff] shadow-[0_0_12px_rgba(57,213,255,0.9)]" />
+                  </span>
                   Online
                 </Badge>
               </div>

@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.activecampaign-sheets-reconcile]
 verify_jwt = false
+
+[functions.admin-user-management]
+verify_jwt = true
