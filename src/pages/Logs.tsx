@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,10 +11,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAuth } from "@/contexts/AuthContext";
 import { useLaunch } from "@/contexts/LaunchContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, Loader2 } from "lucide-react";
+import { Bug, FileText, Loader2 } from "lucide-react";
 
 type LogLevel = "info" | "warning" | "error" | "success";
 type LogSource =
@@ -37,6 +39,18 @@ interface ProcessingLogRow {
   code: string;
   created_at: string;
   details: Record<string, unknown> | null;
+  level: LogLevel;
+  message: string;
+  source: LogSource;
+  title: string;
+}
+
+interface TechnicalLogRow {
+  id: string;
+  code: string;
+  created_at: string;
+  details: Record<string, unknown> | null;
+  expires_at: string;
   level: LogLevel;
   message: string;
   source: LogSource;
@@ -93,9 +107,11 @@ function getLogCategory(row: ProcessingLogRow): LogCategory {
 
 export default function Logs() {
   const { activeLaunch } = useLaunch();
+  const { profile } = useAuth();
   const { toast } = useToast();
   const activeLaunchId = activeLaunch?.id ?? null;
   const activeCycleNumber = activeLaunch?.current_cycle_number ?? null;
+  const isAdmin = Boolean(profile?.is_admin && profile.approval_status === "approved" && !profile.must_change_password);
 
   const [rows, setRows] = useState<ProcessingLogRow[]>([]);
   const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
@@ -104,6 +120,49 @@ export default function Logs() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [expandedTechnicalLogId, setExpandedTechnicalLogId] = useState<string | null>(null);
+  const [technicalLoadingId, setTechnicalLoadingId] = useState<string | null>(null);
+  const [technicalLogsByOperationalId, setTechnicalLogsByOperationalId] = useState<Record<string, TechnicalLogRow[]>>({});
+
+  const loadTechnicalLogs = async (row: ProcessingLogRow) => {
+    if (!isAdmin) return;
+
+    if (expandedTechnicalLogId === row.id) {
+      setExpandedTechnicalLogId(null);
+      return;
+    }
+
+    setExpandedTechnicalLogId(row.id);
+
+    if (technicalLogsByOperationalId[row.id]) {
+      return;
+    }
+
+    setTechnicalLoadingId(row.id);
+
+    const { data, error } = await supabase
+      .from("contact_technical_logs")
+      .select("id, code, created_at, details, expires_at, level, message, source, title")
+      .eq("operational_log_id", row.id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (error) {
+      toast({
+        title: "Erro ao carregar detalhes tecnicos",
+        description: error.message,
+        variant: "destructive",
+      });
+      setTechnicalLoadingId(null);
+      return;
+    }
+
+    setTechnicalLogsByOperationalId((current) => ({
+      ...current,
+      [row.id]: (data || []) as TechnicalLogRow[],
+    }));
+    setTechnicalLoadingId(null);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -113,6 +172,8 @@ export default function Logs() {
         if (mounted) {
           setRows([]);
           setLoadedLaunchId(null);
+          setExpandedTechnicalLogId(null);
+          setTechnicalLogsByOperationalId({});
           setLoading(false);
         }
         return;
@@ -123,6 +184,8 @@ export default function Logs() {
       if (!silent && mounted) {
         setRows([]);
         setLoadedLaunchId(null);
+        setExpandedTechnicalLogId(null);
+        setTechnicalLogsByOperationalId({});
         setLoading(true);
       }
 
@@ -371,6 +434,68 @@ export default function Logs() {
                     <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
                       {JSON.stringify(row.details, null, 2)}
                     </pre>
+                  </div>
+                )}
+
+                {isAdmin && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => void loadTechnicalLogs(row)}
+                      disabled={technicalLoadingId === row.id}
+                    >
+                      {technicalLoadingId === row.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bug className="h-4 w-4" />
+                      )}
+                      {expandedTechnicalLogId === row.id ? "Ocultar detalhes tecnicos" : "Ver detalhes tecnicos"}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      Visivel apenas para admins. Retencao curta de 14 dias.
+                    </span>
+                  </div>
+                )}
+
+                {isAdmin && expandedTechnicalLogId === row.id && (
+                  <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">Detalhes tecnicos</p>
+                        <p className="text-xs text-muted-foreground">
+                          Payload completo e contexto de debug separados do log operacional.
+                        </p>
+                      </div>
+                      {technicalLoadingId === row.id && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                    </div>
+
+                    {technicalLogsByOperationalId[row.id]?.length ? (
+                      <div className="space-y-3">
+                        {technicalLogsByOperationalId[row.id].map((technicalLog) => (
+                          <div key={technicalLog.id} className="space-y-2 rounded-lg border bg-background/60 p-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant={levelVariant(technicalLog.level)}>{levelLabels[technicalLog.level]}</Badge>
+                              <Badge variant="outline">{sourceLabels[technicalLog.source]}</Badge>
+                              <Badge variant="outline" className="font-mono">
+                                {technicalLog.code}
+                              </Badge>
+                              <span>{new Date(technicalLog.created_at).toLocaleString("pt-BR")}</span>
+                              <span>Expira em {new Date(technicalLog.expires_at).toLocaleString("pt-BR")}</span>
+                            </div>
+                            <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
+                              {JSON.stringify(technicalLog.details || {}, null, 2)}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhum detalhe tecnico vinculado a este log. Logs antigos podem nao ter esse vinculo.
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>

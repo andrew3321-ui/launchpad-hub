@@ -66,6 +66,12 @@ const schemaProbes: SchemaProbe[] = [
     description: "Tabela de logs operacionais do processamento",
   },
   {
+    table: "contact_technical_logs",
+    select: "id",
+    kind: "table",
+    description: "Tabela de logs tecnicos com retencao curta",
+  },
+  {
     table: "contact_routing_actions",
     select: "id",
     kind: "table",
@@ -158,7 +164,7 @@ export function buildLovableBootstrapPrompt(issues: SchemaIssue[]) {
     "Conecte este projeto ao backend Supabase atual do Lovable e aplique o schema do app.",
     "Use o arquivo supabase/bootstrap.sql como fonte principal ou execute os arquivos de supabase/migrations em ordem cronologica.",
     "Garanta que as estruturas abaixo existam antes de continuar:",
-    missingItems || "profiles, launches, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, contact_routing_actions",
+    missingItems || "profiles, launches, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, contact_technical_logs, contact_routing_actions",
     "Depois publique ou atualize as edge functions process-contact-event, launch-webhook-router e supabase-project-connector.",
     "Depois confirme que o frontend pode ler launches, uchat_workspaces, inbound_contact_events e contact_routing_actions sem erro de schema ausente.",
   ].join("\n");

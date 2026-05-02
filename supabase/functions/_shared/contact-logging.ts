@@ -87,7 +87,9 @@ function technicalLogFrom(row: ContactLogRow, operationalLogId?: string | null) 
 }
 
 function operationalLogFrom(row: ContactLogRow) {
+  const id = crypto.randomUUID();
   const output: Record<string, unknown> = {
+    id,
     launch_id: row.launch_id,
     event_id: row.event_id ?? null,
     contact_id: row.contact_id ?? null,
@@ -103,7 +105,11 @@ function operationalLogFrom(row: ContactLogRow) {
     output.cycle_number = row.cycle_number;
   }
 
-  return output;
+  return {
+    id,
+    operational: output,
+    technical: technicalLogFrom(row, id),
+  };
 }
 
 async function insertTechnicalLogs(supabase: AnySupabaseClient, rows: Array<Record<string, unknown>>) {
@@ -117,23 +123,25 @@ async function insertTechnicalLogs(supabase: AnySupabaseClient, rows: Array<Reco
 }
 
 export async function insertContactLog(supabase: AnySupabaseClient, row: ContactLogRow) {
+  const prepared = operationalLogFrom(row);
   const { error } = await supabase
     .from("contact_processing_logs")
-    .insert(operationalLogFrom(row));
+    .insert(prepared.operational);
 
   if (error) throw error;
 
-  await insertTechnicalLogs(supabase, [technicalLogFrom(row)]);
+  await insertTechnicalLogs(supabase, [prepared.technical]);
 }
 
 export async function insertContactLogs(supabase: AnySupabaseClient, rows: ContactLogRow[]) {
   if (rows.length === 0) return;
+  const preparedRows = rows.map(operationalLogFrom);
 
   const { error } = await supabase
     .from("contact_processing_logs")
-    .insert(rows.map(operationalLogFrom));
+    .insert(preparedRows.map((row) => row.operational));
 
   if (error) throw error;
 
-  await insertTechnicalLogs(supabase, rows.map((row) => technicalLogFrom(row)));
+  await insertTechnicalLogs(supabase, preparedRows.map((row) => row.technical));
 }
