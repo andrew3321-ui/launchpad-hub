@@ -157,6 +157,83 @@ export type Database = {
           },
         ]
       }
+      contact_technical_logs: {
+        Row: {
+          code: string
+          contact_id: string | null
+          created_at: string
+          details: Json
+          event_id: string | null
+          expires_at: string
+          id: string
+          launch_id: string
+          level: string
+          message: string
+          operational_log_id: string | null
+          source: string
+          title: string
+        }
+        Insert: {
+          code: string
+          contact_id?: string | null
+          created_at?: string
+          details?: Json
+          event_id?: string | null
+          expires_at?: string
+          id?: string
+          launch_id: string
+          level: string
+          message: string
+          operational_log_id?: string | null
+          source: string
+          title: string
+        }
+        Update: {
+          code?: string
+          contact_id?: string | null
+          created_at?: string
+          details?: Json
+          event_id?: string | null
+          expires_at?: string
+          id?: string
+          launch_id?: string
+          level?: string
+          message?: string
+          operational_log_id?: string | null
+          source?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_technical_logs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "lead_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_technical_logs_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_contact_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_technical_logs_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_technical_logs_operational_log_id_fkey"
+            columns: ["operational_log_id"]
+            isOneToOne: false
+            referencedRelation: "contact_processing_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbound_contact_events: {
         Row: {
           cycle_number: number
@@ -1006,6 +1083,7 @@ export type Database = {
           user_id: string
         }[]
       }
+      purge_expired_contact_technical_logs: { Args: never; Returns: number }
       replace_launch_uchat_workspaces: {
         Args: { next_workspaces?: Json; target_launch_id: string }
         Returns: Json
