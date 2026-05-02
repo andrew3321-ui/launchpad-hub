@@ -530,6 +530,38 @@ export type Database = {
           },
         ]
       }
+      launch_user_assignments: {
+        Row: {
+          assigned_by: string | null
+          created_at: string
+          id: string
+          launch_id: string
+          user_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          launch_id: string
+          user_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          launch_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_user_assignments_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launch_webhook_jobs: {
         Row: {
           attempts: number
@@ -1072,6 +1104,21 @@ export type Database = {
       }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      list_admin_user_access_overview: {
+        Args: never
+        Returns: {
+          approval_status: string
+          assigned_experts: Json
+          created_at: string
+          email: string
+          full_name: string
+          is_admin: boolean
+          must_change_password: boolean
+          password_changed_at: string
+          profile_id: string
+          user_id: string
+        }[]
+      }
       list_pending_signup_requests: {
         Args: never
         Returns: {
@@ -1109,6 +1156,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_user_expert_assignments: {
+        Args: { target_launch_ids?: string[]; target_user_id: string }
+        Returns: Json
       }
       update_launch_activecampaign_settings: {
         Args: {
