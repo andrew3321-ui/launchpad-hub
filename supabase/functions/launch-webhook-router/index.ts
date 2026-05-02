@@ -3408,8 +3408,11 @@ async function syncContactToActiveCampaign(
   // from the one already on the ActiveCampaign contact (matched by phone/identity),
   // preserve the existing email, name and phone entirely. Only tags, list
   // membership and custom field values are applied.
+  const existingActiveName = [existingActiveFirstName, existingActiveLastName].filter(Boolean).join(" ") || null;
+  const hasExistingActiveName = Boolean(existingActiveName);
   const shouldSendPhone = Boolean(outboundPhone) && !activeEmailConflict;
   const shouldSendName = !activeEmailConflict;
+  const shouldSkipContactProfileUpdate = Boolean(existingContact && activeEmailConflict);
 
   if (activeEmailConflict) {
     console.log(
@@ -3425,8 +3428,10 @@ async function syncContactToActiveCampaign(
     lastName: shouldSendName ? lastName || undefined : undefined,
   };
 
-  const payload = existingContact
-    ? await activeCampaignRequest(
+  const payload = shouldSkipContactProfileUpdate
+    ? { contact: existingContact?.snapshot || {} }
+    : existingContact
+      ? await activeCampaignRequest(
         launch.ac_api_url,
         launch.ac_api_key,
         `/api/3/contacts/${existingContact.activeContactId}`,
@@ -3435,7 +3440,7 @@ async function syncContactToActiveCampaign(
           contact: contactPayload,
         },
       )
-    : await activeCampaignRequest(
+      : await activeCampaignRequest(
         launch.ac_api_url,
         launch.ac_api_key,
         "/api/3/contact/sync",
@@ -3525,13 +3530,15 @@ async function syncContactToActiveCampaign(
           incomingEmail,
           activeCampaignPhone: existingActivePhone,
           incomingPhone: outboundPhone || null,
-          activeCampaignName: [existingActiveFirstName, existingActiveLastName].filter(Boolean).join(" ") || null,
+          activeCampaignName: existingActiveName,
           incomingName: [firstName, lastName].filter(Boolean).join(" ") || null,
           preservedFields: [
             "email",
-            ...(activeHasName ? ["name"] : []),
+            ...(hasExistingActiveName ? ["name"] : []),
             ...(existingActivePhone ? ["phone"] : []),
+            ...(shouldSkipContactProfileUpdate ? ["active_contact_profile"] : []),
           ],
+          profileUpdateSkipped: shouldSkipContactProfileUpdate,
           matchedBy: existingContact?.matchedBy || null,
         }
       : null,

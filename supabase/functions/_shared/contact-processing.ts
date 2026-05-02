@@ -688,6 +688,7 @@ export async function processIncomingContactEvent(
       contactWasMatchedByPhone &&
       Boolean(existingPrimaryEmail && normalizedEmail) &&
       existingPrimaryEmail !== normalizedEmail;
+    const existingPrimaryName = compactPersonName(existingContact.primary_name as string | null | undefined);
     const nextPrimaryEmail = chooseValue(
       existingContact.primary_email as string | null | undefined,
       normalizedEmail,
@@ -696,7 +697,7 @@ export async function processIncomingContactEvent(
     const nextPrimaryPhone = chooseValue(
       existingContact.primary_phone as string | null | undefined,
       rawPhone,
-      preferIncoming,
+      shouldPreserveExistingEmail && existingContact.primary_phone ? false : preferIncoming,
     );
     const mergedPhoneCandidates = buildValidPhoneCandidateSet(
       [
@@ -708,12 +709,24 @@ export async function processIncomingContactEvent(
       settings,
     );
     const nextNormalizedPhone =
-      pickCanonicalPhone([...mergedPhoneCandidates], countryCode) ||
-      chooseValue(
-        existingContact.normalized_phone as string | null | undefined,
-        canonicalPhone,
-        preferIncoming,
-      );
+      shouldPreserveExistingEmail && existingContact.normalized_phone
+        ? (existingContact.normalized_phone as string)
+        : pickCanonicalPhone([...mergedPhoneCandidates], countryCode) ||
+          chooseValue(
+            existingContact.normalized_phone as string | null | undefined,
+            canonicalPhone,
+            preferIncoming,
+          );
+    const nextPrimaryName =
+      shouldPreserveExistingEmail && existingPrimaryName
+        ? existingPrimaryName
+        : chooseContactName(
+            existingContact.primary_name as string | null | undefined,
+            normalizedName,
+            preferIncoming,
+            { source: body.source, externalIdentity },
+          );
+    const shouldCountDuplicateMerge = duplicateMergeCount > 0;
     const hasResolvedManyChatIdentity = Boolean(nextPrimaryEmail || nextNormalizedPhone || nextPrimaryPhone);
     const manyChatStillIncomplete =
       body.source === "manychat"
@@ -768,19 +781,12 @@ export async function processIncomingContactEvent(
     const { data: updatedContact, error: updateError } = await supabase
       .from("lead_contacts")
       .update({
-        primary_name: chooseContactName(
-          existingContact.primary_name as string | null | undefined,
-          normalizedName,
-          preferIncoming,
-          { source: body.source, externalIdentity },
-        ),
+        primary_name: nextPrimaryName,
         primary_email: nextPrimaryEmail,
         primary_phone: nextPrimaryPhone,
         normalized_phone: nextNormalizedPhone,
         last_source: body.source,
-        merged_from_count: isKnownIdentityUpdate
-          ? Number(existingContact.merged_from_count || 0) + duplicateMergeCount
-          : Number(existingContact.merged_from_count || 0) + Math.max(1, duplicateMergeCount),
+        merged_from_count: Number(existingContact.merged_from_count || 0) + duplicateMergeCount,
         data: mergedData,
       })
       .eq("id", existingContact.id as string)
@@ -792,7 +798,7 @@ export async function processIncomingContactEvent(
     }
 
     processedContactId = updatedContact.id;
-    action = isKnownIdentityUpdate ? "updated" : "merged";
+    action = isKnownIdentityUpdate || !shouldCountDuplicateMerge ? "updated" : "merged";
 
     if (duplicateContactsToMerge.length > 0) {
       const duplicateIds = duplicateContactsToMerge
