@@ -613,7 +613,11 @@ function pickActiveCampaignRegistrationDate(payload: JsonRecord) {
 
 function normalizeLeadTypeForSheets(value: unknown) {
   const type = nonEmptyString(value);
-  if (!type || /^(-|n\/a|null|undefined|nao informado|não informado)$/i.test(type)) {
+  if (
+    !type ||
+    /^(-|n\/a|null|undefined|nao informado|não informado)$/i.test(type) ||
+    /^(creat(e)?_?add_?tag|contact_?tag_?add(ed)?|tag_?add(ed)?|add_?tag|webhook_?received)$/i.test(type)
+  ) {
     return null;
   }
   return type;
@@ -624,7 +628,7 @@ function pickActiveCampaignLeadType(payload: JsonRecord) {
     normalizeLeadTypeForSheets(getActiveCampaignContactField(payload, "tipo_de_lead")) ||
     normalizeLeadTypeForSheets(getActiveCampaignContactField(payload, "lead_type")) ||
     normalizeLeadTypeForSheets(getActiveCampaignContactField(payload, "tipo")) ||
-    normalizeLeadTypeForSheets(findStringDeep(payload, ["tipo_lead", "lead_type", "type"])) ||
+    normalizeLeadTypeForSheets(findStringDeep(payload, ["tipo_lead", "lead_type"])) ||
     "Lead"
   );
 }
