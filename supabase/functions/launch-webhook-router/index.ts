@@ -3384,6 +3384,9 @@ async function syncContactToActiveCampaign(
   const { firstName, lastName } = splitName(contact.primary_name);
   const incomingEmail = nonEmptyString(contact.primary_email);
   const existingActiveEmail = nonEmptyString(existingContact?.snapshot?.email);
+  const existingActivePhone = nonEmptyString(existingContact?.snapshot?.phone);
+  const existingActiveFirstName = nonEmptyString(existingContact?.snapshot?.firstName);
+  const existingActiveLastName = nonEmptyString(existingContact?.snapshot?.lastName);
   const activeEmailConflict =
     !phoneOnly &&
     existingContact?.matchedBy !== "email" &&
@@ -3401,15 +3404,19 @@ async function syncContactToActiveCampaign(
     contact.normalized_phone ||
     contact.primary_phone ||
     undefined;
+  const activeHasName = Boolean(existingActiveFirstName || existingActiveLastName);
+  const shouldSendPhone = Boolean(outboundPhone) && (!activeEmailConflict || !existingActivePhone);
+  const shouldSendName = !activeEmailConflict || !activeHasName;
 
   // When the match was driven by phone/known identity, phone is the authority.
   // Do not overwrite the existing ActiveCampaign email with a different email
-  // sent later by the same person.
+  // sent later by the same person. In that conflict state we also avoid
+  // changing existing name/phone data; only tags, lists and field values move.
   const contactPayload = {
     email: shouldSendEmail ? incomingEmail || undefined : undefined,
-    phone: outboundPhone,
-    firstName: firstName || undefined,
-    lastName: lastName || undefined,
+    phone: shouldSendPhone ? outboundPhone : undefined,
+    firstName: shouldSendName ? firstName || undefined : undefined,
+    lastName: shouldSendName ? lastName || undefined : undefined,
   };
 
   const payload = existingContact
@@ -3510,6 +3517,15 @@ async function syncContactToActiveCampaign(
       ? {
           activeCampaignEmail: existingActiveEmail,
           incomingEmail,
+          activeCampaignPhone: existingActivePhone,
+          incomingPhone: outboundPhone || null,
+          activeCampaignName: [existingActiveFirstName, existingActiveLastName].filter(Boolean).join(" ") || null,
+          incomingName: [firstName, lastName].filter(Boolean).join(" ") || null,
+          preservedFields: [
+            "email",
+            ...(activeHasName ? ["name"] : []),
+            ...(existingActivePhone ? ["phone"] : []),
+          ],
           matchedBy: existingContact?.matchedBy || null,
         }
       : null,
