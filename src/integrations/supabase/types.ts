@@ -1157,6 +1157,21 @@ export type Database = {
           updated_at: string
         }[]
       }
+      get_launch_visible_webhook_jobs: {
+        Args: { limit_count?: number; target_launch_id: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string | null
+          event_type: string | null
+          id: string
+          last_error: string | null
+          next_attempt_at: string | null
+          source: string
+          status: string
+          updated_at: string
+        }[]
+      }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
       launchhub_phone_dedupe_key: {

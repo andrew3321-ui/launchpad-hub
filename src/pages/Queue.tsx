@@ -100,11 +100,10 @@ export default function Queue() {
         { data: actionData, error: actionError },
       ] = await Promise.all([
         supabase
-          .from("launch_webhook_jobs")
-          .select("id, source, event_type, status, attempts, next_attempt_at, created_at, updated_at, last_error, dedupe_key")
-          .eq("launch_id", launchId)
-          .order("created_at", { ascending: false })
-          .limit(30),
+          .rpc("get_launch_visible_webhook_jobs", {
+            target_launch_id: launchId,
+            limit_count: 30,
+          }),
         supabase
           .from("inbound_contact_events")
           .select("id, source, event_type, processing_status, received_at, processing_summary")
