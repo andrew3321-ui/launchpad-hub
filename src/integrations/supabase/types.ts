@@ -1162,11 +1162,11 @@ export type Database = {
         Returns: {
           attempts: number
           created_at: string
-          dedupe_key: string | null
-          event_type: string | null
+          dedupe_key: string
+          event_type: string
           id: string
-          last_error: string | null
-          next_attempt_at: string | null
+          last_error: string
+          next_attempt_at: string
           source: string
           status: string
           updated_at: string
