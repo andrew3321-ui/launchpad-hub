@@ -477,6 +477,70 @@ function getActiveCampaignContactField(payload: JsonRecord, fieldName: string) {
   );
 }
 
+function formatSheetDate(value: unknown) {
+  const raw = nonEmptyString(value);
+  if (!raw) return null;
+
+  const brDate = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (brDate) {
+    return `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+  }
+
+  const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDate) {
+    return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+  }
+
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return null;
+
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function todaySheetDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function pickActiveCampaignSheetDate(payload: JsonRecord) {
+  return (
+    formatSheetDate(getActiveCampaignContactField(payload, "data_evento")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[cdate]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[created_timestamp]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "created_timestamp")) ||
+    formatSheetDate(findStringDeep(payload, ["event_date", "created_at", "createdAt", "timestamp"])) ||
+    todaySheetDate()
+  );
+}
+
+function pickActiveCampaignRegistrationDate(payload: JsonRecord) {
+  return (
+    formatSheetDate(getActiveCampaignContactField(payload, "data_de_cadastro")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[cdate]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[created_timestamp]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "created_timestamp")) ||
+    pickActiveCampaignSheetDate(payload)
+  );
+}
+
+function pickActiveCampaignLeadType(payload: JsonRecord) {
+  return (
+    getActiveCampaignContactField(payload, "tipo_de_lead") ||
+    getActiveCampaignContactField(payload, "lead_type") ||
+    findStringDeep(payload, ["tipo_lead", "lead_type", "type"]) ||
+    "Lead"
+  );
+}
+
+function pickActiveCampaignProductName(launch: LaunchRow, payload: JsonRecord) {
+  return (
+    getActiveCampaignContactField(payload, "produto") ||
+    findStringDeep(payload, ["produto", "product", "product_name"]) ||
+    nonEmptyString(launch.gs_default_product_name) ||
+    launch.name ||
+    "Launch Hub"
+  );
+}
+
 function formatGoogleSheetsPhone(contact: LeadContactRow, payload: JsonRecord) {
   const rawPhone =
     getActiveCampaignBodyValue(payload, "contact[phone]") ||
@@ -521,19 +585,19 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
       "vk_ad_id",
     ],
     row: [
-      getActiveCampaignContactField(payload, "data_evento"),
+      pickActiveCampaignSheetDate(payload),
       name,
       getActiveCampaignBodyValue(payload, "contact[email]") || contact.primary_email,
       formatGoogleSheetsPhone(contact, payload),
-      getActiveCampaignContactField(payload, "tipo_de_lead"),
-      getActiveCampaignContactField(payload, "produto") || launch.gs_default_product_name,
+      pickActiveCampaignLeadType(payload),
+      pickActiveCampaignProductName(launch, payload),
       getActiveCampaignContactField(payload, "utm_source"),
       getActiveCampaignContactField(payload, "utm_campaign"),
       getActiveCampaignContactField(payload, "utm_medium"),
       getActiveCampaignContactField(payload, "utm_content"),
       getActiveCampaignContactField(payload, "utm_term"),
       getActiveCampaignContactField(payload, "utm_site"),
-      getActiveCampaignContactField(payload, "data_de_cadastro"),
+      pickActiveCampaignRegistrationDate(payload),
       getActiveCampaignContactField(payload, "dashboard_value") || "1",
       getActiveCampaignContactField(payload, "hotlead"),
       getActiveCampaignContactField(payload, "vk_source"),

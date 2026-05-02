@@ -41,6 +41,7 @@ interface ActiveCampaignContact {
   phone: string | null;
   firstName: string | null;
   lastName: string | null;
+  createdAt: string | null;
 }
 
 interface ActiveCampaignFieldDefinition {
@@ -244,6 +245,7 @@ function parseActiveCampaignContact(item: unknown): ActiveCampaignContact | null
     phone: nonEmptyString(item.phone),
     firstName: nonEmptyString(item.firstName ?? item.first_name),
     lastName: nonEmptyString(item.lastName ?? item.last_name),
+    createdAt: nonEmptyString(item.cdate ?? item.created_at ?? item.createdAt),
   };
 }
 
@@ -469,6 +471,70 @@ function getActiveCampaignContactField(payload: JsonRecord, fieldName: string) {
   return nonEmptyString(payload[fieldName]);
 }
 
+function formatSheetDate(value: unknown) {
+  const raw = nonEmptyString(value);
+  if (!raw) return null;
+
+  const brDate = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (brDate) {
+    return `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+  }
+
+  const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDate) {
+    return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+  }
+
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return null;
+
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function todaySheetDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function pickActiveCampaignSheetDate(payload: JsonRecord) {
+  return (
+    formatSheetDate(getActiveCampaignContactField(payload, "data_evento")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[cdate]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "created_at")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "createdAt")) ||
+    todaySheetDate()
+  );
+}
+
+function pickActiveCampaignRegistrationDate(payload: JsonRecord) {
+  return (
+    formatSheetDate(getActiveCampaignContactField(payload, "data_de_cadastro")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "contact[cdate]")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "created_at")) ||
+    formatSheetDate(getActiveCampaignBodyValue(payload, "createdAt")) ||
+    pickActiveCampaignSheetDate(payload)
+  );
+}
+
+function pickActiveCampaignLeadType(payload: JsonRecord) {
+  return (
+    getActiveCampaignContactField(payload, "tipo_de_lead") ||
+    getActiveCampaignContactField(payload, "lead_type") ||
+    getActiveCampaignContactField(payload, "tipo") ||
+    "Lead"
+  );
+}
+
+function pickActiveCampaignProductName(launch: LaunchRow, payload: JsonRecord) {
+  return (
+    getActiveCampaignContactField(payload, "produto") ||
+    getActiveCampaignContactField(payload, "product") ||
+    getActiveCampaignContactField(payload, "product_name") ||
+    nonEmptyString(launch.gs_default_product_name) ||
+    launch.name ||
+    "Launch Hub"
+  );
+}
+
 function buildContactName(contact: ActiveCampaignContact) {
   return uniqueStrings([[contact.firstName, contact.lastName].filter(Boolean).join(" ")])[0] || null;
 }
@@ -508,19 +574,19 @@ function buildActiveCampaignSheetsRow(
       "vk_ad_id",
     ],
     row: [
-      getActiveCampaignContactField(payload, "data_evento"),
+      pickActiveCampaignSheetDate(payload),
       name,
       getActiveCampaignBodyValue(payload, "contact[email]") || contact.email,
       formatGoogleSheetsPhone(contact),
-      getActiveCampaignContactField(payload, "tipo_de_lead"),
-      getActiveCampaignContactField(payload, "produto") || launch.gs_default_product_name,
+      pickActiveCampaignLeadType(payload),
+      pickActiveCampaignProductName(launch, payload),
       getActiveCampaignContactField(payload, "utm_source"),
       getActiveCampaignContactField(payload, "utm_campaign"),
       getActiveCampaignContactField(payload, "utm_medium"),
       getActiveCampaignContactField(payload, "utm_content"),
       getActiveCampaignContactField(payload, "utm_term"),
       getActiveCampaignContactField(payload, "utm_site"),
-      getActiveCampaignContactField(payload, "data_de_cadastro"),
+      pickActiveCampaignRegistrationDate(payload),
       getActiveCampaignContactField(payload, "dashboard_value") || "1",
       getActiveCampaignContactField(payload, "hotlead"),
       getActiveCampaignContactField(payload, "vk_source"),
@@ -537,6 +603,7 @@ function buildContactPayload(contact: ActiveCampaignContact, fieldPayload: JsonR
     "contact[phone]": contact.phone,
     "contact[first_name]": contact.firstName,
     "contact[last_name]": contact.lastName,
+    "contact[cdate]": contact.createdAt,
   } satisfies JsonRecord;
 }
 
