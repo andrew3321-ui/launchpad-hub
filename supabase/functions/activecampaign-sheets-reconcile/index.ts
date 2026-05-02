@@ -123,9 +123,77 @@ function digitsOnly(value: unknown) {
 function normalizeBrazilianPhone(value: unknown) {
   const digits = digitsOnly(value);
   if (!digits) return null;
-  if (digits.startsWith("55")) return digits;
-  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
-  return digits;
+
+  const localDigits = normalizeBrazilianLocalDigits(digits);
+  const variants = addBrazilianPhoneNinthDigitVariants(localDigits)
+    .filter((variant) => /^[1-9]{2}9?\d{8}$/.test(variant))
+    .sort((left, right) => {
+      const leftHasNinth = /^[1-9]{2}9[6-9]\d{7}$/.test(left) ? 1 : 0;
+      const rightHasNinth = /^[1-9]{2}9[6-9]\d{7}$/.test(right) ? 1 : 0;
+      return rightHasNinth - leftHasNinth || right.length - left.length;
+    });
+
+  if (variants.length > 0) return `55${variants[0]}`;
+  return digits.replace(/^0+/, "") || digits;
+}
+
+function normalizeBrazilianLocalDigits(rawDigits: string) {
+  const trimmedDigits = rawDigits.replace(/^0+/, "");
+  return trimmedDigits.startsWith("55") && [12, 13].includes(trimmedDigits.length)
+    ? trimmedDigits.slice(2)
+    : trimmedDigits;
+}
+
+function addBrazilianPhoneNinthDigitVariants(localDigits: string) {
+  const variants = new Set<string>([localDigits]);
+
+  if (/^[1-9]{2}[6-9]\d{7}$/.test(localDigits)) {
+    variants.add(`${localDigits.slice(0, 2)}9${localDigits.slice(2)}`);
+  }
+
+  if (/^[1-9]{2}9[6-9]\d{7}$/.test(localDigits)) {
+    variants.add(`${localDigits.slice(0, 2)}${localDigits.slice(3)}`);
+  }
+
+  return [...variants];
+}
+
+function buildPhoneDedupeKey(value: unknown) {
+  const digits = digitsOnly(value);
+  if (!digits) return null;
+
+  let localDigits = normalizeBrazilianLocalDigits(digits);
+  if (/^[1-9]{2}9[6-9]\d{7}$/.test(localDigits)) {
+    localDigits = `${localDigits.slice(0, 2)}${localDigits.slice(3)}`;
+  }
+
+  if (/^[1-9]{2}9?\d{8}$/.test(localDigits)) {
+    return `br:${localDigits}`;
+  }
+
+  return `raw:${digits.replace(/^0+/, "") || digits}`;
+}
+
+function buildPhoneIdentityKeys(value: unknown) {
+  const digits = digitsOnly(value);
+  const keys = new Set<string>();
+  if (!digits) return keys;
+
+  keys.add(digits);
+  const canonical = normalizeBrazilianPhone(digits);
+  if (canonical) keys.add(canonical);
+  const dedupeKey = buildPhoneDedupeKey(digits);
+  if (dedupeKey) keys.add(dedupeKey);
+
+  const localDigits = normalizeBrazilianLocalDigits(digits);
+  keys.add(localDigits);
+
+  for (const localVariant of addBrazilianPhoneNinthDigitVariants(localDigits)) {
+    keys.add(localVariant);
+    keys.add(`55${localVariant}`);
+  }
+
+  return keys;
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -635,8 +703,9 @@ function buildContactPayload(contact: ActiveCampaignContact, fieldPayload: JsonR
 
 function buildCaptureFingerprint(contact: ActiveCampaignContact) {
   const email = contact.email ? `email:${contact.email.toLowerCase()}` : null;
+  const phoneKey = buildPhoneDedupeKey(contact.phone);
   const phone = normalizeBrazilianPhone(contact.phone);
-  return normalizeKey((phone ? `phone:${phone}` : null) || email || `active:${contact.id}` || "");
+  return normalizeKey((phoneKey ? `phone:${phoneKey}` : null) || (phone ? `phone:${phone}` : null) || email || `active:${contact.id}` || "");
 }
 
 function buildSheetIndex(values: unknown[][]) {
@@ -645,9 +714,10 @@ function buildSheetIndex(values: unknown[][]) {
 
   for (const row of values) {
     const email = nonEmptyString(row[0])?.toLowerCase();
-    const phone = normalizeBrazilianPhone(row[1]);
     if (email) emails.add(email);
-    if (phone) phones.add(phone);
+    for (const phoneKey of buildPhoneIdentityKeys(row[1])) {
+      phones.add(phoneKey);
+    }
   }
 
   return { emails, phones };
@@ -685,8 +755,11 @@ function contactAlreadyInSheet(
   sheetIndex: { emails: Set<string>; phones: Set<string> },
 ) {
   const email = contact.email?.toLowerCase() || null;
-  const phone = normalizeBrazilianPhone(contact.phone);
-  return Boolean((email && sheetIndex.emails.has(email)) || (phone && sheetIndex.phones.has(phone)));
+  const phoneKeys = buildPhoneIdentityKeys(contact.phone);
+  return Boolean(
+    (email && sheetIndex.emails.has(email)) ||
+      [...phoneKeys].some((phoneKey) => sheetIndex.phones.has(phoneKey)),
+  );
 }
 
 function rememberSample<T>(items: T[], item: T, max = 10) {
@@ -695,22 +768,59 @@ function rememberSample<T>(items: T[], item: T, max = 10) {
   }
 }
 
+function isUniqueViolation(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown; details?: unknown };
+  const code = typeof record.code === "string" ? record.code : "";
+  const message = `${typeof record.message === "string" ? record.message : ""} ${typeof record.details === "string" ? record.details : ""}`;
+  return code === "23505" || /duplicate key|unique constraint/i.test(message);
+}
+
 async function hasCaptureRecord(
   supabase: AnySupabaseClient,
   launch: LaunchRow,
   contact: ActiveCampaignContact,
 ) {
   const fingerprint = buildCaptureFingerprint(contact);
-  const { data, error } = await supabase
-    .from("launch_google_sheet_capture_records")
-    .select("id")
-    .eq("launch_id", launch.id)
-    .eq("cycle_number", launch.current_cycle_number || 1)
-    .eq("spreadsheet_id", launch.gs_spreadsheet_id)
-    .eq("sheet_name", launch.gs_sheet_name)
+  const phoneDedupeKey = buildPhoneDedupeKey(contact.phone);
+  const email = contact.email?.toLowerCase() || null;
+  const baseQuery = () =>
+    supabase
+      .from("launch_google_sheet_capture_records")
+      .select("id")
+      .eq("launch_id", launch.id)
+      .eq("cycle_number", launch.current_cycle_number || 1)
+      .eq("spreadsheet_id", launch.gs_spreadsheet_id)
+      .eq("sheet_name", launch.gs_sheet_name)
+      .limit(1);
+
+  if (phoneDedupeKey) {
+    const { data, error } = await baseQuery()
+      .eq("phone_dedupe_key", phoneDedupeKey)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.id) return true;
+  }
+
+  if (email) {
+    const { data, error } = await baseQuery()
+      .ilike("primary_email", email)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.id) return true;
+  }
+
+  if (contact.id) {
+    const { data, error } = await baseQuery()
+      .eq("active_contact_id", contact.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.id) return true;
+  }
+
+  const { data, error } = await baseQuery()
     .eq("row_fingerprint", fingerprint)
     .maybeSingle();
-
   if (error) throw new Error(error.message);
   return Boolean(data?.id);
 }
@@ -721,7 +831,7 @@ async function saveCaptureRecord(
   contact: ActiveCampaignContact,
   source: string,
 ) {
-  await supabase
+  const { error } = await supabase
     .from("launch_google_sheet_capture_records")
     .upsert(
       {
@@ -730,15 +840,21 @@ async function saveCaptureRecord(
         active_contact_id: contact.id,
         primary_email: contact.email,
         normalized_phone: normalizeBrazilianPhone(contact.phone),
+        phone_dedupe_key: buildPhoneDedupeKey(contact.phone),
         spreadsheet_id: launch.gs_spreadsheet_id,
         sheet_name: launch.gs_sheet_name,
         row_fingerprint: buildCaptureFingerprint(contact),
         source,
+        append_status: "appended",
       },
       {
         onConflict: "launch_id,cycle_number,spreadsheet_id,sheet_name,row_fingerprint",
       },
     );
+
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(error.message);
+  }
 }
 
 async function insertProcessingLog(
@@ -912,6 +1028,10 @@ async function reconcileLaunch(
       const builtRow = buildActiveCampaignSheetsRow(launch, contact, payload);
       header = header ?? builtRow.header;
       rowsToAppend.push({ contact, row: builtRow.row });
+      if (contact.email) sheetIndex.emails.add(contact.email.toLowerCase());
+      for (const phoneKey of buildPhoneIdentityKeys(contact.phone)) {
+        sheetIndex.phones.add(phoneKey);
+      }
       rememberSample(samples.appended, {
         activeContactId: contact.id,
         email: contact.email,
@@ -969,8 +1089,9 @@ async function reconcileLaunch(
         for (const item of rowsToAppend) {
           await saveCaptureRecord(supabase, launch, item.contact, "activecampaign_hourly_reconcile");
           if (item.contact.email) sheetIndex.emails.add(item.contact.email.toLowerCase());
-          const phone = normalizeBrazilianPhone(item.contact.phone);
-          if (phone) sheetIndex.phones.add(phone);
+          for (const phoneKey of buildPhoneIdentityKeys(item.contact.phone)) {
+            sheetIndex.phones.add(phoneKey);
+          }
         }
 
         counters.appended += rowsToAppend.length;

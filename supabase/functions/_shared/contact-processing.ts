@@ -698,11 +698,22 @@ export async function processIncomingContactEvent(
       rawPhone,
       preferIncoming,
     );
-    const nextNormalizedPhone = chooseValue(
-      existingContact.normalized_phone as string | null | undefined,
-      canonicalPhone,
-      preferIncoming,
+    const mergedPhoneCandidates = buildValidPhoneCandidateSet(
+      [
+        existingContact.primary_phone as string | null | undefined,
+        existingContact.normalized_phone as string | null | undefined,
+        rawPhone,
+        canonicalPhone,
+      ],
+      settings,
     );
+    const nextNormalizedPhone =
+      pickCanonicalPhone([...mergedPhoneCandidates], countryCode) ||
+      chooseValue(
+        existingContact.normalized_phone as string | null | undefined,
+        canonicalPhone,
+        preferIncoming,
+      );
     const hasResolvedManyChatIdentity = Boolean(nextPrimaryEmail || nextNormalizedPhone || nextPrimaryPhone);
     const manyChatStillIncomplete =
       body.source === "manychat"

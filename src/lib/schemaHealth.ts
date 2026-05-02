@@ -78,6 +78,13 @@ const schemaProbes: SchemaProbe[] = [
     description: "Tabela de acoes de roteamento para ActiveCampaign e UChat",
   },
   {
+    table: "launch_google_sheet_capture_records",
+    select: "phone_dedupe_key",
+    kind: "column",
+    column: "phone_dedupe_key",
+    description: "Chave de deduplicacao rigida para captura no Google Sheets",
+  },
+  {
     table: "platform_rate_limit_windows",
     select: "provider",
     kind: "table",
@@ -176,7 +183,7 @@ export function buildLovableBootstrapPrompt(issues: SchemaIssue[]) {
     "Conecte este projeto ao backend Supabase atual do Lovable e aplique o schema do app.",
     "Use o arquivo supabase/bootstrap.sql como fonte principal ou execute os arquivos de supabase/migrations em ordem cronologica.",
     "Garanta que as estruturas abaixo existam antes de continuar:",
-    missingItems || "profiles, launches, launch_user_assignments, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, contact_technical_logs, contact_routing_actions, platform_rate_limit_windows",
+    missingItems || "profiles, launches, launch_user_assignments, uchat_workspaces, launch_dedupe_settings, lead_contacts, lead_contact_identities, inbound_contact_events, contact_processing_logs, contact_technical_logs, contact_routing_actions, launch_google_sheet_capture_records.phone_dedupe_key, platform_rate_limit_windows",
     "Depois publique ou atualize as edge functions process-contact-event, launch-webhook-router e supabase-project-connector.",
     "Depois confirme que o frontend pode ler launches, uchat_workspaces, inbound_contact_events e contact_routing_actions sem erro de schema ausente.",
   ].join("\n");
