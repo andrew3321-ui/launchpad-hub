@@ -17,6 +17,9 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 type AnySupabaseClient = any;
+interface EdgeRuntimeLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
 type WebhookSource =
   | "activecampaign"
   | "manychat"
@@ -198,6 +201,10 @@ function jsonResponse(body: unknown, status = 200) {
       ...corsHeaders,
     },
   });
+}
+
+function getEdgeRuntime() {
+  return (globalThis as typeof globalThis & { EdgeRuntime?: EdgeRuntimeLike }).EdgeRuntime ?? null;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -5338,7 +5345,7 @@ async function enqueueLaunchWebhookJob(
 
   if (error || !data?.id) {
     throw new ProcessContactError(
-      "Failed to queue ActiveCampaign webhook job",
+      "Failed to queue webhook job",
       500,
       error?.message,
     );
@@ -5506,6 +5513,25 @@ async function processQueuedLaunchWebhookJob(
   }
 }
 
+function runQueuedLaunchWebhookJobInBackground(
+  supabase: AnySupabaseClient,
+  jobId: string,
+) {
+  const workerPromise = processQueuedLaunchWebhookJob(supabase, jobId).catch((error) => {
+    console.error("launch-webhook-router background worker failed", {
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
+  const runtime = getEdgeRuntime();
+  if (runtime) {
+    runtime.waitUntil(workerPromise);
+  } else {
+    void workerPromise;
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -5537,8 +5563,14 @@ Deno.serve(async (request) => {
     try {
       const supabase = createClient(supabaseUrl, serviceRoleKey);
       platformRateLimitClient = supabase;
-      const result = await processQueuedLaunchWebhookJob(supabase, workerJobId);
-      return jsonResponse(result);
+      runQueuedLaunchWebhookJobInBackground(supabase, workerJobId);
+      return jsonResponse({
+        accepted: true,
+        queued: true,
+        worker: true,
+        jobId: workerJobId,
+        reason: "webhook_job_worker_started",
+      });
     } catch (error) {
       if (error instanceof ProcessContactError) {
         return jsonResponse(
@@ -5589,51 +5621,20 @@ Deno.serve(async (request) => {
 
     const normalizedEvent = normalizeIncomingWebhook(source, payload);
 
-    if (normalizedEvent.source === "activecampaign") {
-      const queuedJob = await enqueueLaunchWebhookJob(supabase, launch, normalizedEvent);
-
-      return jsonResponse({
-        accepted: true,
-        queued: true,
-        duplicate: queuedJob.duplicate,
-        jobId: queuedJob.id,
-        routing: {
-          queued: true,
-          duplicate: queuedJob.duplicate,
-          currentStatus: queuedJob.status,
-          reason: "activecampaign_webhook_queued_for_async_processing",
-        },
-      });
-    }
-
-    const processingResult = await processIncomingContactEvent(supabase, {
-      launchId: launch.id,
-      source: normalizedEvent.source,
-      eventType: normalizedEvent.eventType,
-      externalContactId: normalizedEvent.externalContactId,
-      contact: normalizedEvent.contact,
-      payload: normalizedEvent.payload,
-    } as IncomingEventBody);
-
-    if (processingResult.status === "rejected" || !processingResult.contactId || !processingResult.eventId) {
-      return jsonResponse({
-        accepted: false,
-        processing: processingResult,
-      });
-    }
-
-    const routingResult = await runAcceptedContactJobs(
-      supabase,
-      launch,
-      normalizedEvent,
-      processingResult.contactId,
-      processingResult.eventId,
-    );
+    const queuedJob = await enqueueLaunchWebhookJob(supabase, launch, normalizedEvent);
 
     return jsonResponse({
       accepted: true,
-      processing: processingResult,
-      routing: routingResult,
+      queued: true,
+      duplicate: queuedJob.duplicate,
+      jobId: queuedJob.id,
+      routing: {
+        queued: true,
+        duplicate: queuedJob.duplicate,
+        currentStatus: queuedJob.status,
+        source: normalizedEvent.source,
+        reason: "webhook_queued_for_async_processing",
+      },
     });
   } catch (error) {
     if (error instanceof ProcessContactError) {
