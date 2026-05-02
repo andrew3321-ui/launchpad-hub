@@ -3404,14 +3404,20 @@ async function syncContactToActiveCampaign(
     contact.normalized_phone ||
     contact.primary_phone ||
     undefined;
-  const activeHasName = Boolean(existingActiveFirstName || existingActiveLastName);
-  const shouldSendPhone = Boolean(outboundPhone) && (!activeEmailConflict || !existingActivePhone);
-  const shouldSendName = !activeEmailConflict || !activeHasName;
+  // ACTIVECAMPAIGN_EMAIL_CONFLICT_PRESERVED: when the incoming email differs
+  // from the one already on the ActiveCampaign contact (matched by phone/identity),
+  // preserve the existing email, name and phone entirely. Only tags, list
+  // membership and custom field values are applied.
+  const shouldSendPhone = Boolean(outboundPhone) && !activeEmailConflict;
+  const shouldSendName = !activeEmailConflict;
 
-  // When the match was driven by phone/known identity, phone is the authority.
-  // Do not overwrite the existing ActiveCampaign email with a different email
-  // sent later by the same person. In that conflict state we also avoid
-  // changing existing name/phone data; only tags, lists and field values move.
+  if (activeEmailConflict) {
+    console.log(
+      `[ACTIVECAMPAIGN_EMAIL_CONFLICT_PRESERVED] Incoming email="${incomingEmail}" differs from existing="${existingActiveEmail}". ` +
+      `Preserving existing contact data; applying only tags, list and field values.`,
+    );
+  }
+
   const contactPayload = {
     email: shouldSendEmail ? incomingEmail || undefined : undefined,
     phone: shouldSendPhone ? outboundPhone : undefined,
