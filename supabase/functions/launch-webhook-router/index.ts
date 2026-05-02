@@ -552,8 +552,14 @@ function extractActiveCampaignWebhookTagContext(payload: JsonRecord) {
     getActiveCampaignBodyValue(payload, "tag[id]"),
     getActiveCampaignBodyValue(payload, "tagid"),
     getActiveCampaignBodyValue(payload, "tag_id"),
+    getActiveCampaignBodyValue(payload, "contactTag[id]"),
     getActiveCampaignBodyValue(payload, "contactTag[tag]"),
+    getActiveCampaignBodyValue(payload, "contactTag[tagid]"),
+    getActiveCampaignBodyValue(payload, "contactTag[tag_id]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[id]"),
     getActiveCampaignBodyValue(payload, "contact_tag[tag]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[tagid]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[tag_id]"),
     rawTag && /^\d+$/.test(rawTag) ? rawTag : null,
     ...collectStringListDeep(payload, [
       "tag_id",
@@ -567,6 +573,12 @@ function extractActiveCampaignWebhookTagContext(payload: JsonRecord) {
   const tagNames = uniqueStrings([
     getActiveCampaignBodyValue(payload, "tag[name]"),
     getActiveCampaignBodyValue(payload, "tag[tag]"),
+    getActiveCampaignBodyValue(payload, "contactTag[tagName]"),
+    getActiveCampaignBodyValue(payload, "contactTag[tag_name]"),
+    getActiveCampaignBodyValue(payload, "contactTag[name]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[tagName]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[tag_name]"),
+    getActiveCampaignBodyValue(payload, "contact_tag[name]"),
     getActiveCampaignBodyValue(payload, "tag_name"),
     getActiveCampaignBodyValue(payload, "tagName"),
     rawTag && !/^\d+$/.test(rawTag) ? rawTag : null,
@@ -2157,6 +2169,22 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   });
 
   if (!config) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "activecampaign",
+      "info",
+      "GOOGLE_SHEETS_SKIPPED",
+      "Google Sheets nao configurado",
+      "O webhook global do ActiveCampaign foi tratado, mas a captura no Google Sheets nao esta configurada para este expert.",
+      {
+        reason: "google_sheets_not_configured",
+        webhookKind: "activecampaign_global_contact_tag_added",
+      },
+    );
+
     return { skipped: true, reason: "google_sheets_not_configured" } as const;
   }
 
@@ -2170,6 +2198,23 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   };
 
   if (!captureMatch.matches) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "activecampaign",
+      "info",
+      "GOOGLE_SHEETS_SKIPPED",
+      "Webhook global fora da tag de captura",
+      "O webhook global do ActiveCampaign chegou ao Launch Hub, mas a tag recebida nao corresponde a tag configurada para envio a planilha.",
+      {
+        reason: captureMatch.reason,
+        webhookKind: "activecampaign_global_contact_tag_added",
+        captureTag,
+      },
+    );
+
     return {
       skipped: true,
       reason: captureMatch.reason,
@@ -2189,6 +2234,28 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   );
 
   if (existingRecord.exists) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "activecampaign",
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Registro duplicado na planilha bloqueado",
+      "O webhook global do ActiveCampaign encontrou um registro ja salvo para este contato/ciclo e nao reenviou a linha.",
+      {
+        reason: "duplicate_capture_record",
+        duplicateReason: existingRecord.reason,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: config.sheetName,
+        fingerprint: existingRecord.fingerprint,
+        identity: existingRecord.identity,
+        webhookKind: "activecampaign_global_contact_tag_added",
+        captureTag,
+      },
+    );
+
     return {
       skipped: true,
       deduped: true,
@@ -2213,6 +2280,27 @@ async function appendActiveCampaignWebhookToGoogleSheets(
       config.spreadsheetId,
       config.sheetName,
       "activecampaign_webhook_existing_sheet",
+    );
+
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "activecampaign",
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Contato ja existia na planilha",
+      "O webhook global do ActiveCampaign encontrou o mesmo email/telefone diretamente na planilha e registrou a deduplicacao sem anexar uma nova linha.",
+      {
+        reason: "duplicate_sheet_row",
+        duplicateReason: existingSheetRow.reason,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: config.sheetName,
+        identity: existingSheetRow.identity,
+        webhookKind: "activecampaign_global_contact_tag_added",
+        captureTag,
+      },
     );
 
     return {
