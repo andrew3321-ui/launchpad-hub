@@ -1157,6 +1157,10 @@ export type Database = {
       }
       is_approved_user: { Args: { _user_id: string }; Returns: boolean }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      launchhub_phone_dedupe_key: {
+        Args: { input_phone: string }
+        Returns: string
+      }
       list_admin_user_access_overview: {
         Args: never
         Returns: {
