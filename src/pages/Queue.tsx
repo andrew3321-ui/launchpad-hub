@@ -16,6 +16,7 @@ type EventSource =
   | "manual";
 type EventStatus = "pending" | "processed" | "ignored" | "error";
 type ActionStatus = "pending" | "success" | "failed" | "skipped";
+type JobStatus = "pending" | "running" | "success" | "failed" | "retrying" | "dead_letter";
 
 interface EventRow {
   id: string;
@@ -37,9 +38,22 @@ interface ActionRow {
   error_message: string | null;
 }
 
-function statusVariant(status: ActionStatus | EventStatus): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "failed" || status === "error") return "destructive";
-  if (status === "pending") return "secondary";
+interface WebhookJobRow {
+  id: string;
+  source: EventSource;
+  event_type: string | null;
+  status: JobStatus;
+  attempts: number;
+  next_attempt_at: string | null;
+  created_at: string;
+  updated_at: string;
+  last_error: string | null;
+  dedupe_key: string | null;
+}
+
+function statusVariant(status: ActionStatus | EventStatus | JobStatus): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "failed" || status === "error" || status === "dead_letter") return "destructive";
+  if (status === "pending" || status === "running" || status === "retrying") return "secondary";
   if (status === "ignored" || status === "skipped") return "outline";
   return "default";
 }
@@ -50,6 +64,7 @@ export default function Queue() {
   const activeLaunchId = activeLaunch?.id ?? null;
   const activeCycleNumber = activeLaunch?.current_cycle_number ?? null;
   const [loading, setLoading] = useState(false);
+  const [jobs, setJobs] = useState<WebhookJobRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
   const [loadedLaunchId, setLoadedLaunchId] = useState<string | null>(null);
@@ -60,6 +75,7 @@ export default function Queue() {
     const load = async (silent = false) => {
       if (!activeLaunchId || activeCycleNumber === null) {
         if (mounted) {
+          setJobs([]);
           setEvents([]);
           setActions([]);
           setLoadedLaunchId(null);
@@ -71,6 +87,7 @@ export default function Queue() {
       const launchId = activeLaunchId;
 
       if (!silent && mounted) {
+        setJobs([]);
         setEvents([]);
         setActions([]);
         setLoadedLaunchId(null);
@@ -78,9 +95,16 @@ export default function Queue() {
       }
 
       const [
+        { data: jobData, error: jobError },
         { data: eventData, error: eventError },
         { data: actionData, error: actionError },
       ] = await Promise.all([
+        supabase
+          .from("launch_webhook_jobs")
+          .select("id, source, event_type, status, attempts, next_attempt_at, created_at, updated_at, last_error, dedupe_key")
+          .eq("launch_id", launchId)
+          .order("created_at", { ascending: false })
+          .limit(30),
         supabase
           .from("inbound_contact_events")
           .select("id, source, event_type, processing_status, received_at, processing_summary")
@@ -97,10 +121,11 @@ export default function Queue() {
           .limit(30),
       ]);
 
-      if (!silent && (eventError || actionError)) {
+      if (!silent && (jobError || eventError || actionError)) {
         toast({
           title: "Erro ao carregar a fila",
           description:
+            jobError?.message ||
             eventError?.message ||
             actionError?.message ||
             "Não foi possivel carregar a fila operacional.",
@@ -109,6 +134,7 @@ export default function Queue() {
       }
 
       if (mounted) {
+        setJobs((jobData || []) as WebhookJobRow[]);
         setEvents((eventData || []) as EventRow[]);
         setActions((actionData || []) as ActionRow[]);
         setLoadedLaunchId(launchId);
@@ -127,12 +153,15 @@ export default function Queue() {
     };
   }, [activeCycleNumber, activeLaunchId, toast]);
 
+  const visibleJobs = loadedLaunchId === activeLaunchId ? jobs : [];
   const visibleEvents = loadedLaunchId === activeLaunchId ? events : [];
   const visibleActions = loadedLaunchId === activeLaunchId ? actions : [];
 
   const pendingActions = useMemo(
-    () => visibleActions.filter((action) => action.status === "pending").length,
-    [visibleActions],
+    () =>
+      visibleActions.filter((action) => action.status === "pending").length +
+      visibleJobs.filter((job) => ["pending", "running", "retrying"].includes(job.status)).length,
+    [visibleActions, visibleJobs],
   );
 
   if (!activeLaunch) {
@@ -169,7 +198,13 @@ export default function Queue() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Jobs de webhook</CardTitle>
+          </CardHeader>
+          <CardContent className="text-3xl font-semibold">{visibleJobs.length}</CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Eventos recebidos</CardTitle>
@@ -196,6 +231,51 @@ export default function Queue() {
         </div>
       ) : (
         <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Jobs de webhook</CardTitle>
+              <CardDescription>
+                Status claro da fila assíncrona antes de processar ActiveCampaign, UChat e Google Sheets.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {visibleJobs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nenhum job de webhook recebido ainda para esse expert.
+                </p>
+              ) : (
+                visibleJobs.map((job) => (
+                  <div key={job.id} className="rounded-xl border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{job.source}</p>
+                          <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
+                          <Badge variant="outline">{job.event_type || "webhook"}</Badge>
+                          <Badge variant="secondary">{job.attempts} tentativa{job.attempts === 1 ? "" : "s"}</Badge>
+                        </div>
+                        {job.next_attempt_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Proxima tentativa: {new Date(job.next_attempt_at).toLocaleString("pt-BR")}
+                          </p>
+                        )}
+                        {job.dedupe_key && (
+                          <p className="break-all text-xs text-muted-foreground">{job.dedupe_key}</p>
+                        )}
+                        {job.last_error && (
+                          <p className="text-sm text-destructive">{job.last_error}</p>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(job.created_at).toLocaleString("pt-BR")}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Webhooks recentes</CardTitle>

@@ -133,8 +133,9 @@ interface LaunchWebhookJobRow {
   event_type: string | null;
   dedupe_key?: string | null;
   payload: JsonRecord;
-  status: "pending" | "running" | "success" | "failed";
+  status: "pending" | "running" | "success" | "failed" | "retrying" | "dead_letter";
   attempts: number;
+  next_attempt_at?: string | null;
   updated_at?: string | null;
 }
 
@@ -154,6 +155,11 @@ const corsHeaders = {
 const ROUTING_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const ACTIVECAMPAIGN_REQUEST_RETRIES = 2;
 const PLATFORM_RATE_LIMIT_MAX_WAIT_MS = Number(Deno.env.get("LAUNCHHUB_RATE_LIMIT_MAX_WAIT_MS") || 2500);
+const WEBHOOK_JOB_MAX_ATTEMPTS = Math.max(Number(Deno.env.get("LAUNCHHUB_WEBHOOK_MAX_ATTEMPTS") || 5), 1);
+const WEBHOOK_JOB_RUNNING_STALE_MS = Math.max(
+  Number(Deno.env.get("LAUNCHHUB_WEBHOOK_RUNNING_STALE_MS") || 5 * 60 * 1000),
+  60 * 1000,
+);
 const activeCampaignTagCache = new Map<string, Array<{ id: string; tag: string }>>();
 let platformRateLimitClient: AnySupabaseClient | null = null;
 const DEFAULT_TYPEBOT_UTM_FIELD_IDS = {
@@ -5401,7 +5407,7 @@ async function enqueueLaunchWebhookJob(
       .eq("launch_id", launch.id)
       .eq("source", normalizedEvent.source)
       .eq("dedupe_key", dedupeKey)
-      .in("status", ["pending", "running", "success"])
+      .in("status", ["pending", "retrying", "running", "success"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -5436,7 +5442,7 @@ async function enqueueLaunchWebhookJob(
       .eq("launch_id", launch.id)
       .eq("source", normalizedEvent.source)
       .eq("dedupe_key", dedupeKey)
-      .in("status", ["pending", "running", "success"])
+      .in("status", ["pending", "retrying", "running", "success"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -5473,7 +5479,7 @@ function isFreshRunningWebhookJob(job: LaunchWebhookJobRow) {
   const updatedAtMs = Date.parse(job.updated_at);
   if (!Number.isFinite(updatedAtMs)) return false;
 
-  return Date.now() - updatedAtMs < 2 * 60 * 1000;
+  return Date.now() - updatedAtMs < WEBHOOK_JOB_RUNNING_STALE_MS;
 }
 
 async function updateLaunchWebhookJob(
@@ -5516,6 +5522,32 @@ async function processQueuedLaunchWebhookJob(
     };
   }
 
+  if (job.status === "dead_letter") {
+    return {
+      accepted: false,
+      skipped: true,
+      reason: "job_in_dead_letter",
+      jobId,
+    };
+  }
+
+  if ((job.attempts || 0) >= WEBHOOK_JOB_MAX_ATTEMPTS) {
+    await updateLaunchWebhookJob(supabase, jobId, {
+      status: "dead_letter",
+      next_attempt_at: null,
+      last_error: job.status === "failed"
+        ? "Webhook job moved to dead letter after exhausting retry attempts"
+        : "Webhook job reached the maximum number of attempts",
+    });
+
+    return {
+      accepted: false,
+      skipped: true,
+      reason: "job_moved_to_dead_letter",
+      jobId,
+    };
+  }
+
   if (isFreshRunningWebhookJob(job)) {
     return {
       accepted: true,
@@ -5525,12 +5557,26 @@ async function processQueuedLaunchWebhookJob(
     };
   }
 
+  if (job.status === "retrying" && job.next_attempt_at) {
+    const nextAttemptAtMs = Date.parse(job.next_attempt_at);
+    if (Number.isFinite(nextAttemptAtMs) && nextAttemptAtMs > Date.now()) {
+      return {
+        accepted: true,
+        skipped: true,
+        reason: "job_waiting_for_retry",
+        jobId,
+        nextAttemptAt: job.next_attempt_at,
+      };
+    }
+  }
+
   const nextAttempts = (job.attempts || 0) + 1;
   await updateLaunchWebhookJob(supabase, jobId, {
     status: "running",
     attempts: nextAttempts,
     started_at: new Date().toISOString(),
     last_error: null,
+    next_attempt_at: null,
   });
 
   try {
@@ -5592,7 +5638,7 @@ async function processQueuedLaunchWebhookJob(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const shouldRetry = nextAttempts < 5;
+    const shouldRetry = nextAttempts < WEBHOOK_JOB_MAX_ATTEMPTS;
     let retryDelayMs = Math.min(nextAttempts * 30_000, 5 * 60_000);
 
     if (error instanceof ProcessContactError && error.statusCode === 429 && error.details) {
@@ -5609,12 +5655,21 @@ async function processQueuedLaunchWebhookJob(
       }
     }
 
+    const nextAttemptAt = shouldRetry
+      ? new Date(Date.now() + retryDelayMs).toISOString()
+      : null;
+
     await updateLaunchWebhookJob(supabase, jobId, {
-      status: shouldRetry ? "pending" : "failed",
+      status: shouldRetry ? "retrying" : "dead_letter",
       last_error: message,
-      next_attempt_at: shouldRetry
-        ? new Date(Date.now() + retryDelayMs).toISOString()
-        : null,
+      next_attempt_at: nextAttemptAt,
+      response_payload: {
+        accepted: false,
+        error: message,
+        attempts: nextAttempts,
+        status: shouldRetry ? "retrying" : "dead_letter",
+        nextAttemptAt,
+      },
     });
 
     throw error;

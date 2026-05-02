@@ -1138,7 +1138,7 @@ export type Database = {
         Returns: boolean
       }
       dispatch_pending_launch_webhook_jobs: {
-        Args: { limit_count?: number }
+        Args: { limit_count?: number; stale_after?: string }
         Returns: Json
       }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
