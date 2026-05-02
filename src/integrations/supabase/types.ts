@@ -530,6 +530,38 @@ export type Database = {
           },
         ]
       }
+      launch_user_assignments: {
+        Row: {
+          assigned_by: string | null
+          created_at: string
+          id: string
+          launch_id: string
+          user_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          launch_id: string
+          user_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string
+          id?: string
+          launch_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "launch_user_assignments_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       launch_webhook_jobs: {
         Row: {
           attempts: number
@@ -585,38 +617,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "launch_webhook_jobs_launch_id_fkey"
-            columns: ["launch_id"]
-            isOneToOne: false
-            referencedRelation: "launches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      launch_user_assignments: {
-        Row: {
-          assigned_by: string | null
-          created_at: string
-          id: string
-          launch_id: string
-          user_id: string
-        }
-        Insert: {
-          assigned_by?: string | null
-          created_at?: string
-          id?: string
-          launch_id: string
-          user_id: string
-        }
-        Update: {
-          assigned_by?: string | null
-          created_at?: string
-          id?: string
-          launch_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "launch_user_assignments_launch_id_fkey"
             columns: ["launch_id"]
             isOneToOne: false
             referencedRelation: "launches"
@@ -1111,10 +1111,10 @@ export type Database = {
           assigned_experts: Json
           created_at: string
           email: string
-          full_name: string | null
+          full_name: string
           is_admin: boolean
           must_change_password: boolean
-          password_changed_at: string | null
+          password_changed_at: string
           profile_id: string
           user_id: string
         }[]
@@ -1133,10 +1133,6 @@ export type Database = {
       purge_expired_contact_technical_logs: { Args: never; Returns: number }
       replace_launch_uchat_workspaces: {
         Args: { next_workspaces?: Json; target_launch_id: string }
-        Returns: Json
-      }
-      set_user_expert_assignments: {
-        Args: { target_launch_ids?: string[]; target_user_id: string }
         Returns: Json
       }
       review_signup_request: {
@@ -1160,6 +1156,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_user_expert_assignments: {
+        Args: { target_launch_ids?: string[]; target_user_id: string }
+        Returns: Json
       }
       update_launch_activecampaign_settings: {
         Args: {
