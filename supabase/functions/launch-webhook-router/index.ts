@@ -1835,6 +1835,19 @@ function flattenTallyPayload(payload: JsonRecord) {
   } satisfies JsonRecord;
 }
 
+function extractTallyExternalContactId(payload: JsonRecord) {
+  return findStringDeep(payload, [
+    "external_contact_id",
+    "externalcontactid",
+    "respondent_id",
+    "respondentid",
+    "response_id",
+    "responseid",
+    "submission_id",
+    "submissionid",
+  ]);
+}
+
 function normalizeWebhookSource(value: string | null) {
   if (!value) return null;
   const normalized = normalizeKey(value);
@@ -1933,15 +1946,7 @@ function normalizeIncomingWebhook(
     return {
       source,
       eventType,
-      externalContactId:
-        findStringDeep(tallyPayload, [
-          "response_id",
-          "submission_id",
-          "respondent_id",
-          "external_contact_id",
-          "contact_id",
-          "user_id",
-        ]) || externalContactId,
+      externalContactId: extractTallyExternalContactId(tallyPayload),
       contact: {
         name: tallyContact.name,
         email: tallyContact.email,
