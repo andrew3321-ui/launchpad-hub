@@ -874,10 +874,35 @@ export async function processIncomingContactEvent(
         .update({ status: "merged" })
         .in("id", duplicateIds);
 
-      await supabase
-        .from("lead_contact_identities")
-        .update({ contact_id: processedContactId })
-        .in("contact_id", duplicateIds);
+      // Only reassign identities whose email does NOT conflict with the
+      // surviving contact. This prevents cascade/snowball merges where
+      // unrelated phones from a merged contact bridge future lookups.
+      const survivorEmail = nextPrimaryEmail;
+      if (survivorEmail) {
+        // Safe identities: no email or same email
+        await supabase
+          .from("lead_contact_identities")
+          .update({ contact_id: processedContactId })
+          .in("contact_id", duplicateIds)
+          .or(`external_email.is.null,external_email.eq.${survivorEmail}`);
+
+        // Conflicting identities: strip phone so they cannot bridge future merges
+        await supabase
+          .from("lead_contact_identities")
+          .update({
+            contact_id: processedContactId,
+            normalized_phone: null,
+            external_phone: null,
+          })
+          .in("contact_id", duplicateIds)
+          .not("external_email", "is", null)
+          .neq("external_email", survivorEmail);
+      } else {
+        await supabase
+          .from("lead_contact_identities")
+          .update({ contact_id: processedContactId })
+          .in("contact_id", duplicateIds);
+      }
 
       await supabase
         .from("inbound_contact_events")
