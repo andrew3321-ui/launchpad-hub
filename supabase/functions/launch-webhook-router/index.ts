@@ -3366,7 +3366,7 @@ async function syncContactToActiveCampaign(
 
   const phoneOnly = options?.phoneOnlyMatch === true;
   const overridePhone = nonEmptyString(options?.phoneSearchValue) || null;
-  const existingContact = await findExistingActiveCampaignContact(
+  let existingContact = await findExistingActiveCampaignContact(
     launch,
     contact,
     knownContactId,
@@ -3383,10 +3383,34 @@ async function syncContactToActiveCampaign(
 
   const { firstName, lastName } = splitName(contact.primary_name);
   const incomingEmail = nonEmptyString(contact.primary_email);
-  const existingActiveEmail = nonEmptyString(existingContact?.snapshot?.email);
-  const existingActivePhone = nonEmptyString(existingContact?.snapshot?.phone);
-  const existingActiveFirstName = nonEmptyString(existingContact?.snapshot?.firstName);
-  const existingActiveLastName = nonEmptyString(existingContact?.snapshot?.lastName);
+  let existingActiveEmail = nonEmptyString(existingContact?.snapshot?.email);
+  let existingActivePhone = nonEmptyString(existingContact?.snapshot?.phone);
+  let existingActiveFirstName = nonEmptyString(existingContact?.snapshot?.firstName);
+  let existingActiveLastName = nonEmptyString(existingContact?.snapshot?.lastName);
+  const phoneMatchedEmailConflict =
+    !phoneOnly &&
+    existingContact?.matchedBy !== "email" &&
+    Boolean(incomingEmail && existingActiveEmail) &&
+    incomingEmail?.toLowerCase() !== existingActiveEmail?.toLowerCase();
+  const conflictingActiveContact = phoneMatchedEmailConflict
+    ? {
+        activeContactId: existingContact?.activeContactId || null,
+        email: existingActiveEmail,
+        phone: existingActivePhone,
+        name: [existingActiveFirstName, existingActiveLastName].filter(Boolean).join(" ") || null,
+        matchedBy: existingContact?.matchedBy || null,
+      }
+    : null;
+
+  if (phoneMatchedEmailConflict && incomingEmail) {
+    const emailMatchedContact = await findActiveCampaignContactByEmail(launch, incomingEmail);
+    existingContact = emailMatchedContact;
+    existingActiveEmail = nonEmptyString(existingContact?.snapshot?.email);
+    existingActivePhone = nonEmptyString(existingContact?.snapshot?.phone);
+    existingActiveFirstName = nonEmptyString(existingContact?.snapshot?.firstName);
+    existingActiveLastName = nonEmptyString(existingContact?.snapshot?.lastName);
+  }
+
   const activeEmailConflict =
     !phoneOnly &&
     existingContact?.matchedBy !== "email" &&
@@ -3410,14 +3434,15 @@ async function syncContactToActiveCampaign(
   // membership and custom field values are applied.
   const existingActiveName = [existingActiveFirstName, existingActiveLastName].filter(Boolean).join(" ") || null;
   const hasExistingActiveName = Boolean(existingActiveName);
-  const shouldSendPhone = Boolean(outboundPhone) && !activeEmailConflict;
-  const shouldSendName = !activeEmailConflict;
-  const shouldSkipContactProfileUpdate = Boolean(existingContact && activeEmailConflict);
+  const shouldUseEmailOnlyAfterPhoneConflict = phoneMatchedEmailConflict;
+  const shouldSendPhone = Boolean(outboundPhone) && !activeEmailConflict && !shouldUseEmailOnlyAfterPhoneConflict;
+  const shouldSendName = !activeEmailConflict && !shouldUseEmailOnlyAfterPhoneConflict;
+  const shouldSkipContactProfileUpdate = Boolean(existingContact && (activeEmailConflict || shouldUseEmailOnlyAfterPhoneConflict));
 
-  if (activeEmailConflict) {
+  if (activeEmailConflict || phoneMatchedEmailConflict) {
     console.log(
-      `[ACTIVECAMPAIGN_EMAIL_CONFLICT_PRESERVED] Incoming email="${incomingEmail}" differs from existing="${existingActiveEmail}". ` +
-      `Preserving existing contact data; applying only tags, list and field values.`,
+      `[ACTIVECAMPAIGN_EMAIL_CONFLICT_PRESERVED] Incoming email="${incomingEmail}" conflicts with a phone/identity match. ` +
+      `Ignoring the unsafe phone match and preserving profile data; applying only safe routing actions.`,
     );
   }
 
@@ -3524,22 +3549,25 @@ async function syncContactToActiveCampaign(
     appliedFieldValues,
     matchedBy: existingContact?.matchedBy || null,
     operation: existingContact ? "updated_existing" : "synced",
-    preservedEmailConflict: activeEmailConflict
+    preservedEmailConflict: activeEmailConflict || phoneMatchedEmailConflict
       ? {
-          activeCampaignEmail: existingActiveEmail,
+          activeCampaignEmail: conflictingActiveContact?.email || existingActiveEmail,
           incomingEmail,
-          activeCampaignPhone: existingActivePhone,
+          activeCampaignPhone: conflictingActiveContact?.phone || existingActivePhone,
           incomingPhone: outboundPhone || null,
-          activeCampaignName: existingActiveName,
+          activeCampaignName: conflictingActiveContact?.name || existingActiveName,
           incomingName: [firstName, lastName].filter(Boolean).join(" ") || null,
+          unsafeMatchedActiveContactId: conflictingActiveContact?.activeContactId || null,
+          routedActiveContactId: activeContactId,
+          routedByEmailAfterPhoneConflict: phoneMatchedEmailConflict,
           preservedFields: [
             "email",
-            ...(hasExistingActiveName ? ["name"] : []),
-            ...(existingActivePhone ? ["phone"] : []),
+            ...(hasExistingActiveName || conflictingActiveContact?.name ? ["name"] : []),
+            ...(existingActivePhone || conflictingActiveContact?.phone ? ["phone"] : []),
             ...(shouldSkipContactProfileUpdate ? ["active_contact_profile"] : []),
           ],
           profileUpdateSkipped: shouldSkipContactProfileUpdate,
-          matchedBy: existingContact?.matchedBy || null,
+          matchedBy: conflictingActiveContact?.matchedBy || existingContact?.matchedBy || null,
         }
       : null,
   };
@@ -3698,6 +3726,30 @@ function pickActiveCampaignContactByPhone(
       phonesLookEquivalent(candidate.phone, phoneCandidate)
     )
   ) || null;
+}
+
+async function findActiveCampaignContactByEmail(launch: LaunchRow, email: string | null | undefined) {
+  const normalizedEmail = nonEmptyString(email)?.toLowerCase();
+  if (!launch.ac_api_url || !launch.ac_api_key || !normalizedEmail) return null;
+
+  const payload = await activeCampaignRequest(
+    launch.ac_api_url,
+    launch.ac_api_key,
+    "/api/3/contacts",
+    "GET",
+    undefined,
+    { email: normalizedEmail },
+  );
+
+  const matchedContact = extractActiveCampaignContact(payload);
+  const activeContactId = nonEmptyString(matchedContact?.id);
+  if (!matchedContact || !activeContactId) return null;
+
+  return {
+    matchedBy: "email",
+    activeContactId,
+    snapshot: matchedContact,
+  };
 }
 
 async function findExistingActiveCampaignContact(
