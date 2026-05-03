@@ -874,25 +874,10 @@ export async function processIncomingContactEvent(
         .update({ status: "merged" })
         .in("id", duplicateIds);
 
-      // Only reassign identities whose email does NOT conflict with the
-      // surviving contact's email.  Identities with a conflicting email stay
-      // orphaned on the merged (inactive) contact so they can never act as a
-      // bridge to pull unrelated leads into this contact (cascade prevention).
-      const survivingEmail = normalizeEmail(nextPrimaryEmail);
-      if (survivingEmail) {
-        // Safe identities: no email or same email
-        await supabase
-          .from("lead_contact_identities")
-          .update({ contact_id: processedContactId })
-          .in("contact_id", duplicateIds)
-          .or(`external_email.is.null,external_email.eq.${survivingEmail}`);
-      } else {
-        // No email on the surviving contact – reassign everything
-        await supabase
-          .from("lead_contact_identities")
-          .update({ contact_id: processedContactId })
-          .in("contact_id", duplicateIds);
-      }
+      await supabase
+        .from("lead_contact_identities")
+        .update({ contact_id: processedContactId })
+        .in("contact_id", duplicateIds);
 
       await supabase
         .from("inbound_contact_events")

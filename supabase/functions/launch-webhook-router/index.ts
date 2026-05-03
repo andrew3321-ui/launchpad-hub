@@ -1939,7 +1939,9 @@ function normalizeIncomingWebhook(
           "submission_id",
           "respondent_id",
           "external_contact_id",
-          "event_id",
+          "contact_id",
+          "user_id",
+          "id",
         ]) || externalContactId,
       contact: {
         name: tallyContact.name,
