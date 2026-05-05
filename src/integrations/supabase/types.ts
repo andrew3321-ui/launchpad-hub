@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      alert_delivery_logs: {
+        Row: {
+          channel: string
+          code: string
+          created_at: string
+          dedupe_key: string
+          error_message: string | null
+          id: string
+          launch_id: string | null
+          level: string
+          source: string
+          status: string
+        }
+        Insert: {
+          channel?: string
+          code: string
+          created_at?: string
+          dedupe_key: string
+          error_message?: string | null
+          id?: string
+          launch_id?: string | null
+          level: string
+          source: string
+          status: string
+        }
+        Update: {
+          channel?: string
+          code?: string
+          created_at?: string
+          dedupe_key?: string
+          error_message?: string | null
+          id?: string
+          launch_id?: string | null
+          level?: string
+          source?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_delivery_logs_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_processing_logs: {
         Row: {
           code: string
@@ -865,6 +912,42 @@ export type Database = {
           },
         ]
       }
+      platform_alert_settings: {
+        Row: {
+          alert_levels: string[]
+          alert_sources: string[]
+          created_at: string
+          discord_enabled: boolean
+          discord_webhook_url: string | null
+          id: string
+          min_repeat_interval_seconds: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          alert_levels?: string[]
+          alert_sources?: string[]
+          created_at?: string
+          discord_enabled?: boolean
+          discord_webhook_url?: string | null
+          id?: string
+          min_repeat_interval_seconds?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          alert_levels?: string[]
+          alert_sources?: string[]
+          created_at?: string
+          discord_enabled?: boolean
+          discord_webhook_url?: string | null
+          id?: string
+          min_repeat_interval_seconds?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       platform_rate_limit_windows: {
         Row: {
           limit_per_minute: number
@@ -1143,18 +1226,18 @@ export type Database = {
             Args: { limit_count?: number; stale_after?: string }
             Returns: Json
           }
-      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       get_alert_settings: {
         Args: never
         Returns: {
           alert_levels: string[]
           alert_sources: string[]
           discord_enabled: boolean
-          discord_webhook_url: string | null
+          discord_webhook_url: string
           min_repeat_interval_seconds: number
           updated_at: string
         }[]
       }
+      get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
       get_launch_visible_leads: {
         Args: { limit_count?: number; target_launch_id: string }
         Returns: {
@@ -1258,7 +1341,7 @@ export type Database = {
           alert_levels: string[]
           alert_sources: string[]
           discord_enabled: boolean
-          discord_webhook_url: string | null
+          discord_webhook_url: string
           min_repeat_interval_seconds: number
           updated_at: string
         }[]
