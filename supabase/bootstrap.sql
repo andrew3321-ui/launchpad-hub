@@ -801,7 +801,8 @@ DECLARE
     ARRAY[
       'andrehugo@megafone.digital',
       'victorbezerra@megafone.digital',
-      'joaofelipeoliveira@megafone.digital'
+      'joaofelipeoliveira@megafone.digital',
+      'afonsodamasceno@megafone.digital'
     ]
   );
 BEGIN
@@ -846,7 +847,8 @@ SET
       ARRAY[
         'andrehugo@megafone.digital',
         'victorbezerra@megafone.digital',
-        'joaofelipeoliveira@megafone.digital'
+        'joaofelipeoliveira@megafone.digital',
+        'afonsodamasceno@megafone.digital'
       ]
     )
   ),
