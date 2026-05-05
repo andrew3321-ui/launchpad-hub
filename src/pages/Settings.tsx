@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  BellRing,
   CheckCircle2,
   DatabaseZap,
   KeyRound,
@@ -16,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +55,17 @@ interface AdminUserOverview {
   profile_id: string;
   user_id: string;
 }
+
+interface AlertSettings {
+  alert_levels: string[];
+  alert_sources: string[];
+  discord_enabled: boolean;
+  discord_webhook_url: string | null;
+  min_repeat_interval_seconds: number;
+  updated_at: string | null;
+}
+
+const DEFAULT_ALERT_SOURCES = ["activecampaign", "manychat", "typebot", "tally", "sendflow", "uchat"];
 
 function formatDate(value: string | null) {
   if (!value) return "Nao informado";
@@ -102,6 +115,12 @@ export default function Settings() {
   const [resettingPasswordFor, setResettingPasswordFor] = useState<string | null>(null);
   const [deletingUserFor, setDeletingUserFor] = useState<string | null>(null);
   const [userPendingDelete, setUserPendingDelete] = useState<AdminUserOverview | null>(null);
+  const [alertSettings, setAlertSettings] = useState<AlertSettings | null>(null);
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
+  const [discordAlertsEnabled, setDiscordAlertsEnabled] = useState(false);
+  const [discordRepeatInterval, setDiscordRepeatInterval] = useState(300);
+  const [loadingAlertSettings, setLoadingAlertSettings] = useState(false);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
   const isAdmin = Boolean(
     profile?.is_admin && profile.approval_status === "approved" && !profile.must_change_password,
@@ -151,9 +170,45 @@ export default function Settings() {
     }
   }, [isAdmin, toast]);
 
+  const applyAlertSettings = useCallback((settings: AlertSettings | null) => {
+    setAlertSettings(settings);
+    setDiscordWebhookUrl(settings?.discord_webhook_url ?? "");
+    setDiscordAlertsEnabled(settings?.discord_enabled ?? false);
+    setDiscordRepeatInterval(settings?.min_repeat_interval_seconds ?? 300);
+  }, []);
+
+  const loadAlertSettings = useCallback(async () => {
+    if (!isAdmin) {
+      applyAlertSettings(null);
+      return;
+    }
+
+    setLoadingAlertSettings(true);
+
+    try {
+      const { data, error } = await supabase.rpc("get_alert_settings");
+
+      if (error) {
+        throw error;
+      }
+
+      const nextSettings = ((data ?? [])[0] ?? null) as AlertSettings | null;
+      applyAlertSettings(nextSettings);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel carregar os alertas.";
+      toast({ title: "Erro ao carregar alertas", description: message, variant: "destructive" });
+    } finally {
+      setLoadingAlertSettings(false);
+    }
+  }, [applyAlertSettings, isAdmin, toast]);
+
   useEffect(() => {
     void loadAdminUsers();
   }, [loadAdminUsers]);
+
+  useEffect(() => {
+    void loadAlertSettings();
+  }, [loadAlertSettings]);
 
   const handleOwnPasswordSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -214,6 +269,49 @@ export default function Settings() {
     }
 
     return response;
+  };
+
+  const saveAlertSettings = async () => {
+    if (!isAdmin) return;
+
+    if (discordAlertsEnabled && !discordWebhookUrl.trim()) {
+      toast({
+        title: "Webhook do Discord vazio",
+        description: "Informe a URL do webhook antes de ativar os alertas.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAlertSettings(true);
+
+    try {
+      const { data, error } = await supabase.rpc("update_discord_alert_settings", {
+        next_alert_levels: ["error"],
+        next_alert_sources: DEFAULT_ALERT_SOURCES,
+        next_discord_enabled: discordAlertsEnabled,
+        next_discord_webhook_url: discordWebhookUrl.trim(),
+        next_min_repeat_interval_seconds: Math.max(0, Math.round(Number(discordRepeatInterval) || 300)),
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const nextSettings = ((data ?? [])[0] ?? null) as AlertSettings | null;
+      applyAlertSettings(nextSettings);
+      toast({
+        title: "Alertas atualizados",
+        description: nextSettings?.discord_enabled
+          ? "Erros operacionais serao enviados ao Discord configurado."
+          : "Alertas do Discord foram desativados.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel salvar os alertas.";
+      toast({ title: "Erro ao salvar alertas", description: message, variant: "destructive" });
+    } finally {
+      setSavingAlertSettings(false);
+    }
   };
 
   const toggleExpertAssignment = (userId: string, expertId: string, checked: boolean) => {
@@ -458,6 +556,113 @@ export default function Settings() {
           description="Confira se o backend conectado ja recebeu todas as estruturas que o app precisa para operar."
         />
       </div>
+
+      {isAdmin && (
+        <section id="alertas" className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-2">
+              <div className="brand-chip w-fit border-white/10 bg-white/5 text-[#aef4ff]">
+                <BellRing className="h-3.5 w-3.5" />
+                Alertas
+              </div>
+              <h2 className="text-2xl font-semibold text-white">Alertas operacionais</h2>
+              <p className="max-w-3xl text-sm leading-7 text-slate-300">
+                Configure uma URL de webhook do Discord para receber erros criticos sem precisar ficar olhando os logs.
+              </p>
+            </div>
+            <Button variant="outline" onClick={() => void loadAlertSettings()} disabled={loadingAlertSettings}>
+              {loadingAlertSettings && <Loader2 className="h-4 w-4 animate-spin" />}
+              Recarregar alertas
+            </Button>
+          </div>
+
+          <Card className="brand-card border-white/10 bg-[linear-gradient(180deg,rgba(8,23,46,0.92),rgba(4,12,24,0.84))]">
+            <CardHeader>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-white">
+                    <BellRing className="h-5 w-5 text-primary" />
+                    Discord
+                  </CardTitle>
+                  <CardDescription className="mt-2 text-slate-300">
+                    Somente admins podem alterar esta URL. O backend usa essa configuracao para enviar alertas de erro.
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2">
+                  <span className="text-sm text-slate-300">Ativo</span>
+                  <Switch
+                    checked={discordAlertsEnabled}
+                    onCheckedChange={setDiscordAlertsEnabled}
+                    disabled={loadingAlertSettings || savingAlertSettings}
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+                <div className="space-y-2">
+                  <Label htmlFor="discord-webhook-url">URL do webhook do Discord</Label>
+                  <Input
+                    id="discord-webhook-url"
+                    type="password"
+                    autoComplete="off"
+                    value={discordWebhookUrl}
+                    onChange={(event) => setDiscordWebhookUrl(event.target.value)}
+                    placeholder="https://discord.com/api/webhooks/..."
+                    className="h-11 rounded-2xl border-white/10 bg-[#07162c] text-slate-50"
+                    disabled={loadingAlertSettings || savingAlertSettings}
+                  />
+                  <p className="text-xs leading-6 text-slate-400">
+                    Troque esta URL quando precisar rotacionar o canal. Usuarios comuns nao veem nem alteram este campo.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="discord-repeat-interval">Intervalo antispam em segundos</Label>
+                  <Input
+                    id="discord-repeat-interval"
+                    type="number"
+                    min={0}
+                    max={86400}
+                    value={discordRepeatInterval}
+                    onChange={(event) => setDiscordRepeatInterval(Number(event.target.value))}
+                    className="h-11 rounded-2xl border-white/10 bg-[#07162c] text-slate-50"
+                    disabled={loadingAlertSettings || savingAlertSettings}
+                  />
+                  <p className="text-xs leading-6 text-slate-400">
+                    Evita repetir o mesmo erro no Discord em sequencia. O padrao seguro e 300 segundos.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Nivel</p>
+                  <p className="mt-2 font-semibold text-white">Erros criticos</p>
+                </div>
+                <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Fontes</p>
+                  <p className="mt-2 text-sm font-semibold text-white">Active, ManyChat, Typebot, Tally, Sendflow e UChat</p>
+                </div>
+                <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Atualizado</p>
+                  <p className="mt-2 text-sm font-semibold text-white">{formatDate(alertSettings?.updated_at ?? null)}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-400">
+                  O Discord recebe um resumo mascarado do erro; segredos e tokens continuam fora da mensagem.
+                </p>
+                <Button type="button" onClick={() => void saveAlertSettings()} disabled={savingAlertSettings || loadingAlertSettings}>
+                  {savingAlertSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+                  Salvar alertas
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       {isAdmin && (
         <section className="space-y-4">

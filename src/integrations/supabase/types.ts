@@ -1144,6 +1144,17 @@ export type Database = {
             Returns: Json
           }
       get_launch_sources: { Args: { target_launch_id: string }; Returns: Json }
+      get_alert_settings: {
+        Args: never
+        Returns: {
+          alert_levels: string[]
+          alert_sources: string[]
+          discord_enabled: boolean
+          discord_webhook_url: string | null
+          min_repeat_interval_seconds: number
+          updated_at: string
+        }[]
+      }
       get_launch_visible_leads: {
         Args: { limit_count?: number; target_launch_id: string }
         Returns: {
@@ -1234,6 +1245,23 @@ export type Database = {
       set_user_expert_assignments: {
         Args: { target_launch_ids?: string[]; target_user_id: string }
         Returns: Json
+      }
+      update_discord_alert_settings: {
+        Args: {
+          next_alert_levels?: string[]
+          next_alert_sources?: string[]
+          next_discord_enabled?: boolean
+          next_discord_webhook_url?: string
+          next_min_repeat_interval_seconds?: number
+        }
+        Returns: {
+          alert_levels: string[]
+          alert_sources: string[]
+          discord_enabled: boolean
+          discord_webhook_url: string | null
+          min_repeat_interval_seconds: number
+          updated_at: string
+        }[]
       }
       update_launch_activecampaign_settings: {
         Args: {
