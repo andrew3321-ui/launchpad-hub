@@ -190,8 +190,11 @@ interface GoogleSheetsBulkUpdateResponse {
   summary: {
     mode: BulkCsvMode;
     receivedRows: number;
+    uniqueIdentities: number;
     uniqueEmails: number;
+    missingIdentityRows: number;
     missingEmailRows: number;
+    duplicatedInputIdentities: number;
     duplicatedInputEmails: number;
     matchedRows: number;
     matchedByPhoneRows: number;
@@ -685,8 +688,11 @@ function createEmptyBulkUpdateResponse(mode: BulkCsvMode): GoogleSheetsBulkUpdat
     summary: {
       mode,
       receivedRows: 0,
+      uniqueIdentities: 0,
       uniqueEmails: 0,
+      missingIdentityRows: 0,
       missingEmailRows: 0,
+      duplicatedInputIdentities: 0,
       duplicatedInputEmails: 0,
       matchedRows: 0,
       matchedByPhoneRows: 0,
@@ -721,8 +727,15 @@ function mergeBulkUpdateResponses(
     summary: {
       ...next.summary,
       receivedRows: current.summary.receivedRows + next.summary.receivedRows,
+      uniqueIdentities:
+        current.summary.uniqueIdentities +
+        (next.summary.uniqueIdentities ?? next.summary.uniqueEmails),
       uniqueEmails: current.summary.uniqueEmails + next.summary.uniqueEmails,
+      missingIdentityRows: current.summary.missingIdentityRows + (next.summary.missingIdentityRows ?? 0),
       missingEmailRows: current.summary.missingEmailRows + next.summary.missingEmailRows,
+      duplicatedInputIdentities:
+        current.summary.duplicatedInputIdentities +
+        (next.summary.duplicatedInputIdentities ?? next.summary.duplicatedInputEmails),
       duplicatedInputEmails: current.summary.duplicatedInputEmails + next.summary.duplicatedInputEmails,
       matchedRows: current.summary.matchedRows + next.summary.matchedRows,
       matchedByPhoneRows: current.summary.matchedByPhoneRows + next.summary.matchedByPhoneRows,
@@ -781,32 +794,46 @@ function uniqueRowsByColumn(
   column: string,
   phoneColumn = "",
 ) {
-  const rowsByEmail = new Map<string, Record<string, string>>();
-  const seenPhoneKeys = new Set<string>();
+  const rowsByIdentity = new Map<string, Record<string, string>>();
+  const emailIdentityKeys = new Map<string, string>();
+  const phoneIdentityKeys = new Map<string, string>();
   let duplicateCount = 0;
   let missingEmailRows = 0;
+  let missingIdentityRows = 0;
 
   for (const row of rows) {
     const email = String(row[column] ?? "").trim().toLowerCase();
     if (!email || !email.includes("@")) {
       missingEmailRows += 1;
-      continue;
     }
 
     const phoneKey = phoneColumn ? buildFrontendPhoneDedupeKey(row[phoneColumn]) : "";
-    if (rowsByEmail.has(email) || (phoneKey && seenPhoneKeys.has(phoneKey))) {
+    const validEmail = email && email.includes("@") ? email : "";
+    const existingIdentityKey =
+      (validEmail ? emailIdentityKeys.get(validEmail) : undefined) ||
+      (phoneKey ? phoneIdentityKeys.get(phoneKey) : undefined);
+
+    if (existingIdentityKey) {
       duplicateCount += 1;
       continue;
     }
 
-    rowsByEmail.set(email, row);
-    if (phoneKey) seenPhoneKeys.add(phoneKey);
+    const identityKey = validEmail ? `email:${validEmail}` : phoneKey ? `phone:${phoneKey}` : "";
+    if (!identityKey) {
+      missingIdentityRows += 1;
+      continue;
+    }
+
+    rowsByIdentity.set(identityKey, row);
+    if (validEmail) emailIdentityKeys.set(validEmail, identityKey);
+    if (phoneKey) phoneIdentityKeys.set(phoneKey, identityKey);
   }
 
   return {
-    rows: [...rowsByEmail.values()],
+    rows: [...rowsByIdentity.values()],
     duplicateCount,
     missingEmailRows,
+    missingIdentityRows,
   };
 }
 
@@ -2106,14 +2133,14 @@ export default function Sources() {
       const batches = chunkArray(preparedCsvRows.rows, batchSize);
 
       if (batches.length === 0) {
-        throw new Error("Nenhuma linha com email válido foi encontrada no CSV.");
+        throw new Error("Nenhuma linha com email ou telefone utilizável foi encontrada no CSV.");
       }
 
       let mergedResult = createEmptyBulkUpdateResponse(bulkCsvMode);
-      mergedResult.summary.missingEmailRows = preparedCsvRows.missingEmailRows;
-      mergedResult.summary.duplicatedInputEmails = preparedCsvRows.duplicateCount;
+      mergedResult.summary.missingIdentityRows = preparedCsvRows.missingIdentityRows;
+      mergedResult.summary.duplicatedInputIdentities = preparedCsvRows.duplicateCount;
 
-      let processedRows = preparedCsvRows.missingEmailRows + preparedCsvRows.duplicateCount;
+      let processedRows = preparedCsvRows.missingIdentityRows + preparedCsvRows.duplicateCount;
       setBulkUpdateProgress({
         processedRows,
         totalRows: bulkCsvRows.length,
@@ -3385,7 +3412,11 @@ export default function Sources() {
                       </Badge>
                     </div>
                     <div className="grid gap-2 text-muted-foreground md:grid-cols-3">
-                      <p>Emails únicos: {bulkUpdateResult.summary.uniqueEmails}</p>
+                      <p>
+                        Identidades únicas:{" "}
+                        {bulkUpdateResult.summary.uniqueIdentities || bulkUpdateResult.summary.uniqueEmails}
+                      </p>
+                      <p>Linhas sem email/telefone útil: {bulkUpdateResult.summary.missingIdentityRows}</p>
                       {bulkUpdateResult.summary.mode === "active_export_import" ? (
                         <p>Inseridos pelo CSV: {bulkUpdateResult.summary.insertedFromCsv}</p>
                       ) : (

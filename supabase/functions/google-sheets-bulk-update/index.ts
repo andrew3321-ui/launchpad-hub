@@ -326,16 +326,22 @@ function pickCreatedAtFromCsvRow(row: JsonRecord) {
   return firstStringFromAnyRowColumn(row, CSV_CREATED_AT_CANDIDATES) || null;
 }
 
-function buildActiveCampaignContactFromCsvRow(email: string, row: JsonRecord): ActiveCampaignContact {
+function buildActiveCampaignContactFromCsvRow(email: string | null, row: JsonRecord): ActiveCampaignContact {
   const fullName = pickNameFromCsvRow(row) ?? "";
   const firstName = firstStringFromAnyRowColumn(row, CSV_FIRST_NAME_CANDIDATES);
   const lastName = firstStringFromAnyRowColumn(row, CSV_LAST_NAME_CANDIDATES);
+  const phone = pickPhoneFromCsvRow(row);
+  const fallbackId = email
+    ? `csv:${email}`
+    : phone
+      ? `csvphone:${normalizeColumnKey(phone)}`
+      : `csvrow:${normalizeColumnKey(fullName) || "unknown"}`;
   const splitName = fullName.split(/\s+/).filter(Boolean);
 
   return {
-    id: firstStringFromAnyRowColumn(row, CSV_ID_CANDIDATES) || `csv:${email}`,
+    id: firstStringFromAnyRowColumn(row, CSV_ID_CANDIDATES) || fallbackId,
     email,
-    phone: pickPhoneFromCsvRow(row),
+    phone,
     firstName: firstName || splitName[0] || null,
     lastName: lastName || (splitName.length > 1 ? splitName.slice(1).join(" ") : null),
     createdAt: pickCreatedAtFromCsvRow(row),
@@ -1057,46 +1063,72 @@ Deno.serve(async (request) => {
       }
     }
 
-    const csvRowByEmail = new Map<string, {
+    const csvRowByIdentity = new Map<string, {
+      email: string | null;
       row: JsonRecord;
       name: string | null;
       phone: string | null;
       phoneDedupeKey: string | null;
     }>();
+    const emailIdentityKeys = new Map<string, string>();
+    const phoneIdentityKeys = new Map<string, string>();
+    const uniqueEmailSet = new Set<string>();
+    let missingIdentityRows = 0;
     let missingEmailRows = 0;
+    let duplicatedInputIdentities = 0;
     let duplicatedInputEmails = 0;
 
     for (const row of rows) {
       const email = normalizeEmail(firstStringFromRow(row, emailColumn));
       if (!email) {
         missingEmailRows += 1;
-        continue;
-      }
-
-      if (csvRowByEmail.has(email)) {
-        duplicatedInputEmails += 1;
       }
 
       const phone = pickPhoneFromCsvRow(row);
-      csvRowByEmail.set(email, {
+      const phoneDedupeKey = buildPhoneDedupeKey(phone);
+      const existingIdentityKey =
+        (email ? emailIdentityKeys.get(email) : undefined) ||
+        (phoneDedupeKey ? phoneIdentityKeys.get(phoneDedupeKey) : undefined);
+
+      if (email) uniqueEmailSet.add(email);
+
+      if (email && emailIdentityKeys.has(email)) {
+        duplicatedInputEmails += 1;
+      }
+
+      if (existingIdentityKey) {
+        duplicatedInputIdentities += 1;
+        continue;
+      }
+
+      const identityKey = email ? `email:${email}` : phoneDedupeKey ? `phone:${phoneDedupeKey}` : "";
+      if (!identityKey) {
+        missingIdentityRows += 1;
+        continue;
+      }
+
+      csvRowByIdentity.set(identityKey, {
+        email,
         row,
         name: pickNameFromCsvRow(row),
         phone,
-        phoneDedupeKey: buildPhoneDedupeKey(phone),
+        phoneDedupeKey,
       });
+      if (email) emailIdentityKeys.set(email, identityKey);
+      if (phoneDedupeKey) phoneIdentityKeys.set(phoneDedupeKey, identityKey);
     }
 
     const sheetHeader = header.map((value) => nonEmptyString(value) ?? "");
     const updates: Array<{ range: string; values: string[][] }> = [];
     const rowsMissingFromSheet: Array<{
-      email: string;
+      email: string | null;
       row: JsonRecord;
       name: string | null;
       phone: string | null;
       phoneDedupeKey: string | null;
     }> = [];
-    const notFound: Array<{ email: string; name: string | null; phone: string | null; reason: string }> = [];
-    const insertedFromActiveSamples: Array<{ email: string; activeContactId: string }> = [];
+    const notFound: Array<{ email: string | null; name: string | null; phone: string | null; reason: string }> = [];
+    const insertedFromActiveSamples: Array<{ email: string | null; activeContactId: string }> = [];
     let matchedRows = 0;
     let matchedByPhoneRows = 0;
     let updatedRows = 0;
@@ -1109,14 +1141,14 @@ Deno.serve(async (request) => {
     let activeLookupErrors = 0;
     let activeCaptureTagMissing = 0;
 
-    for (const [email, item] of csvRowByEmail.entries()) {
-      const emailMatchedRowNumber = sheetRowByEmail.get(email);
+    for (const item of csvRowByIdentity.values()) {
+      const emailMatchedRowNumber = item.email ? sheetRowByEmail.get(item.email) : undefined;
       const phoneMatchedRowNumber = item.phoneDedupeKey
         ? sheetRowByPhoneKey.get(item.phoneDedupeKey)
         : undefined;
       const sheetRowNumber = emailMatchedRowNumber ?? phoneMatchedRowNumber;
       if (!sheetRowNumber) {
-        rowsMissingFromSheet.push({ email, ...item });
+        rowsMissingFromSheet.push(item);
         continue;
       }
 
@@ -1129,7 +1161,7 @@ Deno.serve(async (request) => {
       const sheetRow = sheetValues[sheetRowNumber - 1] ?? [];
 
       if (isActiveCsvImport) {
-        const activeContact = buildActiveCampaignContactFromCsvRow(email, item.row);
+        const activeContact = buildActiveCampaignContactFromCsvRow(item.email, item.row);
         const rowMap = buildActiveCsvSheetsRowMap(launch, activeContact, item.row);
 
         for (const [targetIndex, headerName] of sheetHeader.entries()) {
@@ -1209,7 +1241,7 @@ Deno.serve(async (request) => {
       }
 
       try {
-        let activeContact = await fetchActiveCampaignContactByEmail(launch, item.email);
+        let activeContact = item.email ? await fetchActiveCampaignContactByEmail(launch, item.email) : null;
         if (!activeContact && item.phone) {
           activeContact = await fetchActiveCampaignContactByPhone(launch, item.phone);
           if (activeContact) {
@@ -1301,8 +1333,11 @@ Deno.serve(async (request) => {
     const summary = {
       mode,
       receivedRows: rows.length,
-      uniqueEmails: csvRowByEmail.size,
+      uniqueIdentities: csvRowByIdentity.size,
+      uniqueEmails: uniqueEmailSet.size,
+      missingIdentityRows,
       missingEmailRows,
+      duplicatedInputIdentities,
       duplicatedInputEmails,
       matchedRows,
       matchedByPhoneRows,
