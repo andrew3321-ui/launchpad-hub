@@ -86,6 +86,10 @@ const CSV_FIRST_NAME_CANDIDATES = ["First Name", "FirstName", "first_name", "con
 const CSV_LAST_NAME_CANDIDATES = ["Last Name", "LastName", "last_name", "contact[last_name]"];
 const CSV_PHONE_CANDIDATES = [
   "Telefone",
+  "Numero de telefone",
+  "Número de telefone",
+  "Numero telefone",
+  "Número telefone",
   "Phone",
   "Phone Number",
   "Contact Phone",
@@ -353,6 +357,10 @@ function normalizedSheetCell(value: unknown) {
 
 function shouldUpdateSheetCell(currentValue: unknown, nextValue: string) {
   return normalizedSheetCell(currentValue) !== nextValue.trim();
+}
+
+function shouldFillBlankSheetCell(currentValue: unknown, nextValue: unknown) {
+  return !normalizedSheetCell(currentValue) && Boolean(nonEmptyString(nextValue));
 }
 
 async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
@@ -1117,12 +1125,29 @@ Deno.serve(async (request) => {
         matchedByPhoneRows += 1;
       }
 
-      if (isActiveCsvImport) {
-        continue;
-      }
-
       let rowUpdated = false;
       const sheetRow = sheetValues[sheetRowNumber - 1] ?? [];
+
+      if (isActiveCsvImport) {
+        const activeContact = buildActiveCampaignContactFromCsvRow(email, item.row);
+        const rowMap = buildActiveCsvSheetsRowMap(launch, activeContact, item.row);
+
+        for (const [targetIndex, headerName] of sheetHeader.entries()) {
+          const value = nonEmptyString(rowMap.get(normalizeColumnKey(headerName)));
+          if (!value || !shouldFillBlankSheetCell(sheetRow[targetIndex], value)) continue;
+
+          updates.push({
+            range: `${columnLetters(targetIndex)}${sheetRowNumber}`,
+            values: [[value]],
+          });
+          rowUpdated = true;
+        }
+
+        if (rowUpdated) {
+          updatedRows += 1;
+        }
+        continue;
+      }
 
       for (const mapping of mappingTargets) {
         if (mapping.targetIndex === undefined) continue;

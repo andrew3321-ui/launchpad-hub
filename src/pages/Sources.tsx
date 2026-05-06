@@ -2090,6 +2090,10 @@ export default function Sources() {
     try {
       const phoneColumn = findCsvColumn(bulkCsvHeaders, [
         "telefone",
+        "numero de telefone",
+        "número de telefone",
+        "numero telefone",
+        "número telefone",
         "phone",
         "phone number",
         "contact phone",
@@ -2161,7 +2165,7 @@ export default function Sources() {
       toast({
         title: "Atualização em lote concluída",
         description: isActiveCsvImport
-          ? `${mergedResult.summary.insertedFromCsv} linha(s) inserida(s) pelo CSV do ActiveCampaign e ${mergedResult.summary.matchedRows} já existia(m) na captura.`
+          ? `${mergedResult.summary.insertedFromCsv} linha(s) inserida(s), ${mergedResult.summary.updatedRows} linha(s) completada(s) e ${mergedResult.summary.matchedRows} já existia(m) na captura.`
           : `${mergedResult.summary.updatedRows} linha(s) atualizada(s), ${mergedResult.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${mergedResult.summary.notFoundRows} alerta(s).`,
         variant: mergedResult.summary.notFoundRows > 0 ? "default" : undefined,
       });
@@ -3386,6 +3390,9 @@ export default function Sources() {
                         <p>Inseridos pelo CSV: {bulkUpdateResult.summary.insertedFromCsv}</p>
                       ) : (
                         <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>
+                      )}
+                      {bulkUpdateResult.summary.mode === "active_export_import" && (
+                        <p>Linhas completadas: {bulkUpdateResult.summary.updatedRows}</p>
                       )}
                       <p>Já existiam na captura: {bulkUpdateResult.summary.matchedRows}</p>
                       {bulkUpdateResult.summary.mode === "fixed_update" && (
