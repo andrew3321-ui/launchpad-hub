@@ -188,16 +188,19 @@ interface GoogleSheetsBulkUpdateResponse {
     missingEmailRows: number;
     duplicatedInputEmails: number;
     matchedRows: number;
+    matchedByPhoneRows: number;
     updatedRows: number;
     updatedCells: number;
     missingFromSheetRows: number;
     insertedFromActive: number;
     activeContactsNotFound: number;
+    activeContactsFoundByPhone: number;
     activeContactsWithoutCaptureTag: number;
     activeLookupErrors: number;
     activeCaptureTagMissing: number;
     notFoundRows: number;
     skippedBlankCells: number;
+    skippedUnchangedCells: number;
     sheetName: string;
     spreadsheetId: string;
     captureTagId: string | null;
@@ -2979,8 +2982,8 @@ export default function Sources() {
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">Atualização por CSV</p>
                     <p className="text-sm text-muted-foreground">
-                      Suba um CSV, escolha quais colunas devem atualizar a planilha de captura e o sistema
-                      procura cada pessoa pelo email. Quem não existir na planilha será buscado no ActiveCampaign e só entra se tiver a tag de captura do evento.
+                      Suba um CSV comum ou exportado do ActiveCampaign, escolha valores fixos para aplicar e o sistema
+                      procura cada pessoa por email e telefone. Quem não existir na captura será buscado no ActiveCampaign e só entra se tiver a tag de captura do evento.
                     </p>
                   </div>
                   <Badge variant="secondary">Valida tag antes de inserir</Badge>
@@ -2997,7 +3000,7 @@ export default function Sources() {
                       disabled={!googleSheetsConnected || bulkUpdatingGoogleSheets}
                     />
                     <p className="text-xs text-muted-foreground">
-                      O arquivo precisa ter uma coluna de email. Ele será usado apenas para localizar as pessoas na captura.
+                      O arquivo precisa ter uma coluna de email. Se vier telefone no CSV, ele também será usado para evitar duplicidade na captura.
                     </p>
                   </div>
                   <div className="flex items-end">
@@ -3127,8 +3130,10 @@ export default function Sources() {
                     <div className="grid gap-2 text-muted-foreground md:grid-cols-3">
                       <p>Emails únicos: {bulkUpdateResult.summary.uniqueEmails}</p>
                       <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>
+                      <p>Células já corretas: {bulkUpdateResult.summary.skippedUnchangedCells}</p>
                       <p>Inseridos via Active: {bulkUpdateResult.summary.insertedFromActive}</p>
                       <p>Ausentes na planilha: {bulkUpdateResult.summary.missingFromSheetRows}</p>
+                      <p>Encontrados por telefone: {bulkUpdateResult.summary.matchedByPhoneRows}</p>
                       <p>Sem tag de captura: {bulkUpdateResult.summary.activeContactsWithoutCaptureTag}</p>
                       <p>Alertas finais: {bulkUpdateResult.summary.notFoundRows}</p>
                     </div>

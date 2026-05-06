@@ -74,6 +74,27 @@ const corsHeaders = {
 const MAX_ROWS_PER_REQUEST = 5000;
 const MAX_MAPPINGS_PER_REQUEST = 30;
 const MAX_SHEET_UPDATES_PER_REQUEST = 25000;
+const CSV_NAME_CANDIDATES = [
+  "Nome completo",
+  "Nome",
+  "Name",
+  "Full Name",
+  "Contact Name",
+];
+const CSV_FIRST_NAME_CANDIDATES = ["First Name", "FirstName", "first_name", "contact[first_name]"];
+const CSV_LAST_NAME_CANDIDATES = ["Last Name", "LastName", "last_name", "contact[last_name]"];
+const CSV_PHONE_CANDIDATES = [
+  "Telefone",
+  "Phone",
+  "Phone Number",
+  "Contact Phone",
+  "Celular",
+  "Mobile",
+  "Whatsapp",
+  "WhatsApp",
+  "contact[phone]",
+];
+const SHEET_PHONE_COLUMNS = ["Telefone", "Phone", "Celular", "Whatsapp", "WhatsApp"];
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
   tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
@@ -241,6 +262,45 @@ function firstStringFromRow(row: JsonRecord, key: string) {
   return matchedEntry ? nonEmptyString(matchedEntry[1]) ?? "" : "";
 }
 
+function firstStringFromAnyRowColumn(row: JsonRecord, candidates: string[]) {
+  for (const candidate of candidates) {
+    const value = firstStringFromRow(row, candidate);
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function pickNameFromCsvRow(row: JsonRecord) {
+  const fullName = firstStringFromAnyRowColumn(row, CSV_NAME_CANDIDATES);
+  if (fullName) return fullName;
+
+  const firstName = firstStringFromAnyRowColumn(row, CSV_FIRST_NAME_CANDIDATES);
+  const lastName = firstStringFromAnyRowColumn(row, CSV_LAST_NAME_CANDIDATES);
+  return [firstName, lastName].filter(Boolean).join(" ").trim() || null;
+}
+
+function pickPhoneFromCsvRow(row: JsonRecord) {
+  return firstStringFromAnyRowColumn(row, CSV_PHONE_CANDIDATES) || null;
+}
+
+function findHeaderColumnIndex(headerIndex: Map<string, number>, candidates: string[]) {
+  for (const candidate of candidates) {
+    const index = headerIndex.get(normalizeColumnKey(candidate));
+    if (index !== undefined) return index;
+  }
+
+  return undefined;
+}
+
+function normalizedSheetCell(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function shouldUpdateSheetCell(currentValue: unknown, nextValue: string) {
+  return normalizedSheetCell(currentValue) !== nextValue.trim();
+}
+
 async function requireAuthenticatedUser(request: Request, supabaseUrl: string, serviceRoleKey: string) {
   const authorization = request.headers.get("authorization") || request.headers.get("Authorization");
   if (!authorization) {
@@ -372,22 +432,68 @@ async function fetchActiveCampaignContactByEmail(
 ) {
   if (!launch.ac_api_url || !launch.ac_api_key) return null;
 
-  const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/contacts", {
-    email,
-    limit: 10,
-  });
-  const contacts = Array.isArray((payload as JsonRecord).contacts)
-    ? ((payload as JsonRecord).contacts as unknown[])
-    : [];
-  const parsedContacts = contacts
-    .map(parseActiveCampaignContact)
-    .filter((contact): contact is ActiveCampaignContact => Boolean(contact));
+  const queries = [
+    { email, limit: 10 },
+    { search: email, limit: 20 },
+  ];
 
-  return (
-    parsedContacts.find((contact) => normalizeEmail(contact.email) === email) ??
-    parsedContacts[0] ??
-    null
-  );
+  for (const query of queries) {
+    const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/contacts", query);
+    const contacts = Array.isArray((payload as JsonRecord).contacts)
+      ? ((payload as JsonRecord).contacts as unknown[])
+      : [];
+    const parsedContacts = contacts
+      .map(parseActiveCampaignContact)
+      .filter((contact): contact is ActiveCampaignContact => Boolean(contact));
+
+    const exactMatch = parsedContacts.find((contact) => normalizeEmail(contact.email) === email);
+    if (exactMatch) return exactMatch;
+    if (query.email && parsedContacts[0]) return parsedContacts[0];
+  }
+
+  return null;
+}
+
+async function fetchActiveCampaignContactByPhone(
+  launch: LaunchGoogleSheetsRow,
+  phone: string | null,
+) {
+  if (!launch.ac_api_url || !launch.ac_api_key || !phone) return null;
+
+  const phoneKey = buildPhoneDedupeKey(phone);
+  const normalizedPhone = normalizeBrazilianPhone(phone);
+  const searchCandidates = uniqueStrings([
+    normalizedPhone,
+    normalizedPhone ? `+${normalizedPhone}` : null,
+    digitsOnly(phone),
+    phone,
+  ]);
+
+  for (const search of searchCandidates) {
+    const payload = await activeCampaignRequest(launch.ac_api_url, launch.ac_api_key, "/api/3/contacts", {
+      search,
+      limit: 20,
+    });
+    const contacts = Array.isArray((payload as JsonRecord).contacts)
+      ? ((payload as JsonRecord).contacts as unknown[])
+      : [];
+    const parsedContacts = contacts
+      .map(parseActiveCampaignContact)
+      .filter((contact): contact is ActiveCampaignContact => Boolean(contact));
+
+    const exactMatch = parsedContacts.find((contact) => {
+      const contactPhoneKey = buildPhoneDedupeKey(contact.phone);
+      const contactPhone = normalizeBrazilianPhone(contact.phone);
+      return (
+        (phoneKey && contactPhoneKey === phoneKey) ||
+        (normalizedPhone && contactPhone === normalizedPhone)
+      );
+    });
+
+    if (exactMatch) return exactMatch;
+  }
+
+  return null;
 }
 
 async function loadActiveCampaignTags(launch: LaunchGoogleSheetsRow) {
@@ -803,6 +909,7 @@ Deno.serve(async (request) => {
     const header = sheetValues[0] ?? [];
     const headerIndex = buildHeaderIndex(header);
     const emailColumnIndex = headerIndex.get("email");
+    const phoneColumnIndex = findHeaderColumnIndex(headerIndex, SHEET_PHONE_COLUMNS);
 
     if (emailColumnIndex === undefined) {
       throw new ProcessContactError("The selected sheet does not have an Email column", 400);
@@ -825,15 +932,28 @@ Deno.serve(async (request) => {
     }
 
     const sheetRowByEmail = new Map<string, number>();
+    const sheetRowByPhoneKey = new Map<string, number>();
     for (let rowIndex = 1; rowIndex < sheetValues.length; rowIndex += 1) {
       const row = sheetValues[rowIndex] ?? [];
       const email = normalizeEmail(row[emailColumnIndex]);
       if (email && !sheetRowByEmail.has(email)) {
         sheetRowByEmail.set(email, rowIndex + 1);
       }
+
+      if (phoneColumnIndex !== undefined) {
+        const phoneKey = buildPhoneDedupeKey(row[phoneColumnIndex]);
+        if (phoneKey && !sheetRowByPhoneKey.has(phoneKey)) {
+          sheetRowByPhoneKey.set(phoneKey, rowIndex + 1);
+        }
+      }
     }
 
-    const csvRowByEmail = new Map<string, JsonRecord>();
+    const csvRowByEmail = new Map<string, {
+      row: JsonRecord;
+      name: string | null;
+      phone: string | null;
+      phoneDedupeKey: string | null;
+    }>();
     let missingEmailRows = 0;
     let duplicatedInputEmails = 0;
 
@@ -848,39 +968,67 @@ Deno.serve(async (request) => {
         duplicatedInputEmails += 1;
       }
 
-      csvRowByEmail.set(email, row);
+      const phone = pickPhoneFromCsvRow(row);
+      csvRowByEmail.set(email, {
+        row,
+        name: pickNameFromCsvRow(row),
+        phone,
+        phoneDedupeKey: buildPhoneDedupeKey(phone),
+      });
     }
 
     const sheetHeader = header.map((value) => nonEmptyString(value) ?? "");
     const updates: Array<{ range: string; values: string[][] }> = [];
-    const rowsMissingFromSheet: Array<{ email: string; row: JsonRecord }> = [];
+    const rowsMissingFromSheet: Array<{
+      email: string;
+      row: JsonRecord;
+      name: string | null;
+      phone: string | null;
+      phoneDedupeKey: string | null;
+    }> = [];
     const notFound: Array<{ email: string; name: string | null; phone: string | null; reason: string }> = [];
     const insertedFromActiveSamples: Array<{ email: string; activeContactId: string }> = [];
     let matchedRows = 0;
+    let matchedByPhoneRows = 0;
     let updatedRows = 0;
     let skippedBlankCells = 0;
+    let skippedUnchangedCells = 0;
     let insertedFromActive = 0;
     let activeContactsNotFound = 0;
+    let activeContactsFoundByPhone = 0;
     let activeContactsWithoutCaptureTag = 0;
     let activeLookupErrors = 0;
     let activeCaptureTagMissing = 0;
 
-    for (const [email, row] of csvRowByEmail.entries()) {
-      const sheetRowNumber = sheetRowByEmail.get(email);
+    for (const [email, item] of csvRowByEmail.entries()) {
+      const emailMatchedRowNumber = sheetRowByEmail.get(email);
+      const phoneMatchedRowNumber = item.phoneDedupeKey
+        ? sheetRowByPhoneKey.get(item.phoneDedupeKey)
+        : undefined;
+      const sheetRowNumber = emailMatchedRowNumber ?? phoneMatchedRowNumber;
       if (!sheetRowNumber) {
-        rowsMissingFromSheet.push({ email, row });
+        rowsMissingFromSheet.push({ email, ...item });
         continue;
       }
 
       matchedRows += 1;
+      if (!emailMatchedRowNumber && phoneMatchedRowNumber) {
+        matchedByPhoneRows += 1;
+      }
       let rowUpdated = false;
+      const sheetRow = sheetValues[sheetRowNumber - 1] ?? [];
 
       for (const mapping of mappingTargets) {
         if (mapping.targetIndex === undefined) continue;
-        const value = resolveMappingValue(mapping, row);
+        const value = resolveMappingValue(mapping, item.row);
 
         if (skipBlankValues && !value) {
           skippedBlankCells += 1;
+          continue;
+        }
+
+        if (!shouldUpdateSheetCell(sheetRow[mapping.targetIndex], value)) {
+          skippedUnchangedCells += 1;
           continue;
         }
 
@@ -905,33 +1053,32 @@ Deno.serve(async (request) => {
         : [];
 
     for (const item of rowsMissingFromSheet) {
-      const rowName =
-        firstStringFromRow(item.row, "name") ||
-        [firstStringFromRow(item.row, "first_name"), firstStringFromRow(item.row, "last_name")]
-          .filter(Boolean)
-          .join(" ") ||
-        null;
-      const rowPhone = firstStringFromRow(item.row, "phone") || firstStringFromRow(item.row, "telefone") || null;
-
       if (!activeCaptureTag) {
         activeCaptureTagMissing += 1;
         notFound.push({
           email: item.email,
-          name: rowName,
-          phone: rowPhone,
+          name: item.name,
+          phone: item.phone,
           reason: "capture_tag_not_configured",
         });
         continue;
       }
 
       try {
-        const activeContact = await fetchActiveCampaignContactByEmail(launch, item.email);
+        let activeContact = await fetchActiveCampaignContactByEmail(launch, item.email);
+        if (!activeContact && item.phone) {
+          activeContact = await fetchActiveCampaignContactByPhone(launch, item.phone);
+          if (activeContact) {
+            activeContactsFoundByPhone += 1;
+          }
+        }
+
         if (!activeContact) {
           activeContactsNotFound += 1;
           notFound.push({
             email: item.email,
-            name: rowName,
-            phone: rowPhone,
+            name: item.name,
+            phone: item.phone,
             reason: "active_contact_not_found",
           });
           continue;
@@ -942,8 +1089,8 @@ Deno.serve(async (request) => {
           activeContactsWithoutCaptureTag += 1;
           notFound.push({
             email: item.email,
-            name: rowName,
-            phone: rowPhone,
+            name: item.name,
+            phone: item.phone,
             reason: "active_contact_without_capture_tag",
           });
           continue;
@@ -972,8 +1119,8 @@ Deno.serve(async (request) => {
         activeLookupErrors += 1;
         notFound.push({
           email: item.email,
-          name: rowName,
-          phone: rowPhone,
+          name: item.name,
+          phone: item.phone,
           reason: error instanceof Error ? `active_lookup_error: ${error.message}` : "active_lookup_error",
         });
       }
@@ -1003,7 +1150,7 @@ Deno.serve(async (request) => {
           contact,
           config.spreadsheetId,
           config.sheetName,
-          "csv_bulk_update_active_lookup",
+          "csv_bulk_update",
         );
       }
     }
@@ -1013,16 +1160,19 @@ Deno.serve(async (request) => {
       missingEmailRows,
       duplicatedInputEmails,
       matchedRows,
+      matchedByPhoneRows,
       updatedRows,
       updatedCells: updates.length,
       missingFromSheetRows: rowsMissingFromSheet.length,
       insertedFromActive,
       activeContactsNotFound,
+      activeContactsFoundByPhone,
       activeContactsWithoutCaptureTag,
       activeLookupErrors,
       activeCaptureTagMissing,
       notFoundRows: notFound.length,
       skippedBlankCells,
+      skippedUnchangedCells,
       sheetName: config.sheetName,
       spreadsheetId: config.spreadsheetId,
       captureTagId: activeCaptureTag?.id ?? null,
@@ -1031,27 +1181,34 @@ Deno.serve(async (request) => {
       skipBlankValues,
     };
 
-    await insertContactLogs(supabase, [
-      {
-        launch_id: launch.id,
-        source: "sheets",
-        level: notFound.length > 0 ? "warning" : "success",
-        code: "GOOGLE_SHEETS_BULK_UPDATE_COMPLETED",
-        title: "Atualizacao em lote concluida",
-        message:
-          notFound.length > 0
-            ? "O CSV foi processado; pessoas ausentes foram buscadas no ActiveCampaign e apenas elegiveis pela tag de captura foram inseridas."
-            : "O CSV foi processado; as pessoas encontradas foram atualizadas e os ausentes elegiveis foram inseridos pela base do ActiveCampaign.",
-        details: {
-          ...summary,
-          notFoundSample: notFound.slice(0, 20),
-          insertedFromActiveSample: insertedFromActiveSamples.slice(0, 20),
-          updateSkipped: updateResult.skipped,
-          appendSkipped: appendResult.skipped,
+    try {
+      await insertContactLogs(supabase, [
+        {
+          launch_id: launch.id,
+          source: "sheets",
+          level: notFound.length > 0 ? "warning" : "success",
+          code: "GOOGLE_SHEETS_BULK_UPDATE_COMPLETED",
+          title: "Atualizacao em lote concluida",
+          message:
+            notFound.length > 0
+              ? "O CSV foi processado; pessoas ausentes foram buscadas no ActiveCampaign e apenas elegiveis pela tag de captura foram inseridas."
+              : "O CSV foi processado; as pessoas encontradas foram atualizadas e os ausentes elegiveis foram inseridos pela base do ActiveCampaign.",
+          details: {
+            ...summary,
+            notFoundSample: notFound.slice(0, 20),
+            insertedFromActiveSample: insertedFromActiveSamples.slice(0, 20),
+            updateSkipped: updateResult.skipped,
+            appendSkipped: appendResult.skipped,
+          },
+          cycle_number: launch.current_cycle_number,
         },
-        cycle_number: launch.current_cycle_number,
-      },
-    ]);
+      ]);
+    } catch (logError) {
+      console.warn(
+        "google-sheets-bulk-update completed but failed to insert logs",
+        logError instanceof Error ? logError.message : String(logError),
+      );
+    }
 
     return jsonResponse({
       success: true,

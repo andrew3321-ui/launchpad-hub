@@ -25,7 +25,8 @@ type LogSource =
   | "tally"
   | "sendflow"
   | "uchat"
-  | "manual";
+  | "manual"
+  | "sheets";
 type LogCategory =
   | "sheets"
   | "uchat"
@@ -72,6 +73,7 @@ const sourceLabels: Record<LogSource, string> = {
   sendflow: "Sendflow",
   uchat: "UChat",
   manual: "Manual",
+  sheets: "Planilha",
 };
 
 const categoryLabels: Record<LogCategory, string> = {
@@ -387,6 +389,7 @@ export default function Logs() {
                   <SelectItem value="sendflow">Sendflow</SelectItem>
                   <SelectItem value="uchat">UChat</SelectItem>
                   <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="sheets">Planilha</SelectItem>
                 </SelectContent>
               </Select>
             </div>

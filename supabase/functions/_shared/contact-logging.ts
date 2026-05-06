@@ -180,6 +180,7 @@ async function loadDiscordAlertSettings(supabase: AnySupabaseClient): Promise<Di
       "tally",
       "sendflow",
       "uchat",
+      "sheets",
     ]),
     minRepeatIntervalSeconds:
       typeof data.min_repeat_interval_seconds === "number" ? data.min_repeat_interval_seconds : 300,

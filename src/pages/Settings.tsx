@@ -65,7 +65,7 @@ interface AlertSettings {
   updated_at: string | null;
 }
 
-const DEFAULT_ALERT_SOURCES = ["activecampaign", "manychat", "typebot", "tally", "sendflow", "uchat"];
+const DEFAULT_ALERT_SOURCES = ["activecampaign", "manychat", "typebot", "tally", "sendflow", "uchat", "sheets"];
 
 function formatDate(value: string | null) {
   if (!value) return "Nao informado";
@@ -642,7 +642,7 @@ export default function Settings() {
                 </div>
                 <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
                   <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Fontes</p>
-                  <p className="mt-2 text-sm font-semibold text-white">Active, ManyChat, Typebot, Tally, Sendflow e UChat</p>
+                  <p className="mt-2 text-sm font-semibold text-white">Active, ManyChat, Typebot, Tally, Sendflow, UChat e Sheets</p>
                 </div>
                 <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
                   <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Atualizado</p>
