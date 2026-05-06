@@ -31,7 +31,15 @@ interface LaunchGoogleSheetsRow {
 }
 
 interface CsvMapping {
-  csvColumn: string;
+  value?: string | null;
+  staticValue?: string | null;
+  csvColumn?: string | null;
+  sheetColumn: string;
+}
+
+interface NormalizedCsvMapping {
+  value: string | null;
+  csvColumn: string | null;
   sheetColumn: string;
 }
 
@@ -702,20 +710,27 @@ async function saveCaptureRecord(
 
 function normalizeMappings(rawMappings: CsvMapping[] | null | undefined) {
   const mappings = Array.isArray(rawMappings) ? rawMappings : [];
-  const uniqueByTarget = new Map<string, CsvMapping>();
+  const uniqueByTarget = new Map<string, NormalizedCsvMapping>();
 
   for (const mapping of mappings) {
+    const value = nonEmptyString(mapping?.value) ?? nonEmptyString(mapping?.staticValue);
     const csvColumn = nonEmptyString(mapping?.csvColumn);
     const sheetColumn = nonEmptyString(mapping?.sheetColumn);
-    if (!csvColumn || !sheetColumn) continue;
+    if ((!value && !csvColumn) || !sheetColumn) continue;
 
     uniqueByTarget.set(normalizeColumnKey(sheetColumn), {
+      value,
       csvColumn,
       sheetColumn,
     });
   }
 
   return [...uniqueByTarget.values()].slice(0, MAX_MAPPINGS_PER_REQUEST);
+}
+
+function resolveMappingValue(mapping: NormalizedCsvMapping, row: JsonRecord) {
+  if (mapping.value !== null) return mapping.value;
+  return mapping.csvColumn ? firstStringFromRow(row, mapping.csvColumn) : "";
 }
 
 function buildHeaderIndex(headerRow: unknown[]) {
@@ -862,7 +877,7 @@ Deno.serve(async (request) => {
 
       for (const mapping of mappingTargets) {
         if (mapping.targetIndex === undefined) continue;
-        const value = firstStringFromRow(row, mapping.csvColumn);
+        const value = resolveMappingValue(mapping, row);
 
         if (skipBlankValues && !value) {
           skippedBlankCells += 1;
@@ -942,7 +957,7 @@ Deno.serve(async (request) => {
         );
 
         for (const mapping of mappingTargets) {
-          const value = firstStringFromRow(item.row, mapping.csvColumn);
+          const value = resolveMappingValue(mapping, item.row);
           if (skipBlankValues && !value) continue;
           rowMap.set(normalizeColumnKey(mapping.sheetColumn), value);
         }

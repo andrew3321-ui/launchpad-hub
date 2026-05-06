@@ -171,7 +171,7 @@ interface GoogleOauthExchangeResponse {
 }
 
 interface CsvColumnMapping {
-  csvColumn: string;
+  value: string;
   sheetColumn: string;
 }
 
@@ -662,25 +662,11 @@ function findCsvColumn(headers: string[], candidates: string[]) {
   );
 }
 
-function buildDefaultCsvMappings(headers: string[]): CsvColumnMapping[] {
-  const mappings: CsvColumnMapping[] = [];
-  const phoneColumn = findCsvColumn(headers, ["phone", "telefone", "celular"]);
-  const nameColumn = findCsvColumn(headers, ["nomecompleto", "name", "nome"]);
-  const statusColumn = findCsvColumn(headers, ["leadstatus", "status"]);
-
-  if (phoneColumn) {
-    mappings.push({ csvColumn: phoneColumn, sheetColumn: "Telefone" });
-  }
-
-  if (nameColumn) {
-    mappings.push({ csvColumn: nameColumn, sheetColumn: "Nome" });
-  }
-
-  if (statusColumn) {
-    mappings.push({ csvColumn: statusColumn, sheetColumn: "Tipo de Lead" });
-  }
-
-  return mappings.length > 0 ? mappings : [{ csvColumn: headers[0] ?? "", sheetColumn: "Nome" }];
+function buildDefaultStaticMappings(): CsvColumnMapping[] {
+  return [
+    { value: "ORG-API", sheetColumn: "UTM SOURCE" },
+    { value: "lsl_modelo_utility_v42", sheetColumn: "UTM CONTENT" },
+  ];
 }
 
 function escapeCsvValue(value: unknown) {
@@ -1863,7 +1849,7 @@ export default function Sources() {
       setBulkCsvHeaders(parsed.headers);
       setBulkCsvRows(parsed.rows);
       setBulkEmailColumn(emailColumn);
-      setBulkColumnMappings(buildDefaultCsvMappings(parsed.headers));
+      setBulkColumnMappings(buildDefaultStaticMappings());
 
       toast({
         title: "CSV carregado",
@@ -1902,8 +1888,8 @@ export default function Sources() {
     setBulkColumnMappings((currentMappings) => [
       ...currentMappings,
       {
-        csvColumn: bulkCsvHeaders[0] ?? "",
-        sheetColumn: "Nome",
+        value: "",
+        sheetColumn: "UTM SOURCE",
       },
     ]);
     setBulkUpdateResult(null);
@@ -1920,7 +1906,7 @@ export default function Sources() {
     if (!activeLaunchId) return;
 
     const validMappings = bulkColumnMappings.filter(
-      (mapping) => mapping.csvColumn.trim() && mapping.sheetColumn.trim(),
+      (mapping) => mapping.value.trim() && mapping.sheetColumn.trim(),
     );
 
     if (!googleSheetsConnected) {
@@ -1935,7 +1921,7 @@ export default function Sources() {
     if (!bulkEmailColumn || bulkCsvRows.length === 0 || validMappings.length === 0) {
       toast({
         title: "Revise o CSV e os mapeamentos",
-        description: "Escolha a coluna de email e ao menos uma coluna para atualizar.",
+        description: "Escolha a coluna de email e ao menos um valor fixo para aplicar.",
         variant: "destructive",
       });
       return;
@@ -3011,7 +2997,7 @@ export default function Sources() {
                       disabled={!googleSheetsConnected || bulkUpdatingGoogleSheets}
                     />
                     <p className="text-xs text-muted-foreground">
-                      O arquivo precisa ter uma coluna de email. Valores vazios nas colunas mapeadas são ignorados para não apagar dados.
+                      O arquivo precisa ter uma coluna de email. Ele será usado apenas para localizar as pessoas na captura.
                     </p>
                   </div>
                   <div className="flex items-end">
@@ -3022,7 +3008,7 @@ export default function Sources() {
                       disabled={bulkCsvHeaders.length === 0 || bulkUpdatingGoogleSheets}
                     >
                       <Plus className="mr-2 h-4 w-4" />
-                      Adicionar coluna
+                      Adicionar valor
                     </Button>
                   </div>
                 </div>
@@ -3059,29 +3045,20 @@ export default function Sources() {
 
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <Label>Colunas para atualizar</Label>
+                        <Label>Valores para aplicar</Label>
                         <span className="text-xs text-muted-foreground">
-                          CSV → Planilha de captura
+                          Valor fixo → Coluna da captura
                         </span>
                       </div>
 
                       {bulkColumnMappings.map((mapping, index) => (
                         <div key={`bulk-mapping-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                          <Select
-                            value={mapping.csvColumn || undefined}
-                            onValueChange={(value) => updateBulkColumnMapping(index, "csvColumn", value)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Coluna do CSV" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {bulkCsvHeaders.map((header) => (
-                                <SelectItem key={`bulk-csv-${index}-${header}`} value={header}>
-                                  {header}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Input
+                            value={mapping.value}
+                            onChange={(event) => updateBulkColumnMapping(index, "value", event.target.value)}
+                            placeholder="Ex: ORG-API"
+                            disabled={bulkUpdatingGoogleSheets}
+                          />
 
                           <Select
                             value={mapping.sheetColumn || undefined}
@@ -3115,7 +3092,7 @@ export default function Sources() {
 
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-muted-foreground">
-                        A atualização é feita por email. Ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada.
+                        A atualização é feita por email. Os valores fixos acima atualizam a captura; ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada.
                       </p>
                       <Button
                         type="button"
