@@ -46,6 +46,7 @@ interface NormalizedCsvMapping {
 interface BulkUpdateBody {
   launchId?: string | null;
   emailColumn?: string | null;
+  mode?: "fixed_update" | "active_export_import" | null;
   mappings?: CsvMapping[] | null;
   rows?: JsonRecord[] | null;
   skipBlankValues?: boolean | null;
@@ -94,7 +95,40 @@ const CSV_PHONE_CANDIDATES = [
   "WhatsApp",
   "contact[phone]",
 ];
+const CSV_ID_CANDIDATES = ["ID", "Contact ID", "Contact Id", "id", "contact[id]"];
+const CSV_CREATED_AT_CANDIDATES = [
+  "Created",
+  "Created At",
+  "Date Created",
+  "Created Date",
+  "CDate",
+  "cdate",
+  "Data do Cadastro",
+  "Data de Cadastro",
+  "Data da criação",
+  "Data de criação",
+  "contact[cdate]",
+];
 const SHEET_PHONE_COLUMNS = ["Telefone", "Phone", "Celular", "Whatsapp", "WhatsApp"];
+const CSV_CAPTURE_COLUMN_ALIASES: Record<string, string[]> = {
+  data: ["Data", "Data do Evento", "data_evento", "event_date"],
+  nome: ["Nome", "Nome completo", "Name", "Full Name", "Contact Name"],
+  email: ["Email", "E-mail", "Email Address", "Contact Email", "contact[email]"],
+  telefone: CSV_PHONE_CANDIDATES,
+  tipodelead: ["Tipo de Lead", "Lead Type", "lead_type", "tipo_de_lead", "Status", "Lead Status"],
+  produto: ["Produto", "Product", "Product Name", "produto", "product_name"],
+  utmsource: ["UTM SOURCE", "UTM Source", "utm_source"],
+  utmcampaign: ["UTM CAMPAIGN", "UTM Campaign", "utm_campaign"],
+  utmmedium: ["UTM MEDIUM", "UTM Medium", "utm_medium"],
+  utmcontent: ["UTM CONTENT", "UTM Content", "utm_content"],
+  utmterm: ["UTM TERM", "UTM Term", "utm_term"],
+  utmsite: ["UTM SITE", "UTM Site", "utm_site"],
+  datadocadastro: CSV_CREATED_AT_CANDIDATES,
+  vlrdash: ["Vlr Dash", "Valor Dash", "Dash", "dashboard_value"],
+  hotlead: ["HOTLEAD", "Hot Lead", "hotlead"],
+  vksource: ["vk_source", "VK Source"],
+  vkadid: ["vk_ad_id", "VK Ad ID"],
+};
 const TARGET_FIELD_ALIASES: Record<string, string[]> = {
   data_evento: ["data_evento", "data do evento", "data evento"],
   tipo_de_lead: ["tipo_de_lead", "tipo de lead"],
@@ -282,6 +316,26 @@ function pickNameFromCsvRow(row: JsonRecord) {
 
 function pickPhoneFromCsvRow(row: JsonRecord) {
   return firstStringFromAnyRowColumn(row, CSV_PHONE_CANDIDATES) || null;
+}
+
+function pickCreatedAtFromCsvRow(row: JsonRecord) {
+  return firstStringFromAnyRowColumn(row, CSV_CREATED_AT_CANDIDATES) || null;
+}
+
+function buildActiveCampaignContactFromCsvRow(email: string, row: JsonRecord): ActiveCampaignContact {
+  const fullName = pickNameFromCsvRow(row) ?? "";
+  const firstName = firstStringFromAnyRowColumn(row, CSV_FIRST_NAME_CANDIDATES);
+  const lastName = firstStringFromAnyRowColumn(row, CSV_LAST_NAME_CANDIDATES);
+  const splitName = fullName.split(/\s+/).filter(Boolean);
+
+  return {
+    id: firstStringFromAnyRowColumn(row, CSV_ID_CANDIDATES) || `csv:${email}`,
+    email,
+    phone: pickPhoneFromCsvRow(row),
+    firstName: firstName || splitName[0] || null,
+    lastName: lastName || (splitName.length > 1 ? splitName.slice(1).join(" ") : null),
+    createdAt: pickCreatedAtFromCsvRow(row),
+  };
 }
 
 function findHeaderColumnIndex(headerIndex: Map<string, number>, candidates: string[]) {
@@ -769,6 +823,49 @@ function buildActiveCampaignSheetsRowMap(
   return rowMap;
 }
 
+function pickCaptureColumnValueFromCsv(row: JsonRecord, sheetColumn: string) {
+  const normalizedColumn = normalizeColumnKey(sheetColumn);
+  const aliases = CSV_CAPTURE_COLUMN_ALIASES[normalizedColumn] ?? [sheetColumn];
+  return firstStringFromAnyRowColumn(row, aliases);
+}
+
+function buildActiveCsvSheetsRowMap(
+  launch: LaunchGoogleSheetsRow,
+  contact: ActiveCampaignContact,
+  row: JsonRecord,
+) {
+  const rowMap = new Map<string, string | null>();
+
+  for (const header of STANDARD_CAPTURE_HEADER) {
+    const value = pickCaptureColumnValueFromCsv(row, header);
+    if (value) rowMap.set(normalizeColumnKey(header), value);
+  }
+
+  const createdAt = pickCreatedAtFromCsvRow(row);
+  const product =
+    pickCaptureColumnValueFromCsv(row, "Produto") ||
+    nonEmptyString(launch.gs_default_product_name) ||
+    launch.name;
+
+  const defaultsByHeader: Record<string, string | null> = {
+    "Data": formatSheetDate(pickCaptureColumnValueFromCsv(row, "Data")) || todaySheetDate(),
+    "Nome": pickNameFromCsvRow(row),
+    "Email": contact.email,
+    "Telefone": normalizeBrazilianPhone(contact.phone) || contact.phone,
+    "Tipo de Lead": normalizeLeadTypeForSheets(pickCaptureColumnValueFromCsv(row, "Tipo de Lead")) || "Lead",
+    "Produto": product,
+    "Data do Cadastro": formatSheetDate(createdAt) || formatSheetDate(pickCaptureColumnValueFromCsv(row, "Data do Cadastro")),
+    "Vlr Dash": pickCaptureColumnValueFromCsv(row, "Vlr Dash") || "1",
+  };
+
+  for (const [header, value] of Object.entries(defaultsByHeader)) {
+    const key = normalizeColumnKey(header);
+    if (!rowMap.get(key) && value) rowMap.set(key, value);
+  }
+
+  return rowMap;
+}
+
 function buildRowForSheetHeader(
   sheetHeader: string[],
   rowMap: Map<string, string | null>,
@@ -872,13 +969,17 @@ Deno.serve(async (request) => {
     const body = await request.json() as BulkUpdateBody;
     const launchId = nonEmptyString(body.launchId);
     const emailColumn = nonEmptyString(body.emailColumn);
+    const mode = body.mode === "active_export_import" ? "active_export_import" : "fixed_update";
+    const isActiveCsvImport = mode === "active_export_import";
     const mappings = normalizeMappings(body.mappings);
     const rows = Array.isArray(body.rows) ? body.rows.filter(isRecord).slice(0, MAX_ROWS_PER_REQUEST) : [];
     const skipBlankValues = body.skipBlankValues !== false;
 
     if (!launchId) throw new ProcessContactError("launchId is required", 400);
     if (!emailColumn) throw new ProcessContactError("emailColumn is required", 400);
-    if (mappings.length === 0) throw new ProcessContactError("At least one column mapping is required", 400);
+    if (!isActiveCsvImport && mappings.length === 0) {
+      throw new ProcessContactError("At least one column mapping is required", 400);
+    }
     if (rows.length === 0) throw new ProcessContactError("No CSV rows were provided", 400);
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -915,7 +1016,7 @@ Deno.serve(async (request) => {
       throw new ProcessContactError("The selected sheet does not have an Email column", 400);
     }
 
-    const mappingTargets = mappings.map((mapping) => ({
+    const mappingTargets = isActiveCsvImport ? [] : mappings.map((mapping) => ({
       ...mapping,
       targetIndex: headerIndex.get(normalizeColumnKey(mapping.sheetColumn)),
     }));
@@ -1015,6 +1116,11 @@ Deno.serve(async (request) => {
       if (!emailMatchedRowNumber && phoneMatchedRowNumber) {
         matchedByPhoneRows += 1;
       }
+
+      if (isActiveCsvImport) {
+        continue;
+      }
+
       let rowUpdated = false;
       const sheetRow = sheetValues[sheetRowNumber - 1] ?? [];
 
@@ -1046,13 +1152,26 @@ Deno.serve(async (request) => {
 
     const rowsToAppend: string[][] = [];
     const captureRecordsToSave: ActiveCampaignContact[] = [];
-    const activeCaptureTag = rowsMissingFromSheet.length > 0 ? await resolveCaptureTag(launch) : null;
+    const activeCaptureTag = !isActiveCsvImport && rowsMissingFromSheet.length > 0 ? await resolveCaptureTag(launch) : null;
     const fieldDefinitions =
-      rowsMissingFromSheet.length > 0 && activeCaptureTag
+      !isActiveCsvImport && rowsMissingFromSheet.length > 0 && activeCaptureTag
         ? await loadActiveCampaignFieldDefinitions(launch)
         : [];
 
     for (const item of rowsMissingFromSheet) {
+      if (isActiveCsvImport) {
+        const activeContact = buildActiveCampaignContactFromCsvRow(item.email, item.row);
+        const rowMap = buildActiveCsvSheetsRowMap(launch, activeContact, item.row);
+
+        rowsToAppend.push(buildRowForSheetHeader(sheetHeader, rowMap));
+        captureRecordsToSave.push(activeContact);
+        insertedFromActiveSamples.push({
+          email: item.email,
+          activeContactId: activeContact.id,
+        });
+        continue;
+      }
+
       if (!activeCaptureTag) {
         activeCaptureTagMissing += 1;
         notFound.push({
@@ -1150,11 +1269,12 @@ Deno.serve(async (request) => {
           contact,
           config.spreadsheetId,
           config.sheetName,
-          "csv_bulk_update",
+          isActiveCsvImport ? "active_csv_import" : "csv_bulk_update",
         );
       }
     }
     const summary = {
+      mode,
       receivedRows: rows.length,
       uniqueEmails: csvRowByEmail.size,
       missingEmailRows,
@@ -1165,6 +1285,7 @@ Deno.serve(async (request) => {
       updatedCells: updates.length,
       missingFromSheetRows: rowsMissingFromSheet.length,
       insertedFromActive,
+      insertedFromCsv: isActiveCsvImport ? insertedFromActive : 0,
       activeContactsNotFound,
       activeContactsFoundByPhone,
       activeContactsWithoutCaptureTag,
@@ -1190,7 +1311,9 @@ Deno.serve(async (request) => {
           code: "GOOGLE_SHEETS_BULK_UPDATE_COMPLETED",
           title: "Atualizacao em lote concluida",
           message:
-            notFound.length > 0
+            isActiveCsvImport
+              ? "O CSV exportado do ActiveCampaign foi comparado com a captura; contatos ausentes foram inseridos diretamente com os dados do arquivo."
+              : notFound.length > 0
               ? "O CSV foi processado; pessoas ausentes foram buscadas no ActiveCampaign e apenas elegiveis pela tag de captura foram inseridas."
               : "O CSV foi processado; as pessoas encontradas foram atualizadas e os ausentes elegiveis foram inseridos pela base do ActiveCampaign.",
           details: {

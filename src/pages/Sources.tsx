@@ -175,6 +175,8 @@ interface CsvColumnMapping {
   sheetColumn: string;
 }
 
+type BulkCsvMode = "fixed_update" | "active_export_import";
+
 interface ParsedCsvUpload {
   headers: string[];
   rows: Array<Record<string, string>>;
@@ -183,6 +185,7 @@ interface ParsedCsvUpload {
 interface GoogleSheetsBulkUpdateResponse {
   success: boolean;
   summary: {
+    mode: BulkCsvMode;
     receivedRows: number;
     uniqueEmails: number;
     missingEmailRows: number;
@@ -193,6 +196,7 @@ interface GoogleSheetsBulkUpdateResponse {
     updatedCells: number;
     missingFromSheetRows: number;
     insertedFromActive: number;
+    insertedFromCsv: number;
     activeContactsNotFound: number;
     activeContactsFoundByPhone: number;
     activeContactsWithoutCaptureTag: number;
@@ -754,6 +758,7 @@ export default function Sources() {
   const [bulkCsvHeaders, setBulkCsvHeaders] = useState<string[]>([]);
   const [bulkCsvRows, setBulkCsvRows] = useState<Array<Record<string, string>>>([]);
   const [bulkEmailColumn, setBulkEmailColumn] = useState("");
+  const [bulkCsvMode, setBulkCsvMode] = useState<BulkCsvMode>("fixed_update");
   const [bulkColumnMappings, setBulkColumnMappings] = useState<CsvColumnMapping[]>([]);
   const [bulkUpdatingGoogleSheets, setBulkUpdatingGoogleSheets] = useState(false);
   const [bulkUpdateResult, setBulkUpdateResult] = useState<GoogleSheetsBulkUpdateResponse | null>(null);
@@ -1908,9 +1913,10 @@ export default function Sources() {
   const runGoogleSheetsBulkUpdate = async () => {
     if (!activeLaunchId) return;
 
-    const validMappings = bulkColumnMappings.filter(
-      (mapping) => mapping.value.trim() && mapping.sheetColumn.trim(),
-    );
+    const isActiveCsvImport = bulkCsvMode === "active_export_import";
+    const validMappings = isActiveCsvImport
+      ? []
+      : bulkColumnMappings.filter((mapping) => mapping.value.trim() && mapping.sheetColumn.trim());
 
     if (!googleSheetsConnected) {
       toast({
@@ -1921,10 +1927,12 @@ export default function Sources() {
       return;
     }
 
-    if (!bulkEmailColumn || bulkCsvRows.length === 0 || validMappings.length === 0) {
+    if (!bulkEmailColumn || bulkCsvRows.length === 0 || (!isActiveCsvImport && validMappings.length === 0)) {
       toast({
         title: "Revise o CSV e os mapeamentos",
-        description: "Escolha a coluna de email e ao menos um valor fixo para aplicar.",
+        description: isActiveCsvImport
+          ? "Escolha a coluna de email do CSV exportado do ActiveCampaign."
+          : "Escolha a coluna de email e ao menos um valor fixo para aplicar.",
         variant: "destructive",
       });
       return;
@@ -1938,6 +1946,7 @@ export default function Sources() {
           body: {
             launchId: activeLaunchId,
             emailColumn: bulkEmailColumn,
+            mode: bulkCsvMode,
             mappings: validMappings,
             rows: bulkCsvRows,
             skipBlankValues: true,
@@ -1955,7 +1964,9 @@ export default function Sources() {
       setBulkUpdateResult(typedData);
       toast({
         title: "Atualização em lote concluída",
-        description: `${typedData.summary.updatedRows} linha(s) atualizada(s), ${typedData.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${typedData.summary.notFoundRows} alerta(s).`,
+        description: isActiveCsvImport
+          ? `${typedData.summary.insertedFromCsv} linha(s) inserida(s) pelo CSV do ActiveCampaign e ${typedData.summary.matchedRows} já existia(m) na captura.`
+          : `${typedData.summary.updatedRows} linha(s) atualizada(s), ${typedData.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${typedData.summary.notFoundRows} alerta(s).`,
         variant: typedData.summary.notFoundRows > 0 ? "default" : undefined,
       });
     } catch (error) {
@@ -2982,11 +2993,28 @@ export default function Sources() {
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">Atualização por CSV</p>
                     <p className="text-sm text-muted-foreground">
-                      Suba um CSV comum ou exportado do ActiveCampaign, escolha valores fixos para aplicar e o sistema
-                      procura cada pessoa por email e telefone. Quem não existir na captura será buscado no ActiveCampaign e só entra se tiver a tag de captura do evento.
+                      Use CSV comum para atualizar valores fixos na captura, ou CSV exportado do ActiveCampaign para comparar bases e inserir apenas quem ainda não está na planilha.
                     </p>
                   </div>
-                  <Badge variant="secondary">Valida tag antes de inserir</Badge>
+                  <Badge variant="secondary">Deduplica por email e telefone</Badge>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Tipo de operação</Label>
+                  <Select value={bulkCsvMode} onValueChange={(value) => setBulkCsvMode(value as BulkCsvMode)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Escolher tipo de CSV" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fixed_update">Atualizar valores fixos por email</SelectItem>
+                      <SelectItem value="active_export_import">Importar CSV exportado do ActiveCampaign</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {bulkCsvMode === "active_export_import"
+                      ? "Neste modo, quem já existe na captura é ignorado. Quem não existe é inserido usando os dados do próprio CSV."
+                      : "Neste modo, o CSV só localiza emails existentes; os valores digitados abaixo atualizam as colunas escolhidas."}
+                  </p>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-[1fr_auto]">
@@ -3003,7 +3031,8 @@ export default function Sources() {
                       O arquivo precisa ter uma coluna de email. Se vier telefone no CSV, ele também será usado para evitar duplicidade na captura.
                     </p>
                   </div>
-                  <div className="flex items-end">
+                  {bulkCsvMode === "fixed_update" && (
+                    <div className="flex items-end">
                     <Button
                       type="button"
                       variant="outline"
@@ -3013,7 +3042,8 @@ export default function Sources() {
                       <Plus className="mr-2 h-4 w-4" />
                       Adicionar valor
                     </Button>
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {bulkCsvFileName && (
@@ -3046,6 +3076,7 @@ export default function Sources() {
                       </Select>
                     </div>
 
+                    {bulkCsvMode === "fixed_update" && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <Label>Valores para aplicar</Label>
@@ -3092,10 +3123,13 @@ export default function Sources() {
                         </div>
                       ))}
                     </div>
+                    )}
 
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-muted-foreground">
-                        A atualização é feita por email. Os valores fixos acima atualizam a captura; ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada.
+                        {bulkCsvMode === "active_export_import"
+                          ? "O CSV exportado do ActiveCampaign é comparado com a captura. Existentes são ignorados; ausentes são inseridos com os dados do arquivo."
+                          : "A atualização é feita por email. Os valores fixos acima atualizam a captura; ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada."}
                       </p>
                       <Button
                         type="button"
@@ -3105,7 +3139,7 @@ export default function Sources() {
                           saving !== null ||
                           !bulkEmailColumn ||
                           bulkCsvRows.length === 0 ||
-                          bulkColumnMappings.length === 0
+                          (bulkCsvMode === "fixed_update" && bulkColumnMappings.length === 0)
                         }
                       >
                         {bulkUpdatingGoogleSheets ? (
@@ -3113,7 +3147,7 @@ export default function Sources() {
                         ) : (
                           <Upload className="mr-2 h-4 w-4" />
                         )}
-                        Atualizar captura
+                        {bulkCsvMode === "active_export_import" ? "Importar ausentes" : "Atualizar captura"}
                       </Button>
                     </div>
                   </div>
@@ -3124,17 +3158,30 @@ export default function Sources() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="font-medium text-foreground">Resultado da atualização</p>
                       <Badge variant={bulkUpdateResult.summary.notFoundRows > 0 ? "secondary" : "default"}>
-                        {bulkUpdateResult.summary.updatedRows} linha(s) atualizada(s)
+                        {bulkUpdateResult.summary.mode === "active_export_import"
+                          ? `${bulkUpdateResult.summary.insertedFromCsv} linha(s) inserida(s)`
+                          : `${bulkUpdateResult.summary.updatedRows} linha(s) atualizada(s)`}
                       </Badge>
                     </div>
                     <div className="grid gap-2 text-muted-foreground md:grid-cols-3">
                       <p>Emails únicos: {bulkUpdateResult.summary.uniqueEmails}</p>
-                      <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>
-                      <p>Células já corretas: {bulkUpdateResult.summary.skippedUnchangedCells}</p>
-                      <p>Inseridos via Active: {bulkUpdateResult.summary.insertedFromActive}</p>
+                      {bulkUpdateResult.summary.mode === "active_export_import" ? (
+                        <p>Inseridos pelo CSV: {bulkUpdateResult.summary.insertedFromCsv}</p>
+                      ) : (
+                        <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>
+                      )}
+                      <p>Já existiam na captura: {bulkUpdateResult.summary.matchedRows}</p>
+                      {bulkUpdateResult.summary.mode === "fixed_update" && (
+                        <p>Células já corretas: {bulkUpdateResult.summary.skippedUnchangedCells}</p>
+                      )}
+                      {bulkUpdateResult.summary.mode === "fixed_update" && (
+                        <p>Inseridos via Active: {bulkUpdateResult.summary.insertedFromActive}</p>
+                      )}
                       <p>Ausentes na planilha: {bulkUpdateResult.summary.missingFromSheetRows}</p>
                       <p>Encontrados por telefone: {bulkUpdateResult.summary.matchedByPhoneRows}</p>
-                      <p>Sem tag de captura: {bulkUpdateResult.summary.activeContactsWithoutCaptureTag}</p>
+                      {bulkUpdateResult.summary.mode === "fixed_update" && (
+                        <p>Sem tag de captura: {bulkUpdateResult.summary.activeContactsWithoutCaptureTag}</p>
+                      )}
                       <p>Alertas finais: {bulkUpdateResult.summary.notFoundRows}</p>
                     </div>
                     {bulkUpdateResult.notFound.length > 0 && (
