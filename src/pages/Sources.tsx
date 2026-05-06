@@ -177,6 +177,9 @@ interface CsvColumnMapping {
 
 type BulkCsvMode = "fixed_update" | "active_export_import";
 
+const FIXED_UPDATE_BATCH_SIZE = 300;
+const ACTIVE_CSV_IMPORT_BATCH_SIZE = 120;
+
 interface ParsedCsvUpload {
   headers: string[];
   rows: Array<Record<string, string>>;
@@ -676,6 +679,137 @@ function buildDefaultStaticMappings(): CsvColumnMapping[] {
   ];
 }
 
+function createEmptyBulkUpdateResponse(mode: BulkCsvMode): GoogleSheetsBulkUpdateResponse {
+  return {
+    success: true,
+    summary: {
+      mode,
+      receivedRows: 0,
+      uniqueEmails: 0,
+      missingEmailRows: 0,
+      duplicatedInputEmails: 0,
+      matchedRows: 0,
+      matchedByPhoneRows: 0,
+      updatedRows: 0,
+      updatedCells: 0,
+      missingFromSheetRows: 0,
+      insertedFromActive: 0,
+      insertedFromCsv: 0,
+      activeContactsNotFound: 0,
+      activeContactsFoundByPhone: 0,
+      activeContactsWithoutCaptureTag: 0,
+      activeLookupErrors: 0,
+      activeCaptureTagMissing: 0,
+      notFoundRows: 0,
+      skippedBlankCells: 0,
+      skippedUnchangedCells: 0,
+      sheetName: "",
+      spreadsheetId: "",
+      captureTagId: null,
+      captureTagName: null,
+    },
+    notFound: [],
+  };
+}
+
+function mergeBulkUpdateResponses(
+  current: GoogleSheetsBulkUpdateResponse,
+  next: GoogleSheetsBulkUpdateResponse,
+): GoogleSheetsBulkUpdateResponse {
+  return {
+    success: current.success && next.success,
+    summary: {
+      ...next.summary,
+      receivedRows: current.summary.receivedRows + next.summary.receivedRows,
+      uniqueEmails: current.summary.uniqueEmails + next.summary.uniqueEmails,
+      missingEmailRows: current.summary.missingEmailRows + next.summary.missingEmailRows,
+      duplicatedInputEmails: current.summary.duplicatedInputEmails + next.summary.duplicatedInputEmails,
+      matchedRows: current.summary.matchedRows + next.summary.matchedRows,
+      matchedByPhoneRows: current.summary.matchedByPhoneRows + next.summary.matchedByPhoneRows,
+      updatedRows: current.summary.updatedRows + next.summary.updatedRows,
+      updatedCells: current.summary.updatedCells + next.summary.updatedCells,
+      missingFromSheetRows: current.summary.missingFromSheetRows + next.summary.missingFromSheetRows,
+      insertedFromActive: current.summary.insertedFromActive + next.summary.insertedFromActive,
+      insertedFromCsv: current.summary.insertedFromCsv + next.summary.insertedFromCsv,
+      activeContactsNotFound: current.summary.activeContactsNotFound + next.summary.activeContactsNotFound,
+      activeContactsFoundByPhone:
+        current.summary.activeContactsFoundByPhone + next.summary.activeContactsFoundByPhone,
+      activeContactsWithoutCaptureTag:
+        current.summary.activeContactsWithoutCaptureTag + next.summary.activeContactsWithoutCaptureTag,
+      activeLookupErrors: current.summary.activeLookupErrors + next.summary.activeLookupErrors,
+      activeCaptureTagMissing: current.summary.activeCaptureTagMissing + next.summary.activeCaptureTagMissing,
+      notFoundRows: current.summary.notFoundRows + next.summary.notFoundRows,
+      skippedBlankCells: current.summary.skippedBlankCells + next.summary.skippedBlankCells,
+      skippedUnchangedCells: current.summary.skippedUnchangedCells + next.summary.skippedUnchangedCells,
+    },
+    notFound: [...current.notFound, ...next.notFound],
+  };
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+function buildFrontendPhoneDedupeKey(value: unknown) {
+  const rawDigits = String(value ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  if (!rawDigits) return "";
+
+  let localDigits =
+    rawDigits.startsWith("55") && [12, 13].includes(rawDigits.length)
+      ? rawDigits.slice(2)
+      : rawDigits;
+
+  if (/^[1-9]{2}9[6-9]\d{7}$/.test(localDigits)) {
+    localDigits = `${localDigits.slice(0, 2)}${localDigits.slice(3)}`;
+  }
+
+  if (/^[1-9]{2}9?\d{8}$/.test(localDigits)) {
+    return `br:${localDigits}`;
+  }
+
+  return `raw:${rawDigits}`;
+}
+
+function uniqueRowsByColumn(
+  rows: Array<Record<string, string>>,
+  column: string,
+  phoneColumn = "",
+) {
+  const rowsByEmail = new Map<string, Record<string, string>>();
+  const seenPhoneKeys = new Set<string>();
+  let duplicateCount = 0;
+  let missingEmailRows = 0;
+
+  for (const row of rows) {
+    const email = String(row[column] ?? "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      missingEmailRows += 1;
+      continue;
+    }
+
+    const phoneKey = phoneColumn ? buildFrontendPhoneDedupeKey(row[phoneColumn]) : "";
+    if (rowsByEmail.has(email) || (phoneKey && seenPhoneKeys.has(phoneKey))) {
+      duplicateCount += 1;
+      continue;
+    }
+
+    rowsByEmail.set(email, row);
+    if (phoneKey) seenPhoneKeys.add(phoneKey);
+  }
+
+  return {
+    rows: [...rowsByEmail.values()],
+    duplicateCount,
+    missingEmailRows,
+  };
+}
+
 function escapeCsvValue(value: unknown) {
   const text = value === null || value === undefined ? "" : String(value);
   if (!/[",\n\r]/.test(text)) return text;
@@ -761,6 +895,12 @@ export default function Sources() {
   const [bulkCsvMode, setBulkCsvMode] = useState<BulkCsvMode>("fixed_update");
   const [bulkColumnMappings, setBulkColumnMappings] = useState<CsvColumnMapping[]>([]);
   const [bulkUpdatingGoogleSheets, setBulkUpdatingGoogleSheets] = useState(false);
+  const [bulkUpdateProgress, setBulkUpdateProgress] = useState<{
+    processedRows: number;
+    totalRows: number;
+    currentBatch: number;
+    totalBatches: number;
+  } | null>(null);
   const [bulkUpdateResult, setBulkUpdateResult] = useState<GoogleSheetsBulkUpdateResponse | null>(null);
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
@@ -782,6 +922,7 @@ export default function Sources() {
     setBulkCsvRows([]);
     setBulkEmailColumn("");
     setBulkColumnMappings([]);
+    setBulkUpdateProgress(null);
     setBulkUpdateResult(null);
   }, [activeLaunchId]);
 
@@ -1830,6 +1971,7 @@ export default function Sources() {
 
   const handleBulkCsvFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
+    setBulkUpdateProgress(null);
     setBulkUpdateResult(null);
 
     if (!file) return;
@@ -1869,6 +2011,7 @@ export default function Sources() {
       setBulkCsvRows([]);
       setBulkEmailColumn("");
       setBulkColumnMappings([]);
+      setBulkUpdateProgress(null);
       toast({
         title: "Erro ao ler CSV",
         description: error instanceof Error ? error.message : "Não foi possível interpretar o arquivo.",
@@ -1889,6 +2032,7 @@ export default function Sources() {
         mappingIndex === index ? { ...mapping, [field]: value } : mapping,
       ),
     );
+    setBulkUpdateProgress(null);
     setBulkUpdateResult(null);
   };
 
@@ -1900,6 +2044,7 @@ export default function Sources() {
         sheetColumn: "UTM SOURCE",
       },
     ]);
+    setBulkUpdateProgress(null);
     setBulkUpdateResult(null);
   };
 
@@ -1907,6 +2052,7 @@ export default function Sources() {
     setBulkColumnMappings((currentMappings) =>
       currentMappings.filter((_, mappingIndex) => mappingIndex !== index),
     );
+    setBulkUpdateProgress(null);
     setBulkUpdateResult(null);
   };
 
@@ -1939,35 +2085,85 @@ export default function Sources() {
     }
 
     setBulkUpdatingGoogleSheets(true);
+    setBulkUpdateResult(null);
 
     try {
-      const { data, error } = await withTimeout(
-        supabase.functions.invoke("google-sheets-bulk-update", {
-          body: {
-            launchId: activeLaunchId,
-            emailColumn: bulkEmailColumn,
-            mode: bulkCsvMode,
-            mappings: validMappings,
-            rows: bulkCsvRows,
-            skipBlankValues: true,
-          },
-        }),
-        60000,
-        "A atualização em lote no Google Sheets demorou demais para responder.",
-      );
+      const phoneColumn = findCsvColumn(bulkCsvHeaders, [
+        "telefone",
+        "phone",
+        "phone number",
+        "contact phone",
+        "celular",
+        "mobile",
+        "whatsapp",
+      ]);
+      const preparedCsvRows = uniqueRowsByColumn(bulkCsvRows, bulkEmailColumn, phoneColumn);
+      const batchSize = isActiveCsvImport ? ACTIVE_CSV_IMPORT_BATCH_SIZE : FIXED_UPDATE_BATCH_SIZE;
+      const batches = chunkArray(preparedCsvRows.rows, batchSize);
 
-      const typedData = (data as GoogleSheetsBulkUpdateResponse | null) ?? null;
-      if (error || !typedData?.success) {
-        throw error ?? new Error("O backend não confirmou a atualização em lote.");
+      if (batches.length === 0) {
+        throw new Error("Nenhuma linha com email válido foi encontrada no CSV.");
       }
 
-      setBulkUpdateResult(typedData);
+      let mergedResult = createEmptyBulkUpdateResponse(bulkCsvMode);
+      mergedResult.summary.missingEmailRows = preparedCsvRows.missingEmailRows;
+      mergedResult.summary.duplicatedInputEmails = preparedCsvRows.duplicateCount;
+
+      let processedRows = preparedCsvRows.missingEmailRows + preparedCsvRows.duplicateCount;
+      setBulkUpdateProgress({
+        processedRows,
+        totalRows: bulkCsvRows.length,
+        currentBatch: 0,
+        totalBatches: batches.length,
+      });
+
+      for (const [batchIndex, batchRows] of batches.entries()) {
+        const { data, error } = await withTimeout(
+          supabase.functions.invoke("google-sheets-bulk-update", {
+            body: {
+              launchId: activeLaunchId,
+              emailColumn: bulkEmailColumn,
+              mode: bulkCsvMode,
+              mappings: validMappings,
+              rows: batchRows,
+              skipBlankValues: true,
+            },
+          }),
+          60000,
+          "A atualização em lote no Google Sheets demorou demais para responder.",
+        );
+
+        const typedData = (data as GoogleSheetsBulkUpdateResponse | null) ?? null;
+        if (error || !typedData?.success) {
+          throw error ?? new Error(`O backend não confirmou o lote ${batchIndex + 1}.`);
+        }
+
+        mergedResult = mergeBulkUpdateResponses(mergedResult, typedData);
+        processedRows = Math.min(bulkCsvRows.length, processedRows + batchRows.length);
+
+        setBulkUpdateProgress({
+          processedRows,
+          totalRows: bulkCsvRows.length,
+          currentBatch: batchIndex + 1,
+          totalBatches: batches.length,
+        });
+        setBulkUpdateResult(mergedResult);
+      }
+
+      setBulkUpdateProgress({
+        processedRows: bulkCsvRows.length,
+        totalRows: bulkCsvRows.length,
+        currentBatch: batches.length,
+        totalBatches: batches.length,
+      });
+
+      setBulkUpdateResult(mergedResult);
       toast({
         title: "Atualização em lote concluída",
         description: isActiveCsvImport
-          ? `${typedData.summary.insertedFromCsv} linha(s) inserida(s) pelo CSV do ActiveCampaign e ${typedData.summary.matchedRows} já existia(m) na captura.`
-          : `${typedData.summary.updatedRows} linha(s) atualizada(s), ${typedData.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${typedData.summary.notFoundRows} alerta(s).`,
-        variant: typedData.summary.notFoundRows > 0 ? "default" : undefined,
+          ? `${mergedResult.summary.insertedFromCsv} linha(s) inserida(s) pelo CSV do ActiveCampaign e ${mergedResult.summary.matchedRows} já existia(m) na captura.`
+          : `${mergedResult.summary.updatedRows} linha(s) atualizada(s), ${mergedResult.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${mergedResult.summary.notFoundRows} alerta(s).`,
+        variant: mergedResult.summary.notFoundRows > 0 ? "default" : undefined,
       });
     } catch (error) {
       const description = await extractFunctionInvokeErrorMessage(
@@ -2476,6 +2672,14 @@ export default function Sources() {
       </div>
     );
   }
+
+  const bulkProgressPercent =
+    bulkUpdateProgress && bulkUpdateProgress.totalRows > 0
+      ? Math.min(
+          100,
+          Math.max(0, Math.round((bulkUpdateProgress.processedRows / bulkUpdateProgress.totalRows) * 100)),
+        )
+      : null;
 
   return (
     <div className="space-y-6">
@@ -3147,9 +3351,22 @@ export default function Sources() {
                         ) : (
                           <Upload className="mr-2 h-4 w-4" />
                         )}
-                        {bulkCsvMode === "active_export_import" ? "Importar ausentes" : "Atualizar captura"}
+                        {bulkUpdatingGoogleSheets && bulkProgressPercent !== null
+                          ? `${bulkProgressPercent}% processado`
+                          : bulkCsvMode === "active_export_import"
+                            ? "Importar ausentes"
+                            : "Atualizar captura"}
                       </Button>
                     </div>
+                    {bulkUpdateProgress && (
+                      <p className="text-xs text-muted-foreground">
+                        Processados {bulkUpdateProgress.processedRows} de {bulkUpdateProgress.totalRows} linha(s)
+                        {bulkUpdateProgress.totalBatches > 0
+                          ? ` · lote ${bulkUpdateProgress.currentBatch}/${bulkUpdateProgress.totalBatches}`
+                          : ""}
+                        {bulkProgressPercent !== null ? ` · ${bulkProgressPercent}%` : ""}
+                      </p>
+                    )}
                   </div>
                 )}
 

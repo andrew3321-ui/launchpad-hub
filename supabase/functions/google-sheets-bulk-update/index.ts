@@ -72,7 +72,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MAX_ROWS_PER_REQUEST = 5000;
+const MAX_ROWS_PER_REQUEST = 400;
 const MAX_MAPPINGS_PER_REQUEST = 30;
 const MAX_SHEET_UPDATES_PER_REQUEST = 25000;
 const CSV_NAME_CANDIDATES = [
@@ -1001,7 +1001,7 @@ Deno.serve(async (request) => {
       throw new ProcessContactError("Google Sheets is not configured for this expert", 400);
     }
 
-    const sheetValuesResult = await readGoogleSheetsValues(config, "A:ZZ");
+    const sheetValuesResult = await readGoogleSheetsValues(config, "A:Q");
     if (sheetValuesResult.skipped) {
       throw new ProcessContactError("Google Sheets is not configured for this expert", 400);
     }
