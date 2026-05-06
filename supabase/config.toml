@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.google-sheets-catalog]
 verify_jwt = true
 
+[functions.google-sheets-bulk-update]
+verify_jwt = true
+
 [functions.google-oauth-exchange]
 verify_jwt = true
 

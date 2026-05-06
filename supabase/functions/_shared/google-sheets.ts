@@ -769,3 +769,54 @@ export async function readGoogleSheetsValues(
     values: values.map((row) => (Array.isArray(row) ? row : [])),
   } as const;
 }
+
+export async function updateGoogleSheetsRanges(
+  config: GoogleSheetsConfigInput,
+  updates: Array<{
+    range: string;
+    values: Array<Array<string | number | boolean | null | undefined>>;
+  }>,
+) {
+  const parsedConfig = resolveGoogleSheetsRuntimeConfig(config);
+  if (!parsedConfig) {
+    return { skipped: true, reason: "google_sheets_not_configured" } as const;
+  }
+
+  if (updates.length === 0) {
+    return { skipped: true, reason: "no_ranges_to_update" } as const;
+  }
+
+  const accessToken = await getGoogleAccessToken(parsedConfig, [
+    GOOGLE_SHEETS_SCOPE,
+    GOOGLE_DRIVE_METADATA_SCOPE,
+  ]);
+
+  await googleSheetsRequest(
+    accessToken,
+    `/spreadsheets/${encodeURIComponent(parsedConfig.spreadsheetId)}/values:batchUpdate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        valueInputOption: "USER_ENTERED",
+        data: updates.map((update) => ({
+          range: buildSheetRange(parsedConfig.sheetName, update.range),
+          majorDimension: "ROWS",
+          values: update.values.map((row) =>
+            row.map((value) => {
+              if (value === null || value === undefined) return "";
+              if (typeof value === "boolean") return value ? "true" : "false";
+              return String(value);
+            }),
+          ),
+        })),
+      }),
+    },
+  );
+
+  return {
+    skipped: false,
+    spreadsheetId: parsedConfig.spreadsheetId,
+    sheetName: parsedConfig.sheetName,
+    updatedRanges: updates.length,
+  } as const;
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Json } from "@/integrations/supabase/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
   buildLaunchWebhookUrl,
   inboundWebhookSources,
 } from "@/lib/webhookRouter";
-import { Copy, Loader2, Radio, Webhook } from "lucide-react";
+import { Copy, Loader2, Plus, Radio, Upload, Webhook, X } from "lucide-react";
 import {
   ActiveCampaignSourceTagBindings,
   type ActiveCampaignTagOption,
@@ -170,6 +170,47 @@ interface GoogleOauthExchangeResponse {
   launch: LaunchSettingsRow;
 }
 
+interface CsvColumnMapping {
+  csvColumn: string;
+  sheetColumn: string;
+}
+
+interface ParsedCsvUpload {
+  headers: string[];
+  rows: Array<Record<string, string>>;
+}
+
+interface GoogleSheetsBulkUpdateResponse {
+  success: boolean;
+  summary: {
+    receivedRows: number;
+    uniqueEmails: number;
+    missingEmailRows: number;
+    duplicatedInputEmails: number;
+    matchedRows: number;
+    updatedRows: number;
+    updatedCells: number;
+    missingFromSheetRows: number;
+    insertedFromActive: number;
+    activeContactsNotFound: number;
+    activeContactsWithoutCaptureTag: number;
+    activeLookupErrors: number;
+    activeCaptureTagMissing: number;
+    notFoundRows: number;
+    skippedBlankCells: number;
+    sheetName: string;
+    spreadsheetId: string;
+    captureTagId: string | null;
+    captureTagName: string | null;
+  };
+  notFound: Array<{
+    email: string;
+    name: string | null;
+    phone: string | null;
+    reason: string;
+  }>;
+}
+
 const MANAGED_SOURCE_ALIASES = [
   {
     alias: "typebot",
@@ -203,6 +244,25 @@ const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_OAUTH_CLIENT_ID = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
 const DEFAULT_GOOGLE_SHEET_NAME = "Página1";
 const NO_CAPTURE_TAG_VALUE = "__none";
+const CAPTURE_SHEET_COLUMNS = [
+  "Data",
+  "Nome",
+  "Email",
+  "Telefone",
+  "Tipo de Lead",
+  "Produto",
+  "UTM SOURCE",
+  "UTM CAMPAIGN",
+  "UTM MEDIUM",
+  "UTM CONTENT",
+  "UTM TERM",
+  "UTM SITE",
+  "Data do Cadastro",
+  "Vlr Dash",
+  "HOTLEAD",
+  "vk_source",
+  "vk_ad_id",
+];
 const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.metadata.readonly",
@@ -513,6 +573,141 @@ async function extractFunctionInvokeErrorMessage(error: unknown, fallback: strin
   return defaultMessage;
 }
 
+function parseCsvText(text: string): ParsedCsvUpload {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      row.push(current);
+      if (row.some((cell) => cell.trim())) {
+        rows.push(row);
+      }
+      row = [];
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  row.push(current);
+  if (row.some((cell) => cell.trim())) {
+    rows.push(row);
+  }
+
+  const headers = (rows[0] ?? []).map((header) => header.trim());
+  const parsedRows = rows.slice(1).map((cells) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      record[header] = cells[index]?.trim() ?? "";
+    });
+
+    const firstNameHeader = headers.find((header) => normalizeKey(header) === "firstname");
+    const lastNameHeader = headers.find((header) => normalizeKey(header) === "lastname");
+    const firstName = firstNameHeader ? record[firstNameHeader]?.trim() : "";
+    const lastName = lastNameHeader ? record[lastNameHeader]?.trim() : "";
+
+    if ((firstName || lastName) && !record["Nome completo"]) {
+      record["Nome completo"] = [firstName, lastName].filter(Boolean).join(" ").trim();
+    }
+
+    return record;
+  });
+
+  const finalHeaders = headers.includes("Nome completo")
+    ? headers
+    : parsedRows.some((parsedRow) => parsedRow["Nome completo"])
+      ? [...headers, "Nome completo"]
+      : headers;
+
+  return {
+    headers: finalHeaders,
+    rows: parsedRows,
+  };
+}
+
+function findCsvColumn(headers: string[], candidates: string[]) {
+  const normalizedCandidates = candidates.map(normalizeKey);
+  return (
+    headers.find((header) => normalizedCandidates.includes(normalizeKey(header))) ||
+    headers.find((header) =>
+      normalizedCandidates.some((candidate) => normalizeKey(header).includes(candidate)),
+    ) ||
+    ""
+  );
+}
+
+function buildDefaultCsvMappings(headers: string[]): CsvColumnMapping[] {
+  const mappings: CsvColumnMapping[] = [];
+  const phoneColumn = findCsvColumn(headers, ["phone", "telefone", "celular"]);
+  const nameColumn = findCsvColumn(headers, ["nomecompleto", "name", "nome"]);
+  const statusColumn = findCsvColumn(headers, ["leadstatus", "status"]);
+
+  if (phoneColumn) {
+    mappings.push({ csvColumn: phoneColumn, sheetColumn: "Telefone" });
+  }
+
+  if (nameColumn) {
+    mappings.push({ csvColumn: nameColumn, sheetColumn: "Nome" });
+  }
+
+  if (statusColumn) {
+    mappings.push({ csvColumn: statusColumn, sheetColumn: "Tipo de Lead" });
+  }
+
+  return mappings.length > 0 ? mappings : [{ csvColumn: headers[0] ?? "", sheetColumn: "Nome" }];
+}
+
+function escapeCsvValue(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  if (!/[",\n\r]/.test(text)) return text;
+  return `"${text.replace(/"/g, "\"\"")}"`;
+}
+
+function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return;
+
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.map(escapeCsvValue).join(","),
+    ...rows.map((row) => headers.map((header) => escapeCsvValue(row[header])).join(",")),
+  ].join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function ConnectionBadge({ connected }: { connected: boolean }) {
   return (
     <Badge variant={connected ? "default" : "secondary"}>
@@ -566,6 +761,13 @@ export default function Sources() {
   const [loadingGoogleSheetsCatalog, setLoadingGoogleSheetsCatalog] = useState(false);
   const [connectingGoogleOauth, setConnectingGoogleOauth] = useState(false);
   const [disconnectingGoogleOauth, setDisconnectingGoogleOauth] = useState(false);
+  const [bulkCsvFileName, setBulkCsvFileName] = useState("");
+  const [bulkCsvHeaders, setBulkCsvHeaders] = useState<string[]>([]);
+  const [bulkCsvRows, setBulkCsvRows] = useState<Array<Record<string, string>>>([]);
+  const [bulkEmailColumn, setBulkEmailColumn] = useState("");
+  const [bulkColumnMappings, setBulkColumnMappings] = useState<CsvColumnMapping[]>([]);
+  const [bulkUpdatingGoogleSheets, setBulkUpdatingGoogleSheets] = useState(false);
+  const [bulkUpdateResult, setBulkUpdateResult] = useState<GoogleSheetsBulkUpdateResponse | null>(null);
   const [activeCampaignTags, setActiveCampaignTags] = useState<ActiveCampaignTagOption[]>([]);
   const [loadingActiveCampaignTags, setLoadingActiveCampaignTags] = useState(false);
   const [activeCampaignTagsLoadedAt, setActiveCampaignTagsLoadedAt] = useState<string | null>(null);
@@ -578,6 +780,15 @@ export default function Sources() {
 
   useEffect(() => {
     latestLaunchIdRef.current = activeLaunchId;
+  }, [activeLaunchId]);
+
+  useEffect(() => {
+    setBulkCsvFileName("");
+    setBulkCsvHeaders([]);
+    setBulkCsvRows([]);
+    setBulkEmailColumn("");
+    setBulkColumnMappings([]);
+    setBulkUpdateResult(null);
   }, [activeLaunchId]);
 
   useEffect(() => {
@@ -1623,6 +1834,157 @@ export default function Sources() {
     visibleGsSpreadsheetId,
   ]);
 
+  const handleBulkCsvFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setBulkUpdateResult(null);
+
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast({
+        title: "Arquivo inválido",
+        description: "Envie um arquivo CSV para atualizar a planilha de captura.",
+        variant: "destructive",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = parseCsvText(text);
+      const emailColumn = findCsvColumn(parsed.headers, ["email", "e-mail"]);
+
+      if (!emailColumn) {
+        throw new Error("O CSV precisa ter uma coluna de email para localizar as pessoas na captura.");
+      }
+
+      setBulkCsvFileName(file.name);
+      setBulkCsvHeaders(parsed.headers);
+      setBulkCsvRows(parsed.rows);
+      setBulkEmailColumn(emailColumn);
+      setBulkColumnMappings(buildDefaultCsvMappings(parsed.headers));
+
+      toast({
+        title: "CSV carregado",
+        description: `${parsed.rows.length} linha(s) lida(s). Revise as colunas antes de atualizar a planilha.`,
+      });
+    } catch (error) {
+      setBulkCsvFileName("");
+      setBulkCsvHeaders([]);
+      setBulkCsvRows([]);
+      setBulkEmailColumn("");
+      setBulkColumnMappings([]);
+      toast({
+        title: "Erro ao ler CSV",
+        description: error instanceof Error ? error.message : "Não foi possível interpretar o arquivo.",
+        variant: "destructive",
+      });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const updateBulkColumnMapping = (
+    index: number,
+    field: keyof CsvColumnMapping,
+    value: string,
+  ) => {
+    setBulkColumnMappings((currentMappings) =>
+      currentMappings.map((mapping, mappingIndex) =>
+        mappingIndex === index ? { ...mapping, [field]: value } : mapping,
+      ),
+    );
+    setBulkUpdateResult(null);
+  };
+
+  const addBulkColumnMapping = () => {
+    setBulkColumnMappings((currentMappings) => [
+      ...currentMappings,
+      {
+        csvColumn: bulkCsvHeaders[0] ?? "",
+        sheetColumn: "Nome",
+      },
+    ]);
+    setBulkUpdateResult(null);
+  };
+
+  const removeBulkColumnMapping = (index: number) => {
+    setBulkColumnMappings((currentMappings) =>
+      currentMappings.filter((_, mappingIndex) => mappingIndex !== index),
+    );
+    setBulkUpdateResult(null);
+  };
+
+  const runGoogleSheetsBulkUpdate = async () => {
+    if (!activeLaunchId) return;
+
+    const validMappings = bulkColumnMappings.filter(
+      (mapping) => mapping.csvColumn.trim() && mapping.sheetColumn.trim(),
+    );
+
+    if (!googleSheetsConnected) {
+      toast({
+        title: "Google Sheets não configurado",
+        description: "Conecte e salve a planilha de captura antes de atualizar por CSV.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!bulkEmailColumn || bulkCsvRows.length === 0 || validMappings.length === 0) {
+      toast({
+        title: "Revise o CSV e os mapeamentos",
+        description: "Escolha a coluna de email e ao menos uma coluna para atualizar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBulkUpdatingGoogleSheets(true);
+
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke("google-sheets-bulk-update", {
+          body: {
+            launchId: activeLaunchId,
+            emailColumn: bulkEmailColumn,
+            mappings: validMappings,
+            rows: bulkCsvRows,
+            skipBlankValues: true,
+          },
+        }),
+        60000,
+        "A atualização em lote no Google Sheets demorou demais para responder.",
+      );
+
+      const typedData = (data as GoogleSheetsBulkUpdateResponse | null) ?? null;
+      if (error || !typedData?.success) {
+        throw error ?? new Error("O backend não confirmou a atualização em lote.");
+      }
+
+      setBulkUpdateResult(typedData);
+      toast({
+        title: "Atualização em lote concluída",
+        description: `${typedData.summary.updatedRows} linha(s) atualizada(s), ${typedData.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${typedData.summary.notFoundRows} alerta(s).`,
+        variant: typedData.summary.notFoundRows > 0 ? "default" : undefined,
+      });
+    } catch (error) {
+      const description = await extractFunctionInvokeErrorMessage(
+        error,
+        "Não foi possível atualizar a planilha por CSV.",
+      );
+
+      toast({
+        title: "Erro na atualização em lote",
+        description,
+        variant: "destructive",
+      });
+    } finally {
+      setBulkUpdatingGoogleSheets(false);
+    }
+  };
+
   const connectGoogleSheetsOauth = useCallback(async () => {
     if (!activeLaunch) return;
 
@@ -2624,6 +2986,210 @@ export default function Sources() {
                     Se o campo Produto vier preenchido do ActiveCampaign, o valor original é preservado.
                   </p>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-background/40 p-4 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">Atualização por CSV</p>
+                    <p className="text-sm text-muted-foreground">
+                      Suba um CSV, escolha quais colunas devem atualizar a planilha de captura e o sistema
+                      procura cada pessoa pelo email. Quem não existir na planilha será buscado no ActiveCampaign e só entra se tiver a tag de captura do evento.
+                    </p>
+                  </div>
+                  <Badge variant="secondary">Valida tag antes de inserir</Badge>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <Label htmlFor="gs-bulk-csv">Arquivo CSV</Label>
+                    <Input
+                      id="gs-bulk-csv"
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(event) => void handleBulkCsvFileChange(event)}
+                      disabled={!googleSheetsConnected || bulkUpdatingGoogleSheets}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      O arquivo precisa ter uma coluna de email. Valores vazios nas colunas mapeadas são ignorados para não apagar dados.
+                    </p>
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={addBulkColumnMapping}
+                      disabled={bulkCsvHeaders.length === 0 || bulkUpdatingGoogleSheets}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Adicionar coluna
+                    </Button>
+                  </div>
+                </div>
+
+                {bulkCsvFileName && (
+                  <div className="rounded-xl border border-border/60 bg-background/50 p-4 text-sm text-muted-foreground">
+                    <p>
+                      CSV carregado:{" "}
+                      <span className="font-medium text-foreground">{bulkCsvFileName}</span>
+                    </p>
+                    <p>
+                      {bulkCsvRows.length} linha(s), {bulkCsvHeaders.length} coluna(s).
+                    </p>
+                  </div>
+                )}
+
+                {bulkCsvHeaders.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Coluna de email para procurar na captura</Label>
+                      <Select value={bulkEmailColumn || undefined} onValueChange={setBulkEmailColumn}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Escolher coluna de email do CSV" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bulkCsvHeaders.map((header) => (
+                            <SelectItem key={`bulk-email-${header}`} value={header}>
+                              {header}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>Colunas para atualizar</Label>
+                        <span className="text-xs text-muted-foreground">
+                          CSV → Planilha de captura
+                        </span>
+                      </div>
+
+                      {bulkColumnMappings.map((mapping, index) => (
+                        <div key={`bulk-mapping-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                          <Select
+                            value={mapping.csvColumn || undefined}
+                            onValueChange={(value) => updateBulkColumnMapping(index, "csvColumn", value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Coluna do CSV" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {bulkCsvHeaders.map((header) => (
+                                <SelectItem key={`bulk-csv-${index}-${header}`} value={header}>
+                                  {header}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <Select
+                            value={mapping.sheetColumn || undefined}
+                            onValueChange={(value) => updateBulkColumnMapping(index, "sheetColumn", value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Coluna da captura" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CAPTURE_SHEET_COLUMNS.map((column) => (
+                                <SelectItem key={`bulk-sheet-${index}-${column}`} value={column}>
+                                  {column}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeBulkColumnMapping(index)}
+                            disabled={bulkColumnMappings.length <= 1 || bulkUpdatingGoogleSheets}
+                            aria-label="Remover mapeamento"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        A atualização é feita por email. Ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada.
+                      </p>
+                      <Button
+                        type="button"
+                        onClick={() => void runGoogleSheetsBulkUpdate()}
+                        disabled={
+                          bulkUpdatingGoogleSheets ||
+                          saving !== null ||
+                          !bulkEmailColumn ||
+                          bulkCsvRows.length === 0 ||
+                          bulkColumnMappings.length === 0
+                        }
+                      >
+                        {bulkUpdatingGoogleSheets ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        Atualizar captura
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {bulkUpdateResult && (
+                  <div className="rounded-xl border border-border/60 bg-background/50 p-4 space-y-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="font-medium text-foreground">Resultado da atualização</p>
+                      <Badge variant={bulkUpdateResult.summary.notFoundRows > 0 ? "secondary" : "default"}>
+                        {bulkUpdateResult.summary.updatedRows} linha(s) atualizada(s)
+                      </Badge>
+                    </div>
+                    <div className="grid gap-2 text-muted-foreground md:grid-cols-3">
+                      <p>Emails únicos: {bulkUpdateResult.summary.uniqueEmails}</p>
+                      <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>
+                      <p>Inseridos via Active: {bulkUpdateResult.summary.insertedFromActive}</p>
+                      <p>Ausentes na planilha: {bulkUpdateResult.summary.missingFromSheetRows}</p>
+                      <p>Sem tag de captura: {bulkUpdateResult.summary.activeContactsWithoutCaptureTag}</p>
+                      <p>Alertas finais: {bulkUpdateResult.summary.notFoundRows}</p>
+                    </div>
+                    {bulkUpdateResult.notFound.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-medium text-foreground">E-mails não encontrados</p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              downloadCsv(
+                                "launchhub-emails-nao-encontrados.csv",
+                                bulkUpdateResult.notFound,
+                              )
+                            }
+                          >
+                            Baixar relatório
+                          </Button>
+                        </div>
+                        <div className="max-h-32 overflow-auto rounded-lg border border-border/60 p-3 text-xs text-muted-foreground">
+                          {bulkUpdateResult.notFound.slice(0, 20).map((item) => (
+                            <p key={`bulk-not-found-${item.email}`}>
+                              {item.email}
+                              {item.name ? ` · ${item.name}` : ""}
+                              {item.phone ? ` · ${item.phone}` : ""}
+                              {item.reason ? ` · ${item.reason}` : ""}
+                            </p>
+                          ))}
+                          {bulkUpdateResult.notFound.length > 20 && (
+                            <p>+{bulkUpdateResult.notFound.length - 20} outro(s) no relatório.</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </CardContent>
             <CardFooter className="justify-end">
