@@ -17,6 +17,7 @@ import Leads from "./pages/Leads";
 import Queue from "./pages/Queue";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
+import ListBoss from "./pages/ListBoss";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
@@ -50,6 +51,7 @@ const App = () => (
               <Route path="/sources" element={<Sources />} />
               <Route path="/rules" element={<Rules />} />
               <Route path="/leads" element={<Leads />} />
+              <Route path="/listboss" element={<ListBoss />} />
               <Route path="/queue" element={<Queue />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/settings" element={<Settings />} />

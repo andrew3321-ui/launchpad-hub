@@ -9,6 +9,7 @@ import {
   Radio,
   Rocket,
   Settings2,
+  ShoppingBag,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ const menuItems = [
   { title: "Fontes", url: "/sources", icon: Radio },
   { title: "Regras", url: "/rules", icon: GitBranch },
   { title: "Leads", url: "/leads", icon: Users },
+  { title: "ListBoss", url: "/listboss", icon: ShoppingBag },
   { title: "Fila", url: "/queue", icon: ListOrdered },
   { title: "Logs", url: "/logs", icon: FileText },
   { title: "Configuracoes", url: "/settings", icon: Settings2 },
