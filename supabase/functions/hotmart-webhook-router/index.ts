@@ -223,10 +223,13 @@ function buildEventKey(payload: JsonRecord, eventType: string) {
   ]);
   const buyerEmail = firstString(payload, [
     "data.buyer.email",
+    "data.user.email",
     "buyer.email",
+    "user.email",
     "buyer_email",
     "email",
     "email_buyer",
+    "user_email",
   ]);
   const occurredAt = firstDate(payload, [
     "creation_date",
@@ -304,28 +307,39 @@ function extractHotmartEvent(payload: JsonRecord, launch: { id: string; current_
     ]),
     buyer_name: firstString(payload, [
       "data.buyer.name",
+      "data.user.name",
       "buyer.name",
+      "user.name",
       "buyer_name",
       "name",
       "name_buyer",
+      "user_name",
       "customer.name",
     ]),
     buyer_email: firstString(payload, [
       "data.buyer.email",
+      "data.user.email",
       "buyer.email",
+      "user.email",
       "buyer_email",
       "email",
       "email_buyer",
+      "user_email",
       "customer.email",
     ]),
     buyer_phone: firstString(payload, [
       "data.buyer.checkout_phone",
       "data.buyer.phone",
+      "data.user.phone",
+      "data.user.checkout_phone",
       "buyer.checkout_phone",
       "buyer.phone",
+      "user.phone",
+      "user.checkout_phone",
       "buyer_phone",
       "phone",
       "phone_buyer",
+      "user_phone",
       "customer.phone",
     ]),
     price_amount: firstNumber(payload, [
