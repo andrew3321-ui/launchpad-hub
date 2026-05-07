@@ -330,6 +330,21 @@ function normalizeKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function matchesSearch(search: string, ...values: Array<string | number | null | undefined>) {
+  const normalizedSearch = normalizeSearchValue(search);
+  if (!normalizedSearch) return true;
+
+  return values.some((value) => normalizeSearchValue(String(value ?? "")).includes(normalizedSearch));
+}
+
 function asRecord(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -936,6 +951,10 @@ export default function Sources() {
   const [activeCampaignSyncRun, setActiveCampaignSyncRun] = useState<ActiveCampaignSyncRunSummary | null>(null);
   const [syncingActiveCampaign, setSyncingActiveCampaign] = useState(false);
   const [activeCampaignSyncMessage, setActiveCampaignSyncMessage] = useState<string | null>(null);
+  const [gsSpreadsheetSearch, setGsSpreadsheetSearch] = useState("");
+  const [gsSheetSearch, setGsSheetSearch] = useState("");
+  const [gsServiceSheetSearch, setGsServiceSheetSearch] = useState("");
+  const [gsCaptureTagSearch, setGsCaptureTagSearch] = useState("");
   const activeLaunchId = activeLaunch?.id ?? null;
   const isHydratedActiveLaunch = hydratedLaunchId === activeLaunchId;
 
@@ -1008,6 +1027,40 @@ export default function Sources() {
 
     return fallbackSheetName ? [{ id: null, title: fallbackSheetName }] : [];
   }, [gsAvailableSheets, visibleGsSheetName, visibleGsSpreadsheetId]);
+  const filteredGsAvailableSpreadsheets = useMemo(
+    () =>
+      visibleGsAvailableSpreadsheets.filter((spreadsheet) =>
+        matchesSearch(
+          gsSpreadsheetSearch,
+          spreadsheet.title,
+          spreadsheet.id,
+          spreadsheet.ownerEmail,
+          spreadsheet.ownerName,
+        ),
+      ),
+    [gsSpreadsheetSearch, visibleGsAvailableSpreadsheets],
+  );
+  const filteredGsAvailableSheets = useMemo(
+    () =>
+      visibleGsAvailableSheets.filter((sheet) =>
+        matchesSearch(gsSheetSearch, sheet.title, sheet.id),
+      ),
+    [gsSheetSearch, visibleGsAvailableSheets],
+  );
+  const filteredServiceAccountSheets = useMemo(
+    () =>
+      gsAvailableSheets.filter((sheet) =>
+        matchesSearch(gsServiceSheetSearch, sheet.title, sheet.id),
+      ),
+    [gsAvailableSheets, gsServiceSheetSearch],
+  );
+  const filteredGsCaptureTags = useMemo(
+    () =>
+      visibleActiveCampaignTags.filter((tag) =>
+        matchesSearch(gsCaptureTagSearch, tag.name, tag.id, tag.description),
+      ),
+    [gsCaptureTagSearch, visibleActiveCampaignTags],
+  );
 
   const managedAliasKeys = useMemo(
     () => MANAGED_SOURCE_ALIASES.map((binding) => normalizeKey(binding.alias)),
@@ -1402,6 +1455,10 @@ export default function Sources() {
         setActiveCampaignSyncRun(null);
         setSyncingActiveCampaign(false);
         setActiveCampaignSyncMessage(null);
+        setGsSpreadsheetSearch("");
+        setGsSheetSearch("");
+        setGsServiceSheetSearch("");
+        setGsCaptureTagSearch("");
         setHydratedLaunchId(null);
         setLoadingActiveCampaignTags(false);
         setLoading(false);
@@ -1442,6 +1499,10 @@ export default function Sources() {
       setActiveCampaignSyncRun(null);
       setSyncingActiveCampaign(false);
       setActiveCampaignSyncMessage(null);
+      setGsSpreadsheetSearch("");
+      setGsSheetSearch("");
+      setGsServiceSheetSearch("");
+      setGsCaptureTagSearch("");
       setLoadingActiveCampaignTags(false);
       setLoading(true);
       setHydratedLaunchId(draft ? launchId : null);
@@ -3068,11 +3129,27 @@ export default function Sources() {
                         <SelectValue placeholder="Escolher planilha" />
                       </SelectTrigger>
                       <SelectContent>
-                        {visibleGsAvailableSpreadsheets.map((spreadsheet) => (
-                          <SelectItem key={spreadsheet.id} value={spreadsheet.id}>
-                            {spreadsheet.title || spreadsheet.id}
-                          </SelectItem>
-                        ))}
+                        <div className="p-2">
+                          <Input
+                            value={gsSpreadsheetSearch}
+                            onChange={(event) => setGsSpreadsheetSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            placeholder="Pesquisar planilha..."
+                            className="h-8"
+                          />
+                        </div>
+                        {filteredGsAvailableSpreadsheets.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Nenhuma planilha encontrada.
+                          </div>
+                        ) : (
+                          filteredGsAvailableSpreadsheets.map((spreadsheet) => (
+                            <SelectItem key={spreadsheet.id} value={spreadsheet.id}>
+                              {spreadsheet.title || spreadsheet.id}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -3110,14 +3187,30 @@ export default function Sources() {
                         />
                       </SelectTrigger>
                       <SelectContent>
-                        {visibleGsAvailableSheets.map((sheet) => (
-                          <SelectItem
-                            key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`}
-                            value={sheet.title || `sheet-${sheet.id ?? 0}`}
-                          >
-                            {sheet.title || `Aba ${sheet.id ?? ""}`}
-                          </SelectItem>
-                        ))}
+                        <div className="p-2">
+                          <Input
+                            value={gsSheetSearch}
+                            onChange={(event) => setGsSheetSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            placeholder="Pesquisar aba..."
+                            className="h-8"
+                          />
+                        </div>
+                        {filteredGsAvailableSheets.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Nenhuma aba encontrada.
+                          </div>
+                        ) : (
+                          filteredGsAvailableSheets.map((sheet) => (
+                            <SelectItem
+                              key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-titulo"}`}
+                              value={sheet.title || `sheet-${sheet.id ?? 0}`}
+                            >
+                              {sheet.title || `Aba ${sheet.id ?? ""}`}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -3129,7 +3222,21 @@ export default function Sources() {
                         <SelectValue placeholder="Escolher aba" />
                       </SelectTrigger>
                       <SelectContent>
-                        {gsAvailableSheets.map((sheet) => (
+                        <div className="p-2">
+                          <Input
+                            value={gsServiceSheetSearch}
+                            onChange={(event) => setGsServiceSheetSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            placeholder="Pesquisar aba..."
+                            className="h-8"
+                          />
+                        </div>
+                        {filteredServiceAccountSheets.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Nenhuma aba encontrada.
+                          </div>
+                        ) : filteredServiceAccountSheets.map((sheet) => (
                           <SelectItem key={`${sheet.id ?? "sheet"}-${sheet.title ?? "sem-título"}`} value={sheet.title || `sheet-${sheet.id ?? 0}`}>
                             {sheet.title || `Aba ${sheet.id ?? ""}`}
                           </SelectItem>
@@ -3188,6 +3295,16 @@ export default function Sources() {
                       />
                     </SelectTrigger>
                     <SelectContent>
+                      <div className="p-2">
+                        <Input
+                          value={gsCaptureTagSearch}
+                          onChange={(event) => setGsCaptureTagSearch(event.target.value)}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          placeholder="Pesquisar tag..."
+                          className="h-8"
+                        />
+                      </div>
                       <SelectItem value={NO_CAPTURE_TAG_VALUE}>Sem revisão horária</SelectItem>
                       {visibleGsCaptureTagId &&
                         !visibleActiveCampaignTags.some((tag) => tag.id === visibleGsCaptureTagId) && (
@@ -3195,7 +3312,11 @@ export default function Sources() {
                             {visibleGsCaptureTagName || `Tag #${visibleGsCaptureTagId}`} #{visibleGsCaptureTagId}
                           </SelectItem>
                         )}
-                      {visibleActiveCampaignTags.map((tag) => (
+                      {filteredGsCaptureTags.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          Nenhuma tag encontrada.
+                        </div>
+                      ) : filteredGsCaptureTags.map((tag) => (
                         <SelectItem key={`capture-${tag.id}`} value={tag.id}>
                           {tag.name} #{tag.id}
                         </SelectItem>
