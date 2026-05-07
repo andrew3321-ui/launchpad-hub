@@ -360,6 +360,9 @@ export type Database = {
       }
       hotmart_webhook_settings: {
         Row: {
+          allowed_offer_codes: string[]
+          allowed_product_ids: string[]
+          allowed_product_names: string[]
           created_at: string
           enabled: boolean
           launch_id: string
@@ -367,6 +370,9 @@ export type Database = {
           webhook_token: string
         }
         Insert: {
+          allowed_offer_codes?: string[]
+          allowed_product_ids?: string[]
+          allowed_product_names?: string[]
           created_at?: string
           enabled?: boolean
           launch_id: string
@@ -374,6 +380,9 @@ export type Database = {
           webhook_token?: string
         }
         Update: {
+          allowed_offer_codes?: string[]
+          allowed_product_ids?: string[]
+          allowed_product_names?: string[]
           created_at?: string
           enabled?: boolean
           launch_id?: string
@@ -1338,6 +1347,9 @@ export type Database = {
       ensure_hotmart_webhook_settings: {
         Args: { target_launch_id: string }
         Returns: {
+          allowed_offer_codes: string[]
+          allowed_product_ids: string[]
+          allowed_product_names: string[]
           created_at: string
           enabled: boolean
           launch_id: string
@@ -1421,6 +1433,9 @@ export type Database = {
       regenerate_hotmart_webhook_token: {
         Args: { target_launch_id: string }
         Returns: {
+          allowed_offer_codes: string[]
+          allowed_product_ids: string[]
+          allowed_product_names: string[]
           created_at: string
           enabled: boolean
           launch_id: string
