@@ -281,6 +281,115 @@ export type Database = {
           },
         ]
       }
+      hotmart_events: {
+        Row: {
+          buyer_email: string | null
+          buyer_name: string | null
+          buyer_phone: string | null
+          created_at: string
+          cycle_number: number | null
+          event_key: string
+          event_type: string
+          hotmart_event_id: string | null
+          id: string
+          launch_id: string
+          occurred_at: string | null
+          offer_code: string | null
+          price_amount: number | null
+          price_currency: string | null
+          product_id: string | null
+          product_name: string | null
+          purchase_status: string | null
+          raw_payload: Json
+          received_at: string
+          transaction_code: string | null
+        }
+        Insert: {
+          buyer_email?: string | null
+          buyer_name?: string | null
+          buyer_phone?: string | null
+          created_at?: string
+          cycle_number?: number | null
+          event_key: string
+          event_type: string
+          hotmart_event_id?: string | null
+          id?: string
+          launch_id: string
+          occurred_at?: string | null
+          offer_code?: string | null
+          price_amount?: number | null
+          price_currency?: string | null
+          product_id?: string | null
+          product_name?: string | null
+          purchase_status?: string | null
+          raw_payload?: Json
+          received_at?: string
+          transaction_code?: string | null
+        }
+        Update: {
+          buyer_email?: string | null
+          buyer_name?: string | null
+          buyer_phone?: string | null
+          created_at?: string
+          cycle_number?: number | null
+          event_key?: string
+          event_type?: string
+          hotmart_event_id?: string | null
+          id?: string
+          launch_id?: string
+          occurred_at?: string | null
+          offer_code?: string | null
+          price_amount?: number | null
+          price_currency?: string | null
+          product_id?: string | null
+          product_name?: string | null
+          purchase_status?: string | null
+          raw_payload?: Json
+          received_at?: string
+          transaction_code?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hotmart_events_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: false
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hotmart_webhook_settings: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          launch_id: string
+          updated_at: string
+          webhook_token: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          launch_id: string
+          updated_at?: string
+          webhook_token?: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          launch_id?: string
+          updated_at?: string
+          webhook_token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hotmart_webhook_settings_launch_id_fkey"
+            columns: ["launch_id"]
+            isOneToOne: true
+            referencedRelation: "launches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbound_contact_events: {
         Row: {
           cycle_number: number
@@ -1226,6 +1335,16 @@ export type Database = {
             Args: { limit_count?: number; stale_after?: string }
             Returns: Json
           }
+      ensure_hotmart_webhook_settings: {
+        Args: { target_launch_id: string }
+        Returns: {
+          created_at: string
+          enabled: boolean
+          launch_id: string
+          updated_at: string
+          webhook_token: string
+        }[]
+      }
       get_alert_settings: {
         Args: never
         Returns: {
@@ -1299,6 +1418,16 @@ export type Database = {
         }[]
       }
       purge_expired_contact_technical_logs: { Args: never; Returns: number }
+      regenerate_hotmart_webhook_token: {
+        Args: { target_launch_id: string }
+        Returns: {
+          created_at: string
+          enabled: boolean
+          launch_id: string
+          updated_at: string
+          webhook_token: string
+        }[]
+      }
       replace_launch_uchat_workspaces: {
         Args: { next_workspaces?: Json; target_launch_id: string }
         Returns: Json
