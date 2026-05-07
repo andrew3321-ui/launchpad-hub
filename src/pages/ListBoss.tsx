@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useLaunch } from "@/contexts/LaunchContext";
 import { useToast } from "@/hooks/use-toast";
 import { getSupabaseConnectionConfig, supabase } from "@/integrations/supabase/client";
@@ -21,6 +22,9 @@ interface HotmartSettings {
   launch_id: string;
   enabled: boolean;
   webhook_token: string;
+  allowed_product_ids: string[];
+  allowed_product_names: string[];
+  allowed_offer_codes: string[];
   created_at: string;
   updated_at: string;
 }
@@ -77,7 +81,9 @@ interface UntypedSupabaseClient {
     select(columns: string, options?: { count?: "exact" }): HotmartEventSelectQuery;
   };
   from(table: "hotmart_webhook_settings"): {
-    update(values: Partial<Pick<HotmartSettings, "enabled">>): HotmartSettingsUpdateQuery;
+    update(
+      values: Partial<Pick<HotmartSettings, "enabled" | "allowed_product_ids" | "allowed_product_names" | "allowed_offer_codes">>,
+    ): HotmartSettingsUpdateQuery;
   };
 }
 
@@ -103,6 +109,21 @@ const eventLabels: Record<string, string> = {
 
 function normalizeFilterValue(value: string) {
   return value.trim().replace(/[%,()]/g, " ");
+}
+
+function parseMultilineList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function formatMultilineList(values: string[] | null | undefined) {
+  return (values || []).join("\n");
 }
 
 function formatEventLabel(eventType: string) {
@@ -223,6 +244,9 @@ export default function ListBoss() {
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
+  const [allowedProductIdsInput, setAllowedProductIdsInput] = useState("");
+  const [allowedProductNamesInput, setAllowedProductNamesInput] = useState("");
+  const [allowedOfferCodesInput, setAllowedOfferCodesInput] = useState("");
   const [search, setSearch] = useState("");
   const [eventFilter, setEventFilter] = useState(HOTMART_NO_EVENT_FILTER);
   const [page, setPage] = useState(1);
@@ -256,7 +280,11 @@ export default function ListBoss() {
       return;
     }
 
-    setSettings((data?.[0] ?? null) as HotmartSettings | null);
+    const nextSettings = (data?.[0] ?? null) as HotmartSettings | null;
+    setSettings(nextSettings);
+    setAllowedProductIdsInput(formatMultilineList(nextSettings?.allowed_product_ids));
+    setAllowedProductNamesInput(formatMultilineList(nextSettings?.allowed_product_names));
+    setAllowedOfferCodesInput(formatMultilineList(nextSettings?.allowed_offer_codes));
     setLoadingSettings(false);
   }, [activeLaunchId, db, toast]);
 
@@ -411,6 +439,49 @@ export default function ListBoss() {
     setSaving(false);
   };
 
+  const saveAllowedProducts = async () => {
+    if (!activeLaunchId || !settings) return;
+
+    const allowedProductIds = parseMultilineList(allowedProductIdsInput);
+    const allowedProductNames = parseMultilineList(allowedProductNamesInput);
+    const allowedOfferCodes = parseMultilineList(allowedOfferCodesInput);
+
+    setSaving(true);
+    const { error } = await db
+      .from("hotmart_webhook_settings")
+      .update({
+        allowed_product_ids: allowedProductIds,
+        allowed_product_names: allowedProductNames,
+        allowed_offer_codes: allowedOfferCodes,
+      })
+      .eq("launch_id", activeLaunchId);
+
+    if (error) {
+      toast({
+        title: "Erro ao salvar filtro Hotmart",
+        description: error.message,
+        variant: "destructive",
+      });
+      setSaving(false);
+      return;
+    }
+
+    setSettings({
+      ...settings,
+      allowed_product_ids: allowedProductIds,
+      allowed_product_names: allowedProductNames,
+      allowed_offer_codes: allowedOfferCodes,
+    });
+    setSaving(false);
+    toast({
+      title: "Filtro Hotmart salvo",
+      description:
+        allowedProductIds.length + allowedProductNames.length + allowedOfferCodes.length > 0
+          ? "A partir de agora, apenas produtos/ofertas configurados serao registrados."
+          : "Nenhum filtro configurado. Todos os produtos recebidos serao registrados.",
+    });
+  };
+
   const regenerateToken = async () => {
     if (!activeLaunchId) return;
 
@@ -429,7 +500,11 @@ export default function ListBoss() {
       return;
     }
 
-    setSettings((data?.[0] ?? null) as HotmartSettings | null);
+    const nextSettings = (data?.[0] ?? null) as HotmartSettings | null;
+    setSettings(nextSettings);
+    setAllowedProductIdsInput(formatMultilineList(nextSettings?.allowed_product_ids));
+    setAllowedProductNamesInput(formatMultilineList(nextSettings?.allowed_product_names));
+    setAllowedOfferCodesInput(formatMultilineList(nextSettings?.allowed_offer_codes));
     setSaving(false);
     toast({
       title: "Token regenerado",
@@ -589,6 +664,68 @@ export default function ListBoss() {
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Regenerar token
                 </Button>
+              </div>
+
+              <div className="rounded-2xl border bg-background/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium">Filtro de produtos e ofertas</p>
+                    <p className="text-sm text-muted-foreground">
+                      Deixe tudo vazio para aceitar todos os produtos enviados pela Hotmart. Se preencher qualquer campo, apenas eventos que baterem com pelo menos um item serao salvos.
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {parseMultilineList(allowedProductIdsInput).length +
+                      parseMultilineList(allowedProductNamesInput).length +
+                      parseMultilineList(allowedOfferCodesInput).length}{" "}
+                    filtro(s)
+                  </Badge>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="hotmart-product-ids">IDs dos produtos</Label>
+                    <Textarea
+                      id="hotmart-product-ids"
+                      value={allowedProductIdsInput}
+                      onChange={(event) => setAllowedProductIdsInput(event.target.value)}
+                      placeholder={"123456\n789012"}
+                      className="min-h-[120px] font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Um ID por linha, ou separados por virgula.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="hotmart-product-names">Nomes dos produtos</Label>
+                    <Textarea
+                      id="hotmart-product-names"
+                      value={allowedProductNamesInput}
+                      onChange={(event) => setAllowedProductNamesInput(event.target.value)}
+                      placeholder={"Libras Sem Medo\nProduto principal"}
+                      className="min-h-[120px]"
+                    />
+                    <p className="text-xs text-muted-foreground">Use quando quiser filtrar pelo nome que vem no payload.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="hotmart-offer-codes">Codigos de oferta</Label>
+                    <Textarea
+                      id="hotmart-offer-codes"
+                      value={allowedOfferCodesInput}
+                      onChange={(event) => setAllowedOfferCodesInput(event.target.value)}
+                      placeholder={"OFERTA-01\nABC123"}
+                      className="min-h-[120px] font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Opcional para segmentar ofertas especificas do mesmo produto.</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button type="button" onClick={saveAllowedProducts} disabled={saving}>
+                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Salvar filtro Hotmart
+                  </Button>
+                </div>
               </div>
             </>
           )}

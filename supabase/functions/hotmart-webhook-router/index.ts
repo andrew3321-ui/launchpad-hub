@@ -32,6 +32,66 @@ function normalizeString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeComparableValue(value: string | null): string | null {
+  if (!value) return null;
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+
+  return normalized || null;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => normalizeString(item))
+    .filter((item): item is string => Boolean(item));
+}
+
+function listContains(allowedValues: string[], candidate: string | null) {
+  const normalizedCandidate = normalizeComparableValue(candidate);
+  if (!normalizedCandidate) return false;
+
+  return allowedValues.some((allowedValue) => normalizeComparableValue(allowedValue) === normalizedCandidate);
+}
+
+function isHotmartEventAllowed(
+  eventRow: ReturnType<typeof extractHotmartEvent>,
+  settings: {
+    allowed_product_ids?: unknown;
+    allowed_product_names?: unknown;
+    allowed_offer_codes?: unknown;
+  },
+) {
+  const allowedProductIds = normalizeStringList(settings.allowed_product_ids);
+  const allowedProductNames = normalizeStringList(settings.allowed_product_names);
+  const allowedOfferCodes = normalizeStringList(settings.allowed_offer_codes);
+  const hasFilters = allowedProductIds.length > 0 || allowedProductNames.length > 0 || allowedOfferCodes.length > 0;
+
+  if (!hasFilters) {
+    return { allowed: true, reason: "no_filters_configured" };
+  }
+
+  if (listContains(allowedProductIds, eventRow.product_id)) {
+    return { allowed: true, reason: "product_id_allowed" };
+  }
+
+  if (listContains(allowedProductNames, eventRow.product_name)) {
+    return { allowed: true, reason: "product_name_allowed" };
+  }
+
+  if (listContains(allowedOfferCodes, eventRow.offer_code)) {
+    return { allowed: true, reason: "offer_code_allowed" };
+  }
+
+  return { allowed: false, reason: "product_not_allowed" };
+}
+
 function normalizeNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return null;
@@ -360,7 +420,7 @@ Deno.serve(async (request) => {
 
     const { data: settings, error: settingsError } = await supabase
       .from("hotmart_webhook_settings")
-      .select("enabled, webhook_token")
+      .select("enabled, webhook_token, allowed_product_ids, allowed_product_names, allowed_offer_codes")
       .eq("launch_id", launch.id)
       .maybeSingle();
 
@@ -372,6 +432,20 @@ Deno.serve(async (request) => {
 
     const payload = await readPayload(request);
     const eventRow = extractHotmartEvent(payload, launch);
+    const filterResult = isHotmartEventAllowed(eventRow, settings);
+
+    if (!filterResult.allowed) {
+      return jsonResponse({
+        ok: true,
+        ignored: true,
+        reason: filterResult.reason,
+        expert: launch.slug || launch.id,
+        eventType: eventRow.event_type,
+        productId: eventRow.product_id,
+        productName: eventRow.product_name,
+        offerCode: eventRow.offer_code,
+      });
+    }
 
     const { error: insertError } = await supabase.from("hotmart_events").insert(eventRow);
 
