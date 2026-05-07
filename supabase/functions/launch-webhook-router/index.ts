@@ -177,6 +177,7 @@ const DEFAULT_MANYCHAT_ACTIVECAMPAIGN_FIELD_VALUES = {
   "24": "INT-GERAL",
   "60": "AUT",
 } as const;
+const UCHAT_DEFAULT_UTM_SOURCE = "ORG-API";
 const ACTIVE_CAMPAIGN_TAGGED_SOURCES = ["manychat", "typebot", "tally", "sendflow", "uchat"] as const;
 const SENDFLOW_WELCOME_ACTION_PREFIX = "sendflow-welcome:v2";
 const ACTIVE_CAMPAIGN_SUBFLOW_ACTION_PREFIX = "active-subflow:v1";
@@ -1016,6 +1017,33 @@ function buildActiveCampaignEnrichedPayload(
   } satisfies JsonRecord;
 }
 
+async function buildActiveCampaignPayloadForSheets(
+  launch: LaunchRow,
+  payload: JsonRecord,
+  activeContactId: string,
+) {
+  const activeContact = await fetchActiveCampaignContactSnapshot(launch, activeContactId);
+  if (!activeContact) {
+    throw new ProcessContactError("ActiveCampaign contact not found for Google Sheets enrichment", 404);
+  }
+
+  const fieldDefinitions = await loadActiveCampaignSheetFieldDefinitions(launch);
+  const fetchedFieldPayload = await fetchActiveCampaignSheetFieldPayload(
+    launch,
+    fieldDefinitions,
+    activeContact.id,
+  );
+  const expectedUtmSource = nonEmptyString(payload.utm_source);
+  const expectedUtmContent = nonEmptyString(payload.utm_content);
+  const fieldPayload = {
+    ...fetchedFieldPayload,
+    ...(expectedUtmSource ? { utm_source: expectedUtmSource } : {}),
+    ...(expectedUtmContent ? { utm_content: expectedUtmContent } : {}),
+  } satisfies JsonRecord;
+
+  return buildActiveCampaignEnrichedPayload(payload, activeContact, fieldPayload);
+}
+
 async function enrichActiveCampaignWebhookForCapture(
   launch: LaunchRow,
   normalizedEvent: NormalizedWebhookEvent,
@@ -1067,10 +1095,12 @@ function getActiveCampaignSheetsIdentity(contact: LeadContactRow, payload: JsonR
   const email =
     getActiveCampaignBodyValue(payload, "contact[email]") ||
     contact.primary_email;
+  const payloadPhone = getActiveCampaignBodyValue(payload, "contact[phone]");
   const phone =
-    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone) ||
+    pickPreferredUchatCreatePhone(contact.normalized_phone || contact.primary_phone || payloadPhone) ||
     contact.normalized_phone ||
-    contact.primary_phone;
+    contact.primary_phone ||
+    payloadPhone;
 
   return {
     activeContactId: nonEmptyString(activeContactId),
@@ -1977,7 +2007,7 @@ function normalizeIncomingWebhook(
       eventType,
       externalContactId: extractUchatUserNs(payload) || null,
       contact,
-      payload,
+      payload: enrichUchatPayloadWithCaptureUtms(payload),
     };
   }
 
@@ -2294,6 +2324,37 @@ function applyDefaultManyChatFieldValues(resolvedValues: Map<string, string>, pa
   }
 }
 
+function extractUchatQualMensagem(payload: JsonRecord) {
+  return findStringDeep(payload, [
+    "qual_msg",
+    "qual_mensagem",
+    "qualMensagem",
+    "qual_message",
+    "qualMessage",
+    "mensagem",
+    "modelo",
+  ]);
+}
+
+function applyDefaultUchatFieldValues(resolvedValues: Map<string, string>, payload: JsonRecord) {
+  resolvedValues.set(DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_source, UCHAT_DEFAULT_UTM_SOURCE);
+
+  const qualMensagem = extractUchatQualMensagem(payload);
+  if (qualMensagem) {
+    resolvedValues.set(DEFAULT_TYPEBOT_UTM_FIELD_IDS.utm_content, qualMensagem);
+  }
+}
+
+function enrichUchatPayloadWithCaptureUtms(payload: JsonRecord) {
+  const qualMensagem = extractUchatQualMensagem(payload);
+
+  return {
+    ...payload,
+    utm_source: UCHAT_DEFAULT_UTM_SOURCE,
+    ...(qualMensagem ? { utm_content: qualMensagem } : {}),
+  } satisfies JsonRecord;
+}
+
 function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRecord) {
   const resolvedValues = new Map<string, string>();
 
@@ -2319,6 +2380,10 @@ function extractActiveCampaignFieldValues(source: WebhookSource, payload: JsonRe
 
   if (source === "manychat") {
     applyDefaultManyChatFieldValues(resolvedValues, payload);
+  }
+
+  if (source === "uchat") {
+    applyDefaultUchatFieldValues(resolvedValues, payload);
   }
 
   const explicitFieldEntries = collectValuesDeep(payload, [
@@ -2740,6 +2805,224 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     ...result,
     webhookKind: "activecampaign_global_contact_tag_added",
     captureTag,
+  };
+}
+
+async function appendUchatWebhookToGoogleSheets(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  eventId: string | null,
+) {
+  const config = parseGoogleSheetsConfig({
+    enabled: launch.gs_enabled,
+    authMode: launch.gs_auth_mode,
+    serviceAccountEmail: launch.gs_service_account_email,
+    privateKey: launch.gs_private_key,
+    oauthRefreshToken: launch.gs_oauth_refresh_token,
+    spreadsheetId: launch.gs_spreadsheet_id,
+    sheetName: launch.gs_sheet_name,
+  });
+
+  if (!config) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "uchat",
+      "info",
+      "GOOGLE_SHEETS_SKIPPED",
+      "Google Sheets nao configurado",
+      "O webhook do UChat atualizou o ActiveCampaign, mas a captura no Google Sheets nao esta configurada para este expert.",
+      {
+        reason: "google_sheets_not_configured",
+        webhookKind: "uchat_after_activecampaign_enrichment",
+      },
+    );
+
+    return { skipped: true, reason: "google_sheets_not_configured" } as const;
+  }
+
+  const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
+  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
+    supabase,
+    launch,
+    contact,
+    payload,
+    config.spreadsheetId,
+    config.sheetName,
+  );
+
+  if (existingRecord.exists) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "uchat",
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Registro duplicado na planilha bloqueado",
+      "O webhook do UChat encontrou um registro ja salvo para este contato/ciclo e nao reenviou a linha.",
+      {
+        reason: "duplicate_capture_record",
+        duplicateReason: existingRecord.reason,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: config.sheetName,
+        fingerprint: existingRecord.fingerprint,
+        identity: existingRecord.identity,
+        webhookKind: "uchat_after_activecampaign_enrichment",
+      },
+    );
+
+    return {
+      skipped: true,
+      deduped: true,
+      reason: "duplicate_capture_record",
+      duplicateReason: existingRecord.reason,
+      spreadsheetId: config.spreadsheetId,
+      sheetName: config.sheetName,
+      fingerprint: existingRecord.fingerprint,
+      identity: existingRecord.identity,
+      webhookKind: "uchat_after_activecampaign_enrichment",
+    } as const;
+  }
+
+  const existingSheetRow = await findExistingGoogleSheetsRow(config, contact, payload);
+  if (existingSheetRow.exists) {
+    await recordGoogleSheetsCapture(
+      supabase,
+      launch,
+      contact,
+      payload,
+      config.spreadsheetId,
+      config.sheetName,
+      "uchat_webhook_existing_sheet",
+    );
+
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "uchat",
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Contato ja existia na planilha",
+      "O webhook do UChat encontrou o mesmo email/telefone diretamente na planilha e registrou a deduplicacao sem anexar uma nova linha.",
+      {
+        reason: "duplicate_sheet_row",
+        duplicateReason: existingSheetRow.reason,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: config.sheetName,
+        identity: existingSheetRow.identity,
+        webhookKind: "uchat_after_activecampaign_enrichment",
+      },
+    );
+
+    return {
+      skipped: true,
+      deduped: true,
+      reason: "duplicate_sheet_row",
+      duplicateReason: existingSheetRow.reason,
+      spreadsheetId: config.spreadsheetId,
+      sheetName: config.sheetName,
+      identity: existingSheetRow.identity,
+      webhookKind: "uchat_after_activecampaign_enrichment",
+    } as const;
+  }
+
+  const captureClaim = await claimGoogleSheetsCaptureRecord(
+    supabase,
+    launch,
+    contact,
+    payload,
+    config.spreadsheetId,
+    config.sheetName,
+    "uchat_webhook",
+  );
+
+  if (!captureClaim.claimed) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      "uchat",
+      "info",
+      "GOOGLE_SHEETS_APPEND_DEDUPED",
+      "Registro concorrente bloqueado",
+      "Outro processamento ja reservou este contato para a mesma planilha/ciclo, entao esta execucao nao anexou uma linha duplicada.",
+      {
+        reason: captureClaim.reason,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: config.sheetName,
+        identity: captureClaim.identity,
+        webhookKind: "uchat_after_activecampaign_enrichment",
+      },
+    );
+
+    return {
+      skipped: true,
+      deduped: true,
+      reason: captureClaim.reason,
+      spreadsheetId: config.spreadsheetId,
+      sheetName: config.sheetName,
+      identity: captureClaim.identity,
+      webhookKind: "uchat_after_activecampaign_enrichment",
+    } as const;
+  }
+
+  await enforcePlatformRateLimit("google_sheets", config.spreadsheetId);
+  let result: Awaited<ReturnType<typeof appendGoogleSheetsRow>>;
+  try {
+    result = await appendGoogleSheetsRow(config, header, row);
+  } catch (error) {
+    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    throw error;
+  }
+
+  if (!result.skipped) {
+    await markGoogleSheetsCaptureRecordAppended(
+      supabase,
+      captureClaim.id,
+      "uchat_webhook",
+    );
+  } else {
+    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+  }
+
+  await insertProcessingLog(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    "uchat",
+    result.skipped ? "info" : "success",
+    result.skipped ? "GOOGLE_SHEETS_SKIPPED" : "GOOGLE_SHEETS_APPENDED",
+    result.skipped ? "Captura Google Sheets ignorada" : "Contato enviado ao Google Sheets",
+    result.skipped
+      ? "O webhook do UChat foi tratado e enriquecido pelo ActiveCampaign, mas a captura complementar no Google Sheets foi ignorada."
+      : "O webhook do UChat atualizou o ActiveCampaign e registrou a captura na planilha com os campos enriquecidos.",
+    result.skipped
+      ? {
+          reason: result.reason,
+          webhookKind: "uchat_after_activecampaign_enrichment",
+        }
+      : {
+          spreadsheetId: result.spreadsheetId,
+          sheetName: result.sheetName,
+          columns: header,
+          webhookKind: "uchat_after_activecampaign_enrichment",
+          ...metadata,
+        },
+  );
+
+  return {
+    ...result,
+    webhookKind: "uchat_after_activecampaign_enrichment",
   };
 }
 
@@ -3242,6 +3525,7 @@ function buildWebhookTagDedupeKey(launch: LaunchRow, source: WebhookSource, payl
     ...resolvedActiveTags.map((value) => `resolved_active_tag:${value}`),
     tagId && `tag_id:${tagId}`,
     uchatTag && `uchat_tag:${uchatTag}`,
+    source === "uchat" ? extractUchatQualMensagem(payload) : null,
     subflowNs && `subflow:${subflowNs}`,
     source === "sendflow" ? findStringDeep(payload, ["campaignId", "campaign_id"]) : null,
     source === "sendflow" ? findStringDeep(payload, ["groupJid", "group_jid", "groupId", "group_id"]) : null,
@@ -4802,6 +5086,7 @@ async function routeToActiveCampaign(
 ) {
   const tagNames = resolveActiveCampaignTags(source, payload, parseNamedTags(launch.ac_named_tags));
   const fieldValues = extractActiveCampaignFieldValues(source, payload);
+  const allowUchatFieldOnlyCapture = source === "uchat" && Boolean(extractUchatQualMensagem(payload));
   const contactHasActiveIdentity = Boolean(
     nonEmptyString(contact.primary_email) ||
       nonEmptyString(contact.normalized_phone) ||
@@ -4833,7 +5118,7 @@ async function routeToActiveCampaign(
     };
   }
 
-  if (isActiveCampaignTaggedSource(source) && tagNames.length === 0) {
+  if (isActiveCampaignTaggedSource(source) && tagNames.length === 0 && !allowUchatFieldOnlyCapture) {
     const sourceLabel = formatWebhookSourceLabel(source);
     const inboundAliases = extractTagAliases(payload, source);
     const inboundTags = extractTagNames(payload);
@@ -4862,7 +5147,7 @@ async function routeToActiveCampaign(
     };
   }
 
-  if (source === "uchat" && tagNames.length === 0) {
+  if (source === "uchat" && tagNames.length === 0 && !allowUchatFieldOnlyCapture) {
     await insertProcessingLog(
       supabase,
       launch.id,
@@ -5078,7 +5363,10 @@ async function dispatchRoutes(
         );
       }
 
-      if (!("skipped" in routed) || !routed.skipped) {
+      const routeSucceeded = !("skipped" in routed) || !routed.skipped;
+      let googleSheetsResult: JsonRecord | null = null;
+
+      if (routeSucceeded) {
         await insertProcessingLog(
           supabase,
           launch.id,
@@ -5093,6 +5381,33 @@ async function dispatchRoutes(
         );
       }
 
+      const existingActiveIdentity = await fetchLeadIdentity(
+        supabase,
+        launch.id,
+        contact.id,
+        "activecampaign",
+      );
+      const activeContactId =
+        nonEmptyString((routed as unknown as JsonRecord).contactId) ||
+        nonEmptyString(existingActiveIdentity?.external_contact_id);
+      const shouldCaptureUchatWebhook = Boolean(extractUchatQualMensagem(routingPayload));
+
+      if (activeContactId && shouldCaptureUchatWebhook) {
+        const sheetsPayload = await buildActiveCampaignPayloadForSheets(
+          launch,
+          routingPayload,
+          activeContactId,
+        );
+        const sheetsResult = await appendUchatWebhookToGoogleSheets(
+          supabase,
+          launch,
+          contact,
+          sheetsPayload,
+          eventId,
+        );
+        googleSheetsResult = sheetsResult as unknown as JsonRecord;
+      }
+
       await insertProcessingLog(
         supabase,
         launch.id,
@@ -5102,15 +5417,17 @@ async function dispatchRoutes(
         "info",
         "UCHAT_WEBHOOK_PROCESSED_NO_RETURN",
         "Webhook do UChat tratado sem retorno",
-        "O webhook do proprio UChat sincroniza o contato com o ActiveCampaign, mas nao retorna ao subflow de boas-vindas. Esse retorno fica reservado ao webhook do Sendflow.",
+        "O webhook do proprio UChat sincroniza o contato com o ActiveCampaign, envia a captura enriquecida ao Google Sheets quando configurado, mas nao retorna ao subflow de boas-vindas. Esse retorno fica reservado ao webhook do Sendflow.",
         {
           activeCampaignRoute: routed,
+          googleSheets: googleSheetsResult,
           returnedToUchat: false,
         } as JsonRecord,
       );
 
       return {
         activeCampaign: routed,
+        googleSheets: googleSheetsResult,
         returnedToUchat: false,
         reason: "uchat_webhook_syncs_to_activecampaign_only",
       };
