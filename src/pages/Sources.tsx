@@ -175,10 +175,11 @@ interface CsvColumnMapping {
   sheetColumn: string;
 }
 
-type BulkCsvMode = "fixed_update" | "active_export_import";
+type BulkCsvMode = "fixed_update" | "active_export_import" | "raw_sheet_append";
 
 const FIXED_UPDATE_BATCH_SIZE = 300;
 const ACTIVE_CSV_IMPORT_BATCH_SIZE = 120;
+const RAW_SHEET_APPEND_BATCH_SIZE = 300;
 
 interface ParsedCsvUpload {
   headers: string[];
@@ -825,8 +826,11 @@ function uniqueRowsByColumn(
     const phoneKey = phoneColumn ? buildFrontendPhoneDedupeKey(row[phoneColumn]) : "";
     const validEmail = email && email.includes("@") ? email : "";
     const existingIdentityKey =
-      (validEmail ? emailIdentityKeys.get(validEmail) : undefined) ||
-      (phoneKey ? phoneIdentityKeys.get(phoneKey) : undefined);
+      validEmail
+        ? emailIdentityKeys.get(validEmail)
+        : phoneKey
+          ? phoneIdentityKeys.get(phoneKey)
+          : undefined;
 
     if (existingIdentityKey) {
       duplicateCount += 1;
@@ -841,7 +845,7 @@ function uniqueRowsByColumn(
 
     rowsByIdentity.set(identityKey, row);
     if (validEmail) emailIdentityKeys.set(validEmail, identityKey);
-    if (phoneKey) phoneIdentityKeys.set(phoneKey, identityKey);
+    if (!validEmail && phoneKey) phoneIdentityKeys.set(phoneKey, identityKey);
   }
 
   return {
@@ -2148,7 +2152,8 @@ export default function Sources() {
     if (!activeLaunchId) return;
 
     const isActiveCsvImport = bulkCsvMode === "active_export_import";
-    const validMappings = isActiveCsvImport
+    const isRawSheetAppend = bulkCsvMode === "raw_sheet_append";
+    const validMappings = isActiveCsvImport || isRawSheetAppend
       ? []
       : bulkColumnMappings.filter((mapping) => mapping.value.trim() && mapping.sheetColumn.trim());
 
@@ -2161,11 +2166,11 @@ export default function Sources() {
       return;
     }
 
-    if (!bulkEmailColumn || bulkCsvRows.length === 0 || (!isActiveCsvImport && validMappings.length === 0)) {
+    if (!bulkEmailColumn || bulkCsvRows.length === 0 || (!isActiveCsvImport && !isRawSheetAppend && validMappings.length === 0)) {
       toast({
         title: "Revise o CSV e os mapeamentos",
-        description: isActiveCsvImport
-          ? "Escolha a coluna de email do CSV exportado do ActiveCampaign."
+        description: isActiveCsvImport || isRawSheetAppend
+          ? "Escolha a coluna de email do CSV para comparar com a planilha."
           : "Escolha a coluna de email e ao menos um valor fixo para aplicar.",
         variant: "destructive",
       });
@@ -2190,7 +2195,11 @@ export default function Sources() {
         "whatsapp",
       ]);
       const preparedCsvRows = uniqueRowsByColumn(bulkCsvRows, bulkEmailColumn, phoneColumn);
-      const batchSize = isActiveCsvImport ? ACTIVE_CSV_IMPORT_BATCH_SIZE : FIXED_UPDATE_BATCH_SIZE;
+      const batchSize = isActiveCsvImport
+        ? ACTIVE_CSV_IMPORT_BATCH_SIZE
+        : isRawSheetAppend
+          ? RAW_SHEET_APPEND_BATCH_SIZE
+          : FIXED_UPDATE_BATCH_SIZE;
       const batches = chunkArray(preparedCsvRows.rows, batchSize);
 
       if (batches.length === 0) {
@@ -2252,7 +2261,7 @@ export default function Sources() {
       setBulkUpdateResult(mergedResult);
       toast({
         title: "Atualização em lote concluída",
-        description: isActiveCsvImport
+        description: isActiveCsvImport || isRawSheetAppend
           ? `${mergedResult.summary.insertedFromCsv} linha(s) inserida(s), ${mergedResult.summary.updatedRows} linha(s) completada(s) e ${mergedResult.summary.matchedRows} já existia(m) na captura.`
           : `${mergedResult.summary.updatedRows} linha(s) atualizada(s), ${mergedResult.summary.insertedFromActive} inserida(s) via ActiveCampaign e ${mergedResult.summary.notFoundRows} alerta(s).`,
         variant: mergedResult.summary.notFoundRows > 0 ? "default" : undefined,
@@ -3364,10 +3373,13 @@ export default function Sources() {
                     <SelectContent>
                       <SelectItem value="fixed_update">Atualizar valores fixos por email</SelectItem>
                       <SelectItem value="active_export_import">Importar CSV exportado do ActiveCampaign</SelectItem>
+                      <SelectItem value="raw_sheet_append">Inserir ausentes direto na planilha</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    {bulkCsvMode === "active_export_import"
+                    {bulkCsvMode === "raw_sheet_append"
+                      ? "Neste modo, o CSV compara com a planilha e somente os ausentes são inseridos direto, sem consultar ActiveCampaign ou gravar dedupe do backend."
+                      : bulkCsvMode === "active_export_import"
                       ? "Neste modo, quem já existe na captura é ignorado. Quem não existe é inserido usando os dados do próprio CSV."
                       : "Neste modo, o CSV só localiza emails existentes; os valores digitados abaixo atualizam as colunas escolhidas."}
                   </p>
@@ -3483,7 +3495,9 @@ export default function Sources() {
 
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-muted-foreground">
-                        {bulkCsvMode === "active_export_import"
+                        {bulkCsvMode === "raw_sheet_append"
+                          ? "O CSV compara com a captura. Somente ausentes são inseridos direto na planilha, sem consultar ActiveCampaign e sem registrar dedupe no backend."
+                          : bulkCsvMode === "active_export_import"
                           ? "O CSV exportado do ActiveCampaign é comparado com a captura. Existentes são ignorados; ausentes são inseridos com os dados do arquivo."
                           : "A atualização é feita por email. Os valores fixos acima atualizam a captura; ausentes só são inseridos se o ActiveCampaign confirmar a tag de captura configurada."}
                       </p>
@@ -3507,6 +3521,8 @@ export default function Sources() {
                           ? `${bulkProgressPercent}% processado`
                           : bulkCsvMode === "active_export_import"
                             ? "Importar ausentes"
+                            : bulkCsvMode === "raw_sheet_append"
+                              ? "Inserir ausentes"
                             : "Atualizar captura"}
                       </Button>
                     </div>
@@ -3527,7 +3543,8 @@ export default function Sources() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="font-medium text-foreground">Resultado da atualização</p>
                       <Badge variant={bulkUpdateResult.summary.notFoundRows > 0 ? "secondary" : "default"}>
-                        {bulkUpdateResult.summary.mode === "active_export_import"
+                        {bulkUpdateResult.summary.mode === "active_export_import" ||
+                        bulkUpdateResult.summary.mode === "raw_sheet_append"
                           ? `${bulkUpdateResult.summary.insertedFromCsv} linha(s) inserida(s)`
                           : `${bulkUpdateResult.summary.updatedRows} linha(s) atualizada(s)`}
                       </Badge>
@@ -3538,7 +3555,8 @@ export default function Sources() {
                         {bulkUpdateResult.summary.uniqueIdentities || bulkUpdateResult.summary.uniqueEmails}
                       </p>
                       <p>Linhas sem email/telefone útil: {bulkUpdateResult.summary.missingIdentityRows}</p>
-                      {bulkUpdateResult.summary.mode === "active_export_import" ? (
+                      {bulkUpdateResult.summary.mode === "active_export_import" ||
+                      bulkUpdateResult.summary.mode === "raw_sheet_append" ? (
                         <p>Inseridos pelo CSV: {bulkUpdateResult.summary.insertedFromCsv}</p>
                       ) : (
                         <p>Células atualizadas: {bulkUpdateResult.summary.updatedCells}</p>

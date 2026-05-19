@@ -46,7 +46,7 @@ interface NormalizedCsvMapping {
 interface BulkUpdateBody {
   launchId?: string | null;
   emailColumn?: string | null;
-  mode?: "fixed_update" | "active_export_import" | null;
+  mode?: "fixed_update" | "active_export_import" | "raw_sheet_append" | null;
   mappings?: CsvMapping[] | null;
   rows?: JsonRecord[] | null;
   skipBlankValues?: boolean | null;
@@ -983,15 +983,21 @@ Deno.serve(async (request) => {
     const body = await request.json() as BulkUpdateBody;
     const launchId = nonEmptyString(body.launchId);
     const emailColumn = nonEmptyString(body.emailColumn);
-    const mode = body.mode === "active_export_import" ? "active_export_import" : "fixed_update";
+    const mode =
+      body.mode === "active_export_import"
+        ? "active_export_import"
+        : body.mode === "raw_sheet_append"
+          ? "raw_sheet_append"
+          : "fixed_update";
     const isActiveCsvImport = mode === "active_export_import";
+    const isRawSheetAppend = mode === "raw_sheet_append";
     const mappings = normalizeMappings(body.mappings);
     const rows = Array.isArray(body.rows) ? body.rows.filter(isRecord).slice(0, MAX_ROWS_PER_REQUEST) : [];
     const skipBlankValues = body.skipBlankValues !== false;
 
     if (!launchId) throw new ProcessContactError("launchId is required", 400);
     if (!emailColumn) throw new ProcessContactError("emailColumn is required", 400);
-    if (!isActiveCsvImport && mappings.length === 0) {
+    if (!isActiveCsvImport && !isRawSheetAppend && mappings.length === 0) {
       throw new ProcessContactError("At least one column mapping is required", 400);
     }
     if (rows.length === 0) throw new ProcessContactError("No CSV rows were provided", 400);
@@ -1030,7 +1036,7 @@ Deno.serve(async (request) => {
       throw new ProcessContactError("The selected sheet does not have an Email column", 400);
     }
 
-    const mappingTargets = isActiveCsvImport ? [] : mappings.map((mapping) => ({
+    const mappingTargets = isActiveCsvImport || isRawSheetAppend ? [] : mappings.map((mapping) => ({
       ...mapping,
       targetIndex: headerIndex.get(normalizeColumnKey(mapping.sheetColumn)),
     }));
@@ -1079,13 +1085,16 @@ Deno.serve(async (request) => {
     let duplicatedInputEmails = 0;
 
     for (const row of rows) {
-      const email = normalizeEmail(firstStringFromRow(row, emailColumn));
+      const email = emailColumn
+        ? normalizeEmail(firstStringFromRow(row, emailColumn))
+        : normalizeEmail(pickCaptureColumnValueFromCsv(row, "Email"));
       if (!email) {
         missingEmailRows += 1;
       }
 
       const phone = pickPhoneFromCsvRow(row);
       const phoneDedupeKey = buildPhoneDedupeKey(phone);
+
       const existingIdentityKey =
         email
           ? emailIdentityKeys.get(email)
@@ -1144,7 +1153,9 @@ Deno.serve(async (request) => {
     let activeLookupErrors = 0;
     let activeCaptureTagMissing = 0;
 
-    for (const item of csvRowByIdentity.values()) {
+    const csvItems = [...csvRowByIdentity.values()];
+
+    for (const item of csvItems) {
       const emailMatchedRowNumber = item.email ? sheetRowByEmail.get(item.email) : undefined;
       const phoneMatchedRowNumber = !item.email && item.phoneDedupeKey
         ? sheetRowByPhoneKey.get(item.phoneDedupeKey)
@@ -1212,19 +1223,24 @@ Deno.serve(async (request) => {
 
     const rowsToAppend: string[][] = [];
     const captureRecordsToSave: ActiveCampaignContact[] = [];
-    const activeCaptureTag = !isActiveCsvImport && rowsMissingFromSheet.length > 0 ? await resolveCaptureTag(launch) : null;
+    const activeCaptureTag =
+      !isActiveCsvImport && !isRawSheetAppend && rowsMissingFromSheet.length > 0
+        ? await resolveCaptureTag(launch)
+        : null;
     const fieldDefinitions =
-      !isActiveCsvImport && rowsMissingFromSheet.length > 0 && activeCaptureTag
+      !isActiveCsvImport && !isRawSheetAppend && rowsMissingFromSheet.length > 0 && activeCaptureTag
         ? await loadActiveCampaignFieldDefinitions(launch)
         : [];
 
     for (const item of rowsMissingFromSheet) {
-      if (isActiveCsvImport) {
+      if (isActiveCsvImport || isRawSheetAppend) {
         const activeContact = buildActiveCampaignContactFromCsvRow(item.email, item.row);
         const rowMap = buildActiveCsvSheetsRowMap(launch, activeContact, item.row);
 
         rowsToAppend.push(buildRowForSheetHeader(sheetHeader, rowMap));
-        captureRecordsToSave.push(activeContact);
+        if (!isRawSheetAppend) {
+          captureRecordsToSave.push(activeContact);
+        }
         insertedFromActiveSamples.push({
           email: item.email,
           activeContactId: activeContact.id,
@@ -1348,7 +1364,7 @@ Deno.serve(async (request) => {
       updatedCells: updates.length,
       missingFromSheetRows: rowsMissingFromSheet.length,
       insertedFromActive,
-      insertedFromCsv: isActiveCsvImport ? insertedFromActive : 0,
+      insertedFromCsv: isActiveCsvImport || isRawSheetAppend ? insertedFromActive : 0,
       activeContactsNotFound,
       activeContactsFoundByPhone,
       activeContactsWithoutCaptureTag,
@@ -1374,7 +1390,9 @@ Deno.serve(async (request) => {
           code: "GOOGLE_SHEETS_BULK_UPDATE_COMPLETED",
           title: "Atualizacao em lote concluida",
           message:
-            isActiveCsvImport
+            isRawSheetAppend
+              ? "O CSV foi comparado com a planilha e apenas os ausentes foram inseridos diretamente, sem consultar ou gravar dedupe no backend."
+              : isActiveCsvImport
               ? "O CSV exportado do ActiveCampaign foi comparado com a captura; contatos ausentes foram inseridos diretamente com os dados do arquivo."
               : notFound.length > 0
               ? "O CSV foi processado; pessoas ausentes foram buscadas no ActiveCampaign e apenas elegiveis pela tag de captura foram inseridas."
