@@ -1114,9 +1114,9 @@ function getActiveCampaignSheetsIdentity(contact: LeadContactRow, payload: JsonR
 function buildGoogleSheetsCaptureFingerprint(contact: LeadContactRow, payload: JsonRecord) {
   const identity = getActiveCampaignSheetsIdentity(contact, payload);
   const fingerprint =
+    (identity.email ? `email:${identity.email}` : null) ||
     (identity.phoneDedupeKey ? `phone:${identity.phoneDedupeKey}` : null) ||
     (identity.normalizedPhone ? `phone:${identity.normalizedPhone}` : null) ||
-    (identity.email ? `email:${identity.email}` : null) ||
     (identity.activeContactId ? `active:${identity.activeContactId}` : null) ||
     contact.id;
 
@@ -1147,7 +1147,7 @@ async function findExistingGoogleSheetsCaptureRecord(
       .eq("sheet_name", sheetName)
       .limit(1);
 
-  if (identity.phoneDedupeKey) {
+  if (!identity.email && identity.phoneDedupeKey) {
     const { data, error } = await baseQuery()
       .eq("phone_dedupe_key", identity.phoneDedupeKey)
       .maybeSingle();
@@ -1157,8 +1157,9 @@ async function findExistingGoogleSheetsCaptureRecord(
     }
   }
 
-  // 1) Phone variant check — highest priority
-  if (identity.normalizedPhone || identity.phone) {
+  // Phone-only dedupe is intentionally looser for Google Sheets: when an
+  // email exists, the same phone can still produce a separate capture row.
+  if (!identity.email && (identity.normalizedPhone || identity.phone)) {
     const phoneCandidates = buildPhoneSearchCandidates([identity.phone, identity.normalizedPhone])
       .map((v) => digitsOnly(v))
       .filter((v): v is string => Boolean(v));
@@ -1240,6 +1241,10 @@ async function findExistingGoogleSheetsRow(
     const rowEmail = nonEmptyString(row[0])?.toLowerCase() || null;
     if (identity.email && rowEmail === identity.email) {
       return { exists: true, reason: "sheet_email", identity };
+    }
+
+    if (identity.email) {
+      continue;
     }
 
     const rowPhoneKeys = buildGoogleSheetsPhoneIdentityKeys([nonEmptyString(row[1])]);
@@ -3402,8 +3407,8 @@ function buildActiveCampaignSheetsActionKey(
 ) {
   const identity = getActiveCampaignSheetsIdentity(contact, payload);
   const recipientKey =
-    (identity.normalizedPhone ? `phone:${identity.normalizedPhone}` : null) ||
     (identity.email ? `email:${identity.email}` : null) ||
+    (identity.normalizedPhone ? `phone:${identity.normalizedPhone}` : null) ||
     (identity.activeContactId ? `active:${identity.activeContactId}` : null) ||
     contact.id;
 

@@ -271,9 +271,9 @@ function buildCaptureFingerprint(contact: ActiveCampaignContact) {
   const phoneKey = buildPhoneDedupeKey(contact.phone);
   const phone = normalizeBrazilianPhone(contact.phone);
   return normalizeColumnKey(
-    (phoneKey ? `phone:${phoneKey}` : null) ||
+    email ||
+      (phoneKey ? `phone:${phoneKey}` : null) ||
       (phone ? `phone:${phone}` : null) ||
-      email ||
       `active:${contact.id}`,
   );
 }
@@ -1087,8 +1087,11 @@ Deno.serve(async (request) => {
       const phone = pickPhoneFromCsvRow(row);
       const phoneDedupeKey = buildPhoneDedupeKey(phone);
       const existingIdentityKey =
-        (email ? emailIdentityKeys.get(email) : undefined) ||
-        (phoneDedupeKey ? phoneIdentityKeys.get(phoneDedupeKey) : undefined);
+        email
+          ? emailIdentityKeys.get(email)
+          : phoneDedupeKey
+          ? phoneIdentityKeys.get(phoneDedupeKey)
+          : undefined;
 
       if (email) uniqueEmailSet.add(email);
 
@@ -1115,7 +1118,7 @@ Deno.serve(async (request) => {
         phoneDedupeKey,
       });
       if (email) emailIdentityKeys.set(email, identityKey);
-      if (phoneDedupeKey) phoneIdentityKeys.set(phoneDedupeKey, identityKey);
+      if (!email && phoneDedupeKey) phoneIdentityKeys.set(phoneDedupeKey, identityKey);
     }
 
     const sheetHeader = header.map((value) => nonEmptyString(value) ?? "");
@@ -1143,7 +1146,7 @@ Deno.serve(async (request) => {
 
     for (const item of csvRowByIdentity.values()) {
       const emailMatchedRowNumber = item.email ? sheetRowByEmail.get(item.email) : undefined;
-      const phoneMatchedRowNumber = item.phoneDedupeKey
+      const phoneMatchedRowNumber = !item.email && item.phoneDedupeKey
         ? sheetRowByPhoneKey.get(item.phoneDedupeKey)
         : undefined;
       const sheetRowNumber = emailMatchedRowNumber ?? phoneMatchedRowNumber;

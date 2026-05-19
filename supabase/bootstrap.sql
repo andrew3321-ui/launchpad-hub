@@ -1886,7 +1886,9 @@ with ranked as (
       order by created_at asc, id asc
     ) as rn
   from public.launch_google_sheet_capture_records
-  where phone_dedupe_key is not null and length(trim(phone_dedupe_key)) > 0
+  where phone_dedupe_key is not null
+    and length(trim(phone_dedupe_key)) > 0
+    and (primary_email is null or length(trim(primary_email)) = 0)
 )
 delete from public.launch_google_sheet_capture_records
 using ranked
@@ -1918,7 +1920,9 @@ create unique index if not exists ux_launch_google_sheet_capture_records_email
   )
   where primary_email is not null and length(trim(primary_email)) > 0;
 
-create unique index if not exists ux_launch_google_sheet_capture_records_phone_key
+drop index if exists public.ux_launch_google_sheet_capture_records_phone_key;
+
+create unique index if not exists ux_launch_google_sheet_capture_records_phone_only
   on public.launch_google_sheet_capture_records (
     launch_id,
     cycle_number,
@@ -1926,7 +1930,9 @@ create unique index if not exists ux_launch_google_sheet_capture_records_phone_k
     sheet_name,
     phone_dedupe_key
   )
-  where phone_dedupe_key is not null and length(trim(phone_dedupe_key)) > 0;
+  where phone_dedupe_key is not null
+    and length(trim(phone_dedupe_key)) > 0
+    and (primary_email is null or length(trim(primary_email)) = 0);
 
 create unique index if not exists ux_launch_google_sheet_capture_records_active_id
   on public.launch_google_sheet_capture_records (

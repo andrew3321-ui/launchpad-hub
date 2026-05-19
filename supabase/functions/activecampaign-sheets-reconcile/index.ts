@@ -717,7 +717,7 @@ function buildCaptureFingerprint(contact: ActiveCampaignContact) {
   const email = contact.email ? `email:${contact.email.toLowerCase()}` : null;
   const phoneKey = buildPhoneDedupeKey(contact.phone);
   const phone = normalizeBrazilianPhone(contact.phone);
-  return normalizeKey((phoneKey ? `phone:${phoneKey}` : null) || (phone ? `phone:${phone}` : null) || email || `active:${contact.id}` || "");
+  return normalizeKey(email || (phoneKey ? `phone:${phoneKey}` : null) || (phone ? `phone:${phone}` : null) || `active:${contact.id}` || "");
 }
 
 function buildSheetIndex(values: unknown[][]) {
@@ -767,11 +767,12 @@ function contactAlreadyInSheet(
   sheetIndex: { emails: Set<string>; phones: Set<string> },
 ) {
   const email = contact.email?.toLowerCase() || null;
+  if (email) {
+    return sheetIndex.emails.has(email);
+  }
+
   const phoneKeys = buildPhoneIdentityKeys(contact.phone);
-  return Boolean(
-    (email && sheetIndex.emails.has(email)) ||
-      [...phoneKeys].some((phoneKey) => sheetIndex.phones.has(phoneKey)),
-  );
+  return [...phoneKeys].some((phoneKey) => sheetIndex.phones.has(phoneKey));
 }
 
 function rememberSample<T>(items: T[], item: T, max = 10) {
@@ -806,17 +807,17 @@ async function hasCaptureRecord(
       .eq("sheet_name", launch.gs_sheet_name)
       .limit(1);
 
-  if (phoneDedupeKey) {
+  if (email) {
     const { data, error } = await baseQuery()
-      .eq("phone_dedupe_key", phoneDedupeKey)
+      .ilike("primary_email", email)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (data?.id) return true;
   }
 
-  if (email) {
+  if (!email && phoneDedupeKey) {
     const { data, error } = await baseQuery()
-      .ilike("primary_email", email)
+      .eq("phone_dedupe_key", phoneDedupeKey)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (data?.id) return true;
