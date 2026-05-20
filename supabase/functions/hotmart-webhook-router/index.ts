@@ -265,7 +265,7 @@ function extractHotmartEvent(payload: JsonRecord, launch: { id: string; current_
 
   return {
     launch_id: launch.id,
-    cycle_number: launch.current_cycle_number,
+    cycle_number: launch.current_cycle_number ?? 1,
     event_key: buildEventKey(payload, eventType),
     event_type: eventType,
     hotmart_event_id: firstString(payload, ["id", "event_id", "webhook_event_id", "hotmart_event_id"]),

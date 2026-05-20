@@ -490,6 +490,7 @@ export async function processIncomingContactEvent(
       .from("inbound_contact_events")
       .insert({
         launch_id: launch.id,
+        cycle_number: launch.current_cycle_number,
         source: body.source,
         event_type: eventType,
         external_contact_id: externalIdentity,

@@ -383,8 +383,45 @@ async function insertTechnicalLogs(supabase: AnySupabaseClient, rows: Array<Reco
   }
 }
 
+async function withCurrentCycleNumbers(supabase: AnySupabaseClient, rows: ContactLogRow[]) {
+  const missingLaunchIds = Array.from(
+    new Set(
+      rows
+        .filter((row) => row.cycle_number === undefined || row.cycle_number === null)
+        .map((row) => row.launch_id)
+        .filter(Boolean),
+    ),
+  );
+
+  if (missingLaunchIds.length === 0) return rows;
+
+  const { data, error } = await supabase
+    .from("launches")
+    .select("id, current_cycle_number")
+    .in("id", missingLaunchIds);
+
+  if (error) {
+    console.warn("Failed to resolve current cycle numbers for contact logs", error.message);
+    return rows;
+  }
+
+  const cycleByLaunchId = new Map<string, number>();
+  for (const launch of data ?? []) {
+    if (typeof launch.id === "string" && typeof launch.current_cycle_number === "number") {
+      cycleByLaunchId.set(launch.id, launch.current_cycle_number);
+    }
+  }
+
+  return rows.map((row) => {
+    if (row.cycle_number !== undefined && row.cycle_number !== null) return row;
+    const cycleNumber = cycleByLaunchId.get(row.launch_id);
+    return typeof cycleNumber === "number" ? { ...row, cycle_number: cycleNumber } : row;
+  });
+}
+
 export async function insertContactLog(supabase: AnySupabaseClient, row: ContactLogRow) {
-  const prepared = operationalLogFrom(row);
+  const [rowWithCycle] = await withCurrentCycleNumbers(supabase, [row]);
+  const prepared = operationalLogFrom(rowWithCycle);
   const { error } = await supabase
     .from("contact_processing_logs")
     .insert(prepared.operational);
@@ -397,7 +434,8 @@ export async function insertContactLog(supabase: AnySupabaseClient, row: Contact
 
 export async function insertContactLogs(supabase: AnySupabaseClient, rows: ContactLogRow[]) {
   if (rows.length === 0) return;
-  const preparedRows = rows.map(operationalLogFrom);
+  const rowsWithCycle = await withCurrentCycleNumbers(supabase, rows);
+  const preparedRows = rowsWithCycle.map(operationalLogFrom);
 
   const { error } = await supabase
     .from("contact_processing_logs")
