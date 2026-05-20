@@ -80,7 +80,7 @@ export type Database = {
           code: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
+          cycle_number: number
           details?: Json
           event_id?: string | null
           id?: string
@@ -151,7 +151,7 @@ export type Database = {
           action_type: string
           contact_id?: string | null
           created_at?: string
-          cycle_number?: number
+          cycle_number: number
           error_message?: string | null
           event_id?: string | null
           id?: string
@@ -415,7 +415,7 @@ export type Database = {
           source: string
         }
         Insert: {
-          cycle_number?: number
+          cycle_number: number
           event_type: string
           external_contact_id?: string | null
           id?: string
@@ -929,7 +929,7 @@ export type Database = {
         Insert: {
           contact_id: string
           created_at?: string
-          cycle_number?: number
+          cycle_number: number
           external_contact_id?: string | null
           external_email?: string | null
           external_phone?: string | null
@@ -990,7 +990,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          cycle_number?: number
+          cycle_number: number
           data?: Json
           first_source?: string | null
           id?: string
