@@ -5538,23 +5538,6 @@ async function dispatchRoutes(
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      let configuredSubflowNs = explicitUchatSubflowNs || null;
-      let configuredSubflowSource: "payload" | "workspace_default" | null = explicitUchatSubflowNs ? "payload" : null;
-
-      if (!configuredSubflowNs && normalizedEvent.source === "sendflow") {
-        try {
-          const workspaces = await fetchLaunchWorkspaces(supabase, launch.id);
-          const workspace = pickPreferredWorkspace(workspaces, normalizedEvent.payload);
-          configuredSubflowNs = nonEmptyString(workspace?.welcome_subflow_ns);
-          configuredSubflowSource = configuredSubflowNs ? "workspace_default" : null;
-        } catch (lookupError) {
-          console.warn(
-            "Failed to resolve default UChat subflow for routing failure log",
-            lookupError instanceof Error ? lookupError.message : String(lookupError),
-          );
-        }
-      }
-
       await insertProcessingLog(
         supabase,
         launch.id,
@@ -5746,6 +5729,23 @@ async function dispatchRoutes(
       return routed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      let configuredSubflowNs = explicitUchatSubflowNs || null;
+      let configuredSubflowSource: "payload" | "workspace_default" | null = explicitUchatSubflowNs ? "payload" : null;
+
+      if (!configuredSubflowNs && normalizedEvent.source === "sendflow") {
+        try {
+          const workspaces = await fetchLaunchWorkspaces(supabase, launch.id);
+          const workspace = pickPreferredWorkspace(workspaces, normalizedEvent.payload);
+          configuredSubflowNs = nonEmptyString(workspace?.welcome_subflow_ns);
+          configuredSubflowSource = configuredSubflowNs ? "workspace_default" : null;
+        } catch (lookupError) {
+          console.warn(
+            "Failed to resolve default UChat subflow for routing failure log",
+            lookupError instanceof Error ? lookupError.message : String(lookupError),
+          );
+        }
+      }
+
       await insertProcessingLog(
         supabase,
         launch.id,
