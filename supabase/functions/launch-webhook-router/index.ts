@@ -1746,6 +1746,11 @@ function isUchatSubscriberNotFoundError(error: unknown) {
   return /subscriber\s+not\s+found/i.test(message);
 }
 
+function isUchatSendSubFlowFailedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /send\s+sub\s+flow\s+failed/i.test(message);
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2080,7 +2085,13 @@ function extractUchatUserId(payload?: JsonRecord | null) {
 function extractKnownUchatUserId(payload?: JsonRecord | null) {
   if (!payload) return null;
   return (
-    findStringDeep(payload, ["user_id", "userId", "subscriber.user_id", "subscriber.userId", "subscriber.id"]) ||
+    findStringDeep(payload, ["user_id", "userId"]) ||
+    readStringAtPath(payload, ["subscriber", "user_id"]) ||
+    readStringAtPath(payload, ["subscriber", "userId"]) ||
+    readStringAtPath(payload, ["subscriber", "id"]) ||
+    readStringAtPath(payload, ["data", "user_id"]) ||
+    readStringAtPath(payload, ["data", "userId"]) ||
+    readStringAtPath(payload, ["data", "id"]) ||
     nonEmptyString(payload.id)
   );
 }
@@ -4270,16 +4281,23 @@ function pickPreferredWorkspace(
 }
 
 function pickFirstSubscriberRow(payload: unknown) {
-  if (Array.isArray((payload as JsonRecord)?.data)) {
-    return (((payload as JsonRecord).data as JsonRecord[])[0] || null) as JsonRecord | null;
+  const record = isRecord(payload) ? payload : null;
+  const data = record?.data;
+
+  if (Array.isArray(data)) {
+    return ((data as JsonRecord[])[0] || null) as JsonRecord | null;
   }
 
-  if (isRecord((payload as JsonRecord)?.subscriber)) {
-    return ((payload as JsonRecord).subscriber as JsonRecord) || null;
+  if (isRecord(data)) {
+    return data as JsonRecord;
   }
 
-  if (isRecord(payload)) {
-    return payload;
+  if (isRecord(record?.subscriber)) {
+    return (record.subscriber as JsonRecord) || null;
+  }
+
+  if (record) {
+    return record;
   }
 
   return null;
@@ -4339,7 +4357,9 @@ async function createUchatSubscriberFromExplicitPayload(
   });
 
   const createdRecord = isRecord(created) ? (created as JsonRecord) : null;
+  const createdSubscriber = pickFirstSubscriberRow(createdRecord) || createdRecord;
   const createdUserNs =
+    findStringDeep(createdSubscriber, ["user_ns"]) ||
     findStringDeep(createdRecord, ["user_ns"]) ||
     findStringDeep(createdRecord, ["subscriber.user_ns"]) ||
     null;
@@ -4350,8 +4370,8 @@ async function createUchatSubscriberFromExplicitPayload(
 
   return {
     userNs: createdUserNs,
-    userId: extractKnownUchatUserId(createdRecord),
-    snapshot: createdRecord,
+    userId: extractKnownUchatUserId(createdSubscriber) || extractKnownUchatUserId(createdRecord),
+    snapshot: createdSubscriber || createdRecord,
     resolutionSource: "payload_create",
   } satisfies ResolvedUchatRecipient;
 }
@@ -4683,15 +4703,9 @@ async function findOrCreateUchatUser(
     const phoneCandidates = buildUchatPhoneCandidates(contact.primary_phone);
     const phoneCandidatesToSearch = phoneCandidates.length > 0 ? phoneCandidates : [contact.primary_phone];
     for (const phoneCandidate of phoneCandidatesToSearch) {
-      const phoneSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
-        limit: 1,
-        page: 1,
+      const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
         phone: phoneCandidate,
       });
-
-      const phoneMatch = Array.isArray((phoneSearch as JsonRecord).data)
-        ? (((phoneSearch as JsonRecord).data as JsonRecord[])[0] || null)
-        : null;
 
       const userNs = nonEmptyString(phoneMatch?.user_ns);
       if (userNs) {
@@ -4707,15 +4721,9 @@ async function findOrCreateUchatUser(
 
   const contactSafeEmail = pickUchatSafeEmail(contact.primary_email);
   if (contactSafeEmail) {
-    const emailSearch = await uchatRequest(workspace.api_token, "/subscribers", "GET", undefined, {
-      limit: 1,
-      page: 1,
+    const emailMatch = await fetchUchatSubscriberByQuery(workspace, {
       email: contactSafeEmail,
     });
-
-    const emailMatch = Array.isArray((emailSearch as JsonRecord).data)
-      ? (((emailSearch as JsonRecord).data as JsonRecord[])[0] || null)
-      : null;
 
     const userNs = nonEmptyString(emailMatch?.user_ns);
     if (userNs) {
@@ -4740,7 +4748,9 @@ async function findOrCreateUchatUser(
     email: contactSafeEmail || undefined,
   });
 
+  const createdSubscriber = pickFirstSubscriberRow(created);
   const createdUserNs =
+    findStringDeep(createdSubscriber, ["user_ns"]) ||
     findStringDeep(created, ["user_ns"]) ||
     findStringDeep(created, ["subscriber.user_ns"]) ||
     null;
@@ -4751,10 +4761,128 @@ async function findOrCreateUchatUser(
 
   return {
     userNs: createdUserNs,
-    userId: extractKnownUchatUserId(isRecord(created) ? (created as JsonRecord) : null),
-    snapshot: isRecord(created) ? (created as JsonRecord) : null,
+    userId: extractKnownUchatUserId(createdSubscriber) ||
+      extractKnownUchatUserId(isRecord(created) ? (created as JsonRecord) : null),
+    snapshot: createdSubscriber || (isRecord(created) ? (created as JsonRecord) : null),
     resolutionSource: "subscriber_created",
   } satisfies ResolvedUchatRecipient;
+}
+
+async function sendUchatSubFlowToRecipient(
+  workspace: UChatWorkspaceRow,
+  subflowNs: string,
+  userNs: string,
+  userId: string | null,
+  contact: LeadContactRow,
+  payload: JsonRecord,
+  attemptedDeliveryMethods: string[],
+) {
+  const tryByUserId = async (value: string, label = "user_id") => {
+    attemptedDeliveryMethods.push(label);
+    const response = (await uchatRequest(
+      workspace.api_token,
+      "/subscriber/send-sub-flow-by-user-id",
+      "POST",
+      {
+        user_id: value,
+        sub_flow_ns: subflowNs,
+      },
+    )) as JsonRecord;
+
+    return {
+      response,
+      deliveryMethod: label === "user_id" ? "user_id" : "user_id_after_phone_lookup",
+    } as const;
+  };
+
+  const tryByUserNs = async (value: string, label = "user_ns") => {
+    attemptedDeliveryMethods.push(label);
+    const response = (await uchatRequest(
+      workspace.api_token,
+      "/subscriber/send-sub-flow",
+      "POST",
+      {
+        user_ns: value,
+        sub_flow_ns: subflowNs,
+      },
+    )) as JsonRecord;
+
+    return {
+      response,
+      deliveryMethod: label === "user_ns"
+        ? "user_ns"
+        : label === "user_ns_after_phone_lookup"
+          ? "user_ns_after_phone_lookup"
+          : "user_id_then_user_ns",
+    } as const;
+  };
+
+  let lastError: unknown = null;
+
+  if (userId) {
+    try {
+      return await tryByUserId(userId);
+    } catch (error) {
+      lastError = error;
+      if (!isUchatSubscriberNotFoundError(error) && !isUchatSendSubFlowFailedError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    return await tryByUserNs(userNs, userId ? "user_ns_after_user_id_failed" : "user_ns");
+  } catch (error) {
+    lastError = error;
+    if (!isUchatSubscriberNotFoundError(error) && !isUchatSendSubFlowFailedError(error)) {
+      throw error;
+    }
+  }
+
+  // UChat can take a moment to expose a subscriber created only from a phone.
+  // Re-read by all phone variants, then retry by user_id/user_ns once.
+  await delay(900);
+
+  const payloadContact = extractGenericContact(payload);
+  const phoneCandidates = uniqueStrings([
+    ...buildUchatPhoneCandidates(contact.normalized_phone),
+    ...buildUchatPhoneCandidates(contact.primary_phone),
+    ...buildUchatPhoneCandidates(payloadContact.phone),
+  ]);
+
+  for (const phoneCandidate of phoneCandidates) {
+    const phoneMatch = await fetchUchatSubscriberByQuery(workspace, {
+      phone: phoneCandidate,
+    });
+    if (!phoneMatch) continue;
+
+    const matchedUserId = extractKnownUchatUserId(phoneMatch);
+    const matchedUserNs = nonEmptyString(phoneMatch.user_ns);
+
+    if (matchedUserId) {
+      try {
+        return await tryByUserId(matchedUserId, "user_id_after_phone_lookup");
+      } catch (error) {
+        lastError = error;
+        if (!isUchatSubscriberNotFoundError(error) && !isUchatSendSubFlowFailedError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (matchedUserNs) {
+      try {
+        return await tryByUserNs(matchedUserNs, "user_ns_after_phone_lookup");
+      } catch (error) {
+        lastError = error;
+        if (!isUchatSubscriberNotFoundError(error) && !isUchatSendSubFlowFailedError(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error("UChat send sub flow failed after phone-only fallback");
 }
 
 async function routeToUchat(
@@ -4813,7 +4941,13 @@ async function routeToUchat(
   const responses: JsonRecord[] = [];
   const executedActions: string[] = [];
   const skippedActions: string[] = [];
-  let subflowDeliveryMethod: "user_ns" | "user_id" | "user_id_then_user_ns" | null = null;
+  let subflowDeliveryMethod:
+    | "user_ns"
+    | "user_id"
+    | "user_id_then_user_ns"
+    | "user_id_after_phone_lookup"
+    | "user_ns_after_phone_lookup"
+    | null = null;
   const deliveryKey = resolveInboundDeliveryKey(source, payload, eventId);
   const failureContext = buildRoutingFailureContext(contact, payload, {
     source,
@@ -4891,51 +5025,17 @@ async function routeToUchat(
     if (actionId) {
       const attemptedDeliveryMethods: string[] = [];
       try {
-        let response: JsonRecord;
-
-        if (targetUserId) {
-          attemptedDeliveryMethods.push("user_id");
-          try {
-            response = (await uchatRequest(
-              workspace.api_token,
-              "/subscriber/send-sub-flow-by-user-id",
-              "POST",
-              {
-                user_id: targetUserId,
-                sub_flow_ns: subflowNs,
-              },
-            )) as JsonRecord;
-            subflowDeliveryMethod = "user_id";
-          } catch (error) {
-            if (!isUchatSubscriberNotFoundError(error)) {
-              throw error;
-            }
-
-            attemptedDeliveryMethods.push("user_ns");
-            response = (await uchatRequest(
-              workspace.api_token,
-              "/subscriber/send-sub-flow",
-              "POST",
-              {
-                user_ns: userNs,
-                sub_flow_ns: subflowNs,
-              },
-            )) as JsonRecord;
-            subflowDeliveryMethod = "user_id_then_user_ns";
-          }
-        } else {
-          attemptedDeliveryMethods.push("user_ns");
-          response = (await uchatRequest(
-            workspace.api_token,
-            "/subscriber/send-sub-flow",
-            "POST",
-            {
-              user_ns: userNs,
-              sub_flow_ns: subflowNs,
-            },
-          )) as JsonRecord;
-          subflowDeliveryMethod = "user_ns";
-        }
+        const delivery = await sendUchatSubFlowToRecipient(
+          workspace,
+          subflowNs,
+          userNs,
+          targetUserId,
+          contact,
+          payload,
+          attemptedDeliveryMethods,
+        );
+        const response = delivery.response;
+        subflowDeliveryMethod = delivery.deliveryMethod;
 
         await updateRoutingAction(supabase, actionId, "success", response);
         responses.push({ action: "send-sub-flow", response });
@@ -5438,6 +5538,23 @@ async function dispatchRoutes(
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      let configuredSubflowNs = explicitUchatSubflowNs || null;
+      let configuredSubflowSource: "payload" | "workspace_default" | null = explicitUchatSubflowNs ? "payload" : null;
+
+      if (!configuredSubflowNs && normalizedEvent.source === "sendflow") {
+        try {
+          const workspaces = await fetchLaunchWorkspaces(supabase, launch.id);
+          const workspace = pickPreferredWorkspace(workspaces, normalizedEvent.payload);
+          configuredSubflowNs = nonEmptyString(workspace?.welcome_subflow_ns);
+          configuredSubflowSource = configuredSubflowNs ? "workspace_default" : null;
+        } catch (lookupError) {
+          console.warn(
+            "Failed to resolve default UChat subflow for routing failure log",
+            lookupError instanceof Error ? lookupError.message : String(lookupError),
+          );
+        }
+      }
+
       await insertProcessingLog(
         supabase,
         launch.id,
@@ -5642,7 +5759,8 @@ async function dispatchRoutes(
         {
           error: message,
           ...buildRoutingFailureContext(contact, normalizedEvent.payload, normalizedEvent),
-          configuredSubflowNs: explicitUchatSubflowNs || null,
+          configuredSubflowNs,
+          configuredSubflowSource,
           workspaceHint:
             findStringDeep(normalizedEvent.payload, ["workspace_id", "workspaceId", "uchat_workspace_id", "bot_id"]) ||
             null,
