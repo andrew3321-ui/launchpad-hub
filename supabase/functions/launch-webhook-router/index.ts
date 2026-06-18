@@ -730,9 +730,109 @@ function buildActiveCampaignSheetsRow(launch: LaunchRow, contact: LeadContactRow
   };
 }
 
+function collectActiveCampaignWebhookTagValues(payload: JsonRecord) {
+  const ids: string[] = [];
+  const names: string[] = [];
+  const tagContainerKeys = new Set([
+    "tag",
+    "tags",
+    "contacttag",
+    "contacttags",
+    "contact_tag",
+    "contact_tags",
+  ].map(normalizeKey));
+  const tagIdKeys = new Set([
+    "tagid",
+    "tagids",
+    "tag_id",
+    "tag_ids",
+    "contacttagid",
+    "contacttagids",
+    "contact_tag_id",
+    "contact_tag_ids",
+    "activecampaigntagid",
+    "activecampaigntagids",
+    "active_campaign_tag_id",
+    "active_campaign_tag_ids",
+    "ac_tag_id",
+    "ac_tag_ids",
+  ].map(normalizeKey));
+  const tagNameKeys = new Set([
+    "tagname",
+    "tagnames",
+    "tag_name",
+    "tag_names",
+    "contacttagname",
+    "contacttagnames",
+    "contact_tag_name",
+    "contact_tag_names",
+  ].map(normalizeKey));
+
+  const pushTagValue = (value: unknown) => {
+    collectStringListDeep({ value }, ["value"]).forEach((item) => {
+      if (/^\d+$/.test(item)) {
+        ids.push(item);
+      } else {
+        names.push(item);
+      }
+    });
+  };
+
+  const pushTagId = (value: unknown) => {
+    collectStringListDeep({ value }, ["value"])
+      .filter((item) => /^\d+$/.test(item))
+      .forEach((item) => ids.push(item));
+  };
+
+  const pushTagName = (value: unknown) => {
+    collectStringListDeep({ value }, ["value"])
+      .filter((item) => !/^\d+$/.test(item))
+      .forEach((item) => names.push(item));
+  };
+
+  const walk = (value: unknown, parentKey = "") => {
+    const normalizedParentKey = normalizeKey(parentKey);
+    const parentIsTagContainer = tagContainerKeys.has(normalizedParentKey);
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item, parentKey));
+      return;
+    }
+
+    if (!isRecord(value)) {
+      if (parentIsTagContainer) pushTagValue(value);
+      return;
+    }
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      const normalizedKey = normalizeKey(key);
+      const keyIsTagContainer = tagContainerKeys.has(normalizedKey);
+
+      if (tagIdKeys.has(normalizedKey) || (parentIsTagContainer && normalizedKey === "id")) {
+        pushTagId(nestedValue);
+      } else if (tagNameKeys.has(normalizedKey) || (parentIsTagContainer && normalizedKey === "name")) {
+        pushTagName(nestedValue);
+      } else if (normalizedKey === "tag") {
+        pushTagValue(nestedValue);
+      }
+
+      walk(nestedValue, keyIsTagContainer ? key : parentKey);
+    }
+  };
+
+  walk(payload);
+
+  return {
+    ids: uniqueStrings(ids),
+    names: uniqueStrings(names),
+  };
+}
+
 function extractActiveCampaignWebhookTagContext(payload: JsonRecord) {
   const rawTag = getActiveCampaignBodyValue(payload, "tag");
+  const deepContext = collectActiveCampaignWebhookTagValues(payload);
   const tagIds = uniqueStrings([
+    ...deepContext.ids,
     getActiveCampaignBodyValue(payload, "tag[id]"),
     getActiveCampaignBodyValue(payload, "tagid"),
     getActiveCampaignBodyValue(payload, "tag_id"),
@@ -755,6 +855,7 @@ function extractActiveCampaignWebhookTagContext(payload: JsonRecord) {
     ]).filter((value) => /^\d+$/.test(value)),
   ]);
   const tagNames = uniqueStrings([
+    ...deepContext.names,
     getActiveCampaignBodyValue(payload, "tag[name]"),
     getActiveCampaignBodyValue(payload, "tag[tag]"),
     getActiveCampaignBodyValue(payload, "contactTag[tagName]"),
@@ -796,6 +897,7 @@ async function matchActiveCampaignCaptureTag(launch: LaunchRow, payload: JsonRec
   const context = extractActiveCampaignWebhookTagContext(payload);
   const configuredIds = await resolveConfiguredCaptureTagIds(launch);
   const configuredName = nonEmptyString(launch.gs_capture_tag_name);
+  const activeContactId = extractActiveCampaignContactId(payload);
 
   if (configuredIds.length === 0 && !configuredName) {
     return {
@@ -835,6 +937,29 @@ async function matchActiveCampaignCaptureTag(launch: LaunchRow, payload: JsonRec
   }
 
   const hasAnyTagContext = context.ids.length > 0 || context.names.length > 0;
+
+  if (activeContactId && configuredIds.length > 0) {
+    const contactTagIds = await listActiveCampaignContactTagIds(launch, activeContactId);
+    if (
+      configuredIds.some((configuredId) =>
+        contactTagIds.some((receivedId) => normalizeKey(receivedId) === normalizeKey(configuredId))
+      )
+    ) {
+      return {
+        matches: true,
+        matchedBy: hasAnyTagContext
+          ? "active_contact_current_tags_after_payload_mismatch"
+          : "active_contact_current_tags",
+        context: {
+          ids: contactTagIds,
+          names: context.names,
+        },
+        configuredIds,
+        configuredName,
+      } as const;
+    }
+  }
+
   return {
     matches: false,
     reason: hasAnyTagContext ? "capture_tag_mismatch" : "missing_tag_context",
