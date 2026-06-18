@@ -5954,6 +5954,14 @@ async function runAcceptedContactJobs(
       normalizedEvent.payload,
     );
 
+    const routingResult = await dispatchRoutes(
+      supabase,
+      launch,
+      normalizedEvent,
+      contact.id,
+      eventId,
+    );
+
     if (includeGoogleSheets && normalizedEvent.source === "activecampaign") {
       await appendActiveCampaignWebhookToGoogleSheetsJob(
         supabase,
@@ -5963,14 +5971,6 @@ async function runAcceptedContactJobs(
         eventId,
       );
     }
-
-    const routingResult = await dispatchRoutes(
-      supabase,
-      launch,
-      normalizedEvent,
-      contact.id,
-      eventId,
-    );
 
     return routingResult;
   } catch (error) {
