@@ -1278,7 +1278,7 @@ async function findExistingGoogleSheetsCaptureRecord(
       .maybeSingle();
     if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (phone key)", 500, error.message);
     if (data?.id) {
-      return { exists: true, reason: "phone_dedupe_key", fingerprint, identity };
+      return { exists: true, id: nonEmptyString(data.id), reason: "phone_dedupe_key", fingerprint, identity };
     }
   }
 
@@ -1296,7 +1296,7 @@ async function findExistingGoogleSheetsCaptureRecord(
         .maybeSingle();
       if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (phone)", 500, error.message);
       if (data?.id) {
-        return { exists: true, reason: "normalized_phone", fingerprint, identity };
+        return { exists: true, id: nonEmptyString(data.id), reason: "normalized_phone", fingerprint, identity };
       }
     }
   }
@@ -1308,7 +1308,7 @@ async function findExistingGoogleSheetsCaptureRecord(
       .maybeSingle();
     if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (email)", 500, error.message);
     if (data?.id) {
-      return { exists: true, reason: "email", fingerprint, identity };
+      return { exists: true, id: nonEmptyString(data.id), reason: "email", fingerprint, identity };
     }
   }
 
@@ -1319,7 +1319,7 @@ async function findExistingGoogleSheetsCaptureRecord(
       .maybeSingle();
     if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (fingerprint)", 500, error.message);
     if (data?.id) {
-      return { exists: true, reason: "row_fingerprint", fingerprint, identity };
+      return { exists: true, id: nonEmptyString(data.id), reason: "row_fingerprint", fingerprint, identity };
     }
   }
 
@@ -1330,12 +1330,13 @@ async function findExistingGoogleSheetsCaptureRecord(
       .maybeSingle();
     if (error) throw new ProcessContactError("Failed to check Google Sheets capture dedupe (active_id)", 500, error.message);
     if (data?.id) {
-      return { exists: true, reason: "active_contact_id", fingerprint, identity };
+      return { exists: true, id: nonEmptyString(data.id), reason: "active_contact_id", fingerprint, identity };
     }
   }
 
   return {
     exists: false,
+    id: null,
     reason: null,
     fingerprint,
     identity,
@@ -2738,52 +2739,6 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   }
 
   const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
-  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
-    supabase,
-    launch,
-    contact,
-    payload,
-    config.spreadsheetId,
-    config.sheetName,
-  );
-
-  if (existingRecord.exists) {
-    await insertProcessingLog(
-      supabase,
-      launch.id,
-      contact.id,
-      eventId,
-      "activecampaign",
-      "info",
-      "GOOGLE_SHEETS_APPEND_DEDUPED",
-      "Registro duplicado na planilha bloqueado",
-      "O webhook global do ActiveCampaign encontrou um registro ja salvo para este contato/ciclo e nao reenviou a linha.",
-      {
-        reason: "duplicate_capture_record",
-        duplicateReason: existingRecord.reason,
-        spreadsheetId: config.spreadsheetId,
-        sheetName: config.sheetName,
-        fingerprint: existingRecord.fingerprint,
-        identity: existingRecord.identity,
-        webhookKind: "activecampaign_global_contact_tag_added",
-        captureTag,
-      },
-    );
-
-    return {
-      skipped: true,
-      deduped: true,
-      reason: "duplicate_capture_record",
-      duplicateReason: existingRecord.reason,
-      spreadsheetId: config.spreadsheetId,
-      sheetName: config.sheetName,
-      fingerprint: existingRecord.fingerprint,
-      identity: existingRecord.identity,
-      webhookKind: "activecampaign_global_contact_tag_added",
-      captureTag,
-    } as const;
-  }
-
   const existingSheetRow = await findExistingGoogleSheetsRow(config, contact, payload);
   if (existingSheetRow.exists) {
     await recordGoogleSheetsCapture(
@@ -2830,15 +2785,31 @@ async function appendActiveCampaignWebhookToGoogleSheets(
     } as const;
   }
 
-  const captureClaim = await claimGoogleSheetsCaptureRecord(
+  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
     supabase,
     launch,
     contact,
     payload,
     config.spreadsheetId,
     config.sheetName,
-    "activecampaign_webhook",
   );
+  const reusedExistingCaptureRecord = Boolean(existingRecord.exists && existingRecord.id);
+  const captureClaim = reusedExistingCaptureRecord
+    ? {
+        claimed: true,
+        id: existingRecord.id,
+        identity: existingRecord.identity,
+        reason: "reused_stale_capture_record",
+      }
+    : await claimGoogleSheetsCaptureRecord(
+        supabase,
+        launch,
+        contact,
+        payload,
+        config.spreadsheetId,
+        config.sheetName,
+        "activecampaign_webhook",
+      );
 
   if (!captureClaim.claimed) {
     await insertProcessingLog(
@@ -2878,7 +2849,9 @@ async function appendActiveCampaignWebhookToGoogleSheets(
   try {
     result = await appendGoogleSheetsRow(config, header, row);
   } catch (error) {
-    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    if (!reusedExistingCaptureRecord) {
+      await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    }
     throw error;
   }
 
@@ -2889,7 +2862,9 @@ async function appendActiveCampaignWebhookToGoogleSheets(
       "activecampaign_webhook",
     );
   } else {
-    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    if (!reusedExistingCaptureRecord) {
+      await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    }
   }
 
   const skippedTitle = result.skipped && !("deduped" in result && result.deduped)
@@ -2987,50 +2962,6 @@ async function appendUchatWebhookToGoogleSheets(
   }
 
   const { header, row, metadata } = buildActiveCampaignSheetsRow(launch, contact, payload);
-  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
-    supabase,
-    launch,
-    contact,
-    payload,
-    config.spreadsheetId,
-    config.sheetName,
-  );
-
-  if (existingRecord.exists) {
-    await insertProcessingLog(
-      supabase,
-      launch.id,
-      contact.id,
-      eventId,
-      "uchat",
-      "info",
-      "GOOGLE_SHEETS_APPEND_DEDUPED",
-      "Registro duplicado na planilha bloqueado",
-      "O webhook do UChat encontrou um registro ja salvo para este contato/ciclo e nao reenviou a linha.",
-      {
-        reason: "duplicate_capture_record",
-        duplicateReason: existingRecord.reason,
-        spreadsheetId: config.spreadsheetId,
-        sheetName: config.sheetName,
-        fingerprint: existingRecord.fingerprint,
-        identity: existingRecord.identity,
-        webhookKind: "uchat_after_activecampaign_enrichment",
-      },
-    );
-
-    return {
-      skipped: true,
-      deduped: true,
-      reason: "duplicate_capture_record",
-      duplicateReason: existingRecord.reason,
-      spreadsheetId: config.spreadsheetId,
-      sheetName: config.sheetName,
-      fingerprint: existingRecord.fingerprint,
-      identity: existingRecord.identity,
-      webhookKind: "uchat_after_activecampaign_enrichment",
-    } as const;
-  }
-
   const existingSheetRow = await findExistingGoogleSheetsRow(config, contact, payload);
   if (existingSheetRow.exists) {
     await recordGoogleSheetsCapture(
@@ -3075,15 +3006,31 @@ async function appendUchatWebhookToGoogleSheets(
     } as const;
   }
 
-  const captureClaim = await claimGoogleSheetsCaptureRecord(
+  const existingRecord = await findExistingGoogleSheetsCaptureRecord(
     supabase,
     launch,
     contact,
     payload,
     config.spreadsheetId,
     config.sheetName,
-    "uchat_webhook",
   );
+  const reusedExistingCaptureRecord = Boolean(existingRecord.exists && existingRecord.id);
+  const captureClaim = reusedExistingCaptureRecord
+    ? {
+        claimed: true,
+        id: existingRecord.id,
+        identity: existingRecord.identity,
+        reason: "reused_stale_capture_record",
+      }
+    : await claimGoogleSheetsCaptureRecord(
+        supabase,
+        launch,
+        contact,
+        payload,
+        config.spreadsheetId,
+        config.sheetName,
+        "uchat_webhook",
+      );
 
   if (!captureClaim.claimed) {
     await insertProcessingLog(
@@ -3121,7 +3068,9 @@ async function appendUchatWebhookToGoogleSheets(
   try {
     result = await appendGoogleSheetsRow(config, header, row);
   } catch (error) {
-    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    if (!reusedExistingCaptureRecord) {
+      await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    }
     throw error;
   }
 
@@ -3132,7 +3081,9 @@ async function appendUchatWebhookToGoogleSheets(
       "uchat_webhook",
     );
   } else {
-    await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    if (!reusedExistingCaptureRecord) {
+      await releaseGoogleSheetsCaptureRecordClaim(supabase, captureClaim.id);
+    }
   }
 
   await insertProcessingLog(
@@ -3165,6 +3116,231 @@ async function appendUchatWebhookToGoogleSheets(
     ...result,
     webhookKind: "uchat_after_activecampaign_enrichment",
   };
+}
+
+function getRoutedActiveCampaignContactId(route: unknown) {
+  if (!isRecord(route)) return null;
+
+  return (
+    nonEmptyString(route.contactId) ||
+    nonEmptyString(route.activeContactId) ||
+    nonEmptyString(route.contact_id) ||
+    null
+  );
+}
+
+async function resolveActiveCampaignContactIdForSheets(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  route: unknown,
+) {
+  const routedContactId = getRoutedActiveCampaignContactId(route);
+  if (routedContactId) return routedContactId;
+
+  const existingActiveIdentity = await fetchLeadIdentity(
+    supabase,
+    launch.id,
+    contact.id,
+    "activecampaign",
+  );
+
+  return nonEmptyString(existingActiveIdentity?.external_contact_id);
+}
+
+function buildCaptureSheetEnsureActionKey(
+  launch: LaunchRow,
+  activeContactId: string,
+) {
+  return [
+    ACTIVE_CAMPAIGN_SHEETS_ACTION_PREFIX,
+    "ensure:v1",
+    `cycle:${launch.current_cycle_number || 1}`,
+    `active:${normalizeDedupeKeyPart(activeContactId)}`,
+  ].join(":");
+}
+
+async function ensureActiveCampaignContactInCaptureSheet(
+  supabase: AnySupabaseClient,
+  launch: LaunchRow,
+  contact: LeadContactRow,
+  eventId: string,
+  source: WebhookSource,
+  payload: JsonRecord,
+  activeContactId: string | null | undefined,
+) {
+  const resolvedActiveContactId = nonEmptyString(activeContactId);
+  if (!resolvedActiveContactId) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "info",
+      "CAPTURE_SHEET_ENSURE_SKIPPED",
+      "Captura na planilha sem contato Active",
+      "O Launch Hub recebeu um contato de uma fonte externa, mas nao encontrou um contato existente no ActiveCampaign para validar a tag de captura. Nenhum contato novo foi criado no ActiveCampaign.",
+      {
+        reason: "missing_activecampaign_contact_id",
+      },
+    );
+
+    return {
+      target: "google_sheets",
+      skipped: true,
+      reason: "missing_activecampaign_contact_id",
+    } as const;
+  }
+
+  const actionKey = buildCaptureSheetEnsureActionKey(launch, resolvedActiveContactId);
+  const actionId = await claimRoutingAction(
+    supabase,
+    launch.id,
+    contact.id,
+    eventId,
+    source,
+    "google_sheets",
+    "ensure-capture-row",
+    actionKey,
+    {
+      activeContactId: resolvedActiveContactId,
+      source,
+      cycleNumber: launch.current_cycle_number || 1,
+      spreadsheetId: launch.gs_spreadsheet_id,
+      sheetName: launch.gs_sheet_name,
+    },
+  );
+
+  if (!actionId) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "info",
+      "CAPTURE_SHEET_ENSURE_DEDUPED",
+      "Garantia de planilha ja processada",
+      "O Launch Hub ja tinha uma tentativa registrada para garantir este contato do ActiveCampaign na planilha de captura deste ciclo.",
+      {
+        actionKey,
+        activeContactId: resolvedActiveContactId,
+      },
+    );
+
+    return {
+      target: "google_sheets",
+      skipped: true,
+      deduped: true,
+      reason: "duplicate_capture_sheet_ensure",
+      activeContactId: resolvedActiveContactId,
+    } as const;
+  }
+
+  try {
+    const sheetsPayload = await buildActiveCampaignPayloadForSheets(
+      launch,
+      payload,
+      resolvedActiveContactId,
+    );
+    const captureMatch = await matchActiveCampaignCaptureTag(launch, sheetsPayload);
+
+    if (!captureMatch.matches) {
+      const response = {
+        skipped: true,
+        reason: "active_contact_without_capture_tag",
+        activeContactId: resolvedActiveContactId,
+        captureTag: {
+          configuredIds: captureMatch.configuredIds,
+          configuredName: captureMatch.configuredName,
+          receivedIds: captureMatch.context.ids,
+          receivedNames: captureMatch.context.names,
+          matchedBy: null,
+        },
+      } satisfies JsonRecord;
+
+      await updateRoutingAction(
+        supabase,
+        actionId,
+        "skipped",
+        response,
+        "ActiveCampaign contact does not have the configured capture tag",
+      );
+
+      await insertProcessingLog(
+        supabase,
+        launch.id,
+        contact.id,
+        eventId,
+        source,
+        "info",
+        "CAPTURE_SHEET_ENSURE_SKIPPED",
+        "Contato fora da tag de captura",
+        "O contato existe no ActiveCampaign, mas nao possui a tag configurada para a planilha de captura. Nenhuma linha foi enviada.",
+        response,
+      );
+
+      return {
+        target: "google_sheets",
+        ...response,
+      } as const;
+    }
+
+    const result = await appendActiveCampaignWebhookToGoogleSheets(
+      supabase,
+      launch,
+      contact,
+      sheetsPayload,
+      eventId,
+    );
+
+    await updateRoutingAction(
+      supabase,
+      actionId,
+      result.skipped && !("deduped" in result && result.deduped) ? "skipped" : "success",
+      {
+        ...(result as unknown as JsonRecord),
+        source,
+        activeContactId: resolvedActiveContactId,
+      },
+      result.skipped ? result.reason : null,
+    );
+
+    return {
+      target: "google_sheets",
+      activeContactId: resolvedActiveContactId,
+      source,
+      ...result,
+    } as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await updateRoutingAction(supabase, actionId, "failed", {}, message);
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "warning",
+      "CAPTURE_SHEET_ENSURE_FAILED",
+      "Falha ao garantir contato na planilha",
+      "O Launch Hub tentou confirmar o contato no ActiveCampaign e garantir a linha na planilha de captura, mas a etapa falhou. Nenhum contato novo foi criado no ActiveCampaign.",
+      {
+        error: message,
+        activeContactId: resolvedActiveContactId,
+      },
+    );
+
+    return {
+      target: "google_sheets",
+      skipped: true,
+      failed: true,
+      reason: "capture_sheet_ensure_failed",
+      error: message,
+      activeContactId: resolvedActiveContactId,
+    } as const;
+  }
 }
 
 async function fetchLaunch(
@@ -5662,6 +5838,18 @@ async function dispatchRoutes(
         googleSheetsResult = sheetsResult as unknown as JsonRecord;
       }
 
+      if (activeContactId && !googleSheetsResult) {
+        googleSheetsResult = await ensureActiveCampaignContactInCaptureSheet(
+          supabase,
+          launch,
+          contact,
+          eventId,
+          normalizedEvent.source,
+          routingPayload,
+          activeContactId,
+        ) as unknown as JsonRecord;
+      }
+
       await insertProcessingLog(
         supabase,
         launch.id,
@@ -5755,8 +5943,31 @@ async function dispatchRoutes(
         );
       }
 
+      const activeContactId = await resolveActiveCampaignContactIdForSheets(
+        supabase,
+        launch,
+        contact,
+        routed,
+      );
+      const googleSheetsEnsure = await ensureActiveCampaignContactInCaptureSheet(
+        supabase,
+        launch,
+        contact,
+        eventId,
+        normalizedEvent.source,
+        routingPayload,
+        activeContactId,
+      );
+      activeCampaignRoute = {
+        ...activeCampaignRoute,
+        googleSheetsEnsure,
+      } satisfies JsonRecord;
+
       if (["manychat", "typebot", "tally"].includes(normalizedEvent.source)) {
-        return routed;
+        return {
+          ...(routed as unknown as JsonRecord),
+          googleSheetsEnsure,
+        };
       }
     } catch (error) {
       if (normalizedEvent.source !== "sendflow") {

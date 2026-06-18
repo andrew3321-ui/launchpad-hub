@@ -999,6 +999,7 @@ async function reconcileLaunch(
     skippedExisting: 0,
     skippedExistingSheet: 0,
     skippedExistingRecord: 0,
+    staleRecordsReappended: 0,
     skippedMissingIdentity: 0,
     errors: 0,
   };
@@ -1023,17 +1024,20 @@ async function reconcileLaunch(
 
       const alreadyInSheet = contactAlreadyInSheet(contact, sheetIndex);
       const alreadyRecorded = alreadyInSheet ? false : await hasCaptureRecord(supabase, launch, contact);
-      if (alreadyInSheet || alreadyRecorded) {
+      if (alreadyInSheet) {
         counters.skippedExisting += 1;
-        if (alreadyInSheet) counters.skippedExistingSheet += 1;
-        if (alreadyRecorded) counters.skippedExistingRecord += 1;
+        counters.skippedExistingSheet += 1;
         rememberSample(samples.skippedExisting, {
           activeContactId: contact.id,
           email: contact.email,
           phone: contact.phone,
-          reason: alreadyInSheet ? "sheet_email_or_phone" : "capture_record",
+          reason: "sheet_email_or_phone",
         });
         continue;
+      }
+
+      if (alreadyRecorded) {
+        counters.staleRecordsReappended += 1;
       }
 
       const fieldPayload = await fetchContactFieldPayload(launch, fieldDefinitions, contact.id);
@@ -1049,6 +1053,7 @@ async function reconcileLaunch(
         activeContactId: contact.id,
         email: contact.email,
         phone: contact.phone,
+        reusedCaptureRecord: alreadyRecorded,
       });
     } catch (error) {
       counters.errors += 1;
