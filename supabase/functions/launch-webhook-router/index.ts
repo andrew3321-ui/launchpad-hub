@@ -5295,6 +5295,7 @@ async function routeToActiveCampaign(
     `contact:${contact.id}`;
 
   const actionKey = JSON.stringify({
+    cycleNumber: launch.current_cycle_number || 1,
     identityKey,
     listId: launch.ac_default_list_id || null,
     fieldValues: fieldValues.map((item) => `${item.fieldId}:${item.value}`).sort(),
@@ -5321,9 +5322,32 @@ async function routeToActiveCampaign(
   );
 
   if (!actionId) {
+    await insertProcessingLog(
+      supabase,
+      launch.id,
+      contact.id,
+      eventId,
+      source,
+      "info",
+      "ACTIVECAMPAIGN_SYNC_DEDUPED",
+      "Envio ao ActiveCampaign ignorado por duplicidade",
+      "O Launch Hub identificou que esta mesma sincronizacao ao ActiveCampaign ja foi registrada para a mesma identidade, lista, campos e tags. A nova tentativa foi bloqueada para evitar reenvio duplicado.",
+      {
+        identityKey,
+        cycleNumber: launch.current_cycle_number || 1,
+        listId: launch.ac_default_list_id || null,
+        tags: tagNames,
+        fieldValues,
+        phoneCandidates,
+      },
+    );
+
     return {
       target: "activecampaign",
       skipped: true,
+      reason: "duplicate_activecampaign_sync",
+      identityKey,
+      tags: tagNames,
     };
   }
 
@@ -5632,6 +5656,14 @@ async function dispatchRoutes(
         "O contato do Sendflow foi tratado, mas o envio complementar ao ActiveCampaign falhou. O retorno ao UChat continuou normalmente.",
         {
           error: message,
+          ...buildRoutingFailureContext(contact, routingPayload, normalizedEvent),
+          resolvedTags: resolveActiveCampaignTags(
+            normalizedEvent.source,
+            routingPayload,
+            namedTags,
+          ),
+          inboundAliases: extractTagAliases(routingPayload, normalizedEvent.source),
+          inboundTags: extractTagNames(routingPayload),
         },
       );
     }
