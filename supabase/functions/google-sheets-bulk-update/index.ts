@@ -1232,11 +1232,11 @@ Deno.serve(async (request) => {
         ? await loadActiveCampaignFieldDefinitions(launch)
         : [];
 
-    for (const item of rowsMissingFromSheet) {
-      if (isActiveCsvImport || isRawSheetAppend) {
+    // Fast path: imports que não precisam consultar o ActiveCampaign.
+    if (isActiveCsvImport || isRawSheetAppend) {
+      for (const item of rowsMissingFromSheet) {
         const activeContact = buildActiveCampaignContactFromCsvRow(item.email, item.row);
         const rowMap = buildActiveCsvSheetsRowMap(launch, activeContact, item.row);
-
         rowsToAppend.push(buildRowForSheetHeader(sheetHeader, rowMap));
         if (!isRawSheetAppend) {
           captureRecordsToSave.push(activeContact);
@@ -1245,10 +1245,9 @@ Deno.serve(async (request) => {
           email: item.email,
           activeContactId: activeContact.id,
         });
-        continue;
       }
-
-      if (!activeCaptureTag) {
+    } else if (!activeCaptureTag) {
+      for (const item of rowsMissingFromSheet) {
         activeCaptureTagMissing += 1;
         notFound.push({
           email: item.email,
@@ -1256,68 +1255,112 @@ Deno.serve(async (request) => {
           phone: item.phone,
           reason: "capture_tag_not_configured",
         });
-        continue;
       }
+    } else {
+      // Paraleliza os lookups no ActiveCampaign com pool de concorrência
+      // para caber dentro do limite de 150s da Edge Function.
+      const AC_LOOKUP_CONCURRENCY = 8;
+      type PendingResult =
+        | { kind: "append"; row: string[]; contact: ActiveCampaignContact; email: string | null }
+        | { kind: "notFound"; entry: { email: string | null; name: string | null; phone: string | null; reason: string } }
+        | { kind: "counter"; field: "activeContactsFoundByPhone" };
 
-      try {
-        let activeContact = item.email ? await fetchActiveCampaignContactByEmail(launch, item.email) : null;
-        if (!activeContact && item.phone) {
-          activeContact = await fetchActiveCampaignContactByPhone(launch, item.phone);
-          if (activeContact) {
-            activeContactsFoundByPhone += 1;
+      const processItem = async (
+        item: typeof rowsMissingFromSheet[number],
+      ): Promise<PendingResult[]> => {
+        const results: PendingResult[] = [];
+        try {
+          let activeContact = item.email ? await fetchActiveCampaignContactByEmail(launch, item.email) : null;
+          if (!activeContact && item.phone) {
+            activeContact = await fetchActiveCampaignContactByPhone(launch, item.phone);
+            if (activeContact) {
+              results.push({ kind: "counter", field: "activeContactsFoundByPhone" });
+            }
+          }
+
+          if (!activeContact) {
+            results.push({
+              kind: "notFound",
+              entry: {
+                email: item.email,
+                name: item.name,
+                phone: item.phone,
+                reason: "active_contact_not_found",
+              },
+            });
+            activeContactsNotFound += 1;
+            return results;
+          }
+
+          const hasCaptureTag = await activeCampaignContactHasTag(launch, activeContact.id, activeCaptureTag.id);
+          if (!hasCaptureTag) {
+            activeContactsWithoutCaptureTag += 1;
+            results.push({
+              kind: "notFound",
+              entry: {
+                email: item.email,
+                name: item.name,
+                phone: item.phone,
+                reason: "active_contact_without_capture_tag",
+              },
+            });
+            return results;
+          }
+
+          const fieldPayload = await fetchContactFieldPayload(launch, fieldDefinitions, activeContact.id);
+          const rowMap = buildActiveCampaignSheetsRowMap(
+            launch,
+            activeContact,
+            buildContactPayload(activeContact, fieldPayload),
+          );
+
+          for (const mapping of mappingTargets) {
+            const value = resolveMappingValue(mapping, item.row);
+            if (skipBlankValues && !value) continue;
+            rowMap.set(normalizeColumnKey(mapping.sheetColumn), value);
+          }
+
+          results.push({
+            kind: "append",
+            row: buildRowForSheetHeader(sheetHeader, rowMap),
+            contact: activeContact,
+            email: item.email,
+          });
+          return results;
+        } catch (error) {
+          activeLookupErrors += 1;
+          results.push({
+            kind: "notFound",
+            entry: {
+              email: item.email,
+              name: item.name,
+              phone: item.phone,
+              reason: error instanceof Error ? `active_lookup_error: ${error.message}` : "active_lookup_error",
+            },
+          });
+          return results;
+        }
+      };
+
+      for (let start = 0; start < rowsMissingFromSheet.length; start += AC_LOOKUP_CONCURRENCY) {
+        const slice = rowsMissingFromSheet.slice(start, start + AC_LOOKUP_CONCURRENCY);
+        const batchResults = await Promise.all(slice.map(processItem));
+        for (const itemResults of batchResults) {
+          for (const result of itemResults) {
+            if (result.kind === "append") {
+              rowsToAppend.push(result.row);
+              captureRecordsToSave.push(result.contact);
+              insertedFromActiveSamples.push({
+                email: result.email,
+                activeContactId: result.contact.id,
+              });
+            } else if (result.kind === "notFound") {
+              notFound.push(result.entry);
+            } else if (result.kind === "counter" && result.field === "activeContactsFoundByPhone") {
+              activeContactsFoundByPhone += 1;
+            }
           }
         }
-
-        if (!activeContact) {
-          activeContactsNotFound += 1;
-          notFound.push({
-            email: item.email,
-            name: item.name,
-            phone: item.phone,
-            reason: "active_contact_not_found",
-          });
-          continue;
-        }
-
-        const hasCaptureTag = await activeCampaignContactHasTag(launch, activeContact.id, activeCaptureTag.id);
-        if (!hasCaptureTag) {
-          activeContactsWithoutCaptureTag += 1;
-          notFound.push({
-            email: item.email,
-            name: item.name,
-            phone: item.phone,
-            reason: "active_contact_without_capture_tag",
-          });
-          continue;
-        }
-
-        const fieldPayload = await fetchContactFieldPayload(launch, fieldDefinitions, activeContact.id);
-        const rowMap = buildActiveCampaignSheetsRowMap(
-          launch,
-          activeContact,
-          buildContactPayload(activeContact, fieldPayload),
-        );
-
-        for (const mapping of mappingTargets) {
-          const value = resolveMappingValue(mapping, item.row);
-          if (skipBlankValues && !value) continue;
-          rowMap.set(normalizeColumnKey(mapping.sheetColumn), value);
-        }
-
-        rowsToAppend.push(buildRowForSheetHeader(sheetHeader, rowMap));
-        captureRecordsToSave.push(activeContact);
-        insertedFromActiveSamples.push({
-          email: item.email,
-          activeContactId: activeContact.id,
-        });
-      } catch (error) {
-        activeLookupErrors += 1;
-        notFound.push({
-          email: item.email,
-          name: item.name,
-          phone: item.phone,
-          reason: error instanceof Error ? `active_lookup_error: ${error.message}` : "active_lookup_error",
-        });
       }
     }
 

@@ -177,7 +177,7 @@ interface CsvColumnMapping {
 
 type BulkCsvMode = "fixed_update" | "active_export_import" | "raw_sheet_append";
 
-const FIXED_UPDATE_BATCH_SIZE = 300;
+const FIXED_UPDATE_BATCH_SIZE = 150;
 const ACTIVE_CSV_IMPORT_BATCH_SIZE = 120;
 const RAW_SHEET_APPEND_BATCH_SIZE = 300;
 
@@ -2230,7 +2230,7 @@ export default function Sources() {
               skipBlankValues: true,
             },
           }),
-          60000,
+          180000,
           "A atualização em lote no Google Sheets demorou demais para responder.",
         );
 
