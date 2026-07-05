@@ -2230,7 +2230,7 @@ export default function Sources() {
               skipBlankValues: true,
             },
           }),
-          60000,
+          180000,
           "A atualização em lote no Google Sheets demorou demais para responder.",
         );
 
