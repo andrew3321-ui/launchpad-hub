@@ -16,11 +16,20 @@ import { LaunchDialog } from "@/components/launches/LaunchDialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface AdvanceCycleResponse {
+  archive_id?: string;
   file_name?: string;
   csv_content?: string;
   row_count?: number;
   previous_cycle_number?: number;
   current_cycle_number?: number;
+  csv_pending?: boolean;
+}
+
+interface BuildArchiveCsvResponse {
+  archive_id?: string;
+  file_name?: string;
+  row_count?: number;
+  csv_content?: string;
 }
 
 function downloadCsv(fileName: string, content: string) {
@@ -76,9 +85,6 @@ export default function Launches() {
     }
 
     const typedData = (data as AdvanceCycleResponse | null) ?? null;
-    if (typedData?.file_name && typeof typedData.csv_content === "string") {
-      downloadCsv(typedData.file_name, typedData.csv_content);
-    }
 
     await refreshLaunches();
 
@@ -86,9 +92,35 @@ export default function Launches() {
       title: "Ciclo alterado",
       description:
         typedData?.row_count !== undefined
-          ? `${typedData.row_count} lead(s) do expert ${launchName} foram arquivados no CSV do ciclo anterior.`
+          ? `${typedData.row_count} lead(s) do expert ${launchName} foram arquivados. Gerando CSV...`
           : `O expert ${launchName} iniciou um novo ciclo.`,
     });
+
+    if (typedData?.archive_id) {
+      // Build & download CSV in background so the cycle-advance itself never times out.
+      void (async () => {
+        const { data: csvData, error: csvError } = await supabase.rpc(
+          "build_launch_cycle_archive_csv",
+          { target_archive_id: typedData.archive_id! },
+        );
+
+        if (csvError || !csvData) {
+          toast({
+            title: "CSV pendente",
+            description:
+              csvError?.message ||
+              "Não conseguimos gerar o CSV agora. Você pode baixá-lo depois no histórico de ciclos.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const csvResp = csvData as unknown as BuildArchiveCsvResponse;
+        if (csvResp.file_name && typeof csvResp.csv_content === "string") {
+          downloadCsv(csvResp.file_name, csvResp.csv_content);
+        }
+      })();
+    }
   };
 
   const handleSaved = async () => {
