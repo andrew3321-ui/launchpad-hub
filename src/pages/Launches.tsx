@@ -16,11 +16,20 @@ import { LaunchDialog } from "@/components/launches/LaunchDialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface AdvanceCycleResponse {
+  archive_id?: string;
   file_name?: string;
   csv_content?: string;
   row_count?: number;
   previous_cycle_number?: number;
   current_cycle_number?: number;
+  csv_pending?: boolean;
+}
+
+interface BuildArchiveCsvResponse {
+  archive_id?: string;
+  file_name?: string;
+  row_count?: number;
+  csv_content?: string;
 }
 
 function downloadCsv(fileName: string, content: string) {
